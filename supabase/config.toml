@@ -1,1 +1,10 @@
 project_id = "lzvvnmhbyyxsukywjhin"
+
+[functions.process-standard]
+verify_jwt = false
+
+[functions.query]
+verify_jwt = false
+
+[functions.upload-standard]
+verify_jwt = false
