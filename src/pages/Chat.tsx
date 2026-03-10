@@ -1,51 +1,123 @@
-import { useState } from "react";
-import { Send, Camera, Mic, AlertTriangle, Lock, Zap, Shield } from "lucide-react";
+import { useState, useRef } from "react";
+import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { useAuth } from "@/hooks/useAuth";
+import { useProfile } from "@/hooks/useData";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
-interface Message {
-  id: number;
-  role: "user" | "ai";
-  content: string;
-  clauses?: string[];
-  safetyWarning?: boolean;
+interface Citation {
+  clause_number: string;
+  standard_code: string;
+  standard_version?: string;
+  page_number?: number;
+  relevant_text?: string;
   gated?: boolean;
 }
 
-const mockMessages: Message[] = [
-  {
-    id: 1,
-    role: "user",
-    content:
-      "What are the requirements for circuit protection in a bathroom?",
-  },
-  {
-    id: 2,
-    role: "ai",
-    content:
-      "Based on AS/NZS 3000:2018, bathroom circuits require specific protection measures. All circuits supplying socket outlets and lighting in Zone 1 and Zone 2 must be protected by a residual current device (RCD) with a rated residual operating current not exceeding 30mA.",
-    clauses: ["Clause 6.2.2.1", "Clause 6.2.3"],
-    safetyWarning: true,
-  },
-  {
-    id: 3,
-    role: "user",
-    content: "What about cable sizing for the bathroom circuit?",
-  },
-  {
-    id: 4,
-    role: "ai",
-    content:
-      "This question relates to cable sizing which is covered in detail in AS/NZS 3008. There is a clause covering this in your library, but it falls outside the indexed portion of your standard.",
-    gated: true,
-  },
-];
+interface Message {
+  id: string;
+  role: "user" | "ai";
+  content: string;
+  citations?: Citation[];
+  safety_critical?: boolean;
+  safety_message?: string;
+  confidence?: string;
+  gated?: boolean;
+  gated_message?: string;
+  low_confidence?: boolean;
+  answer_found?: boolean;
+}
 
 const Chat = () => {
-  const [messages] = useState<Message[]>(mockMessages);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const { session } = useAuth();
+  const { data: profile } = useProfile();
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const queriesRemaining = profile
+    ? 5 - (profile.daily_query_count || 0)
+    : 5;
+
+  const sendQuery = async () => {
+    if (!input.trim() || isLoading) return;
+    if (!session) {
+      toast.error("Please sign in to use the chat");
+      return;
+    }
+
+    const userMessage: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: input.trim(),
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    setInput("");
+    setIsLoading(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke("query", {
+        body: { question: userMessage.content },
+      });
+
+      if (error) {
+        throw new Error(error.message || "Query failed");
+      }
+
+      if (data?.error) {
+        if (data.upgrade_required) {
+          const aiMessage: Message = {
+            id: crypto.randomUUID(),
+            role: "ai",
+            content: data.message || data.error,
+            gated: true,
+            gated_message: data.message,
+          };
+          setMessages((prev) => [...prev, aiMessage]);
+        } else {
+          toast.error(data.error);
+        }
+        return;
+      }
+
+      const aiMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "ai",
+        content: data.answer || "No response generated.",
+        citations: data.citations || [],
+        safety_critical: data.safety_critical || false,
+        safety_message: data.safety_message,
+        confidence: data.confidence,
+        gated: data.gated || false,
+        gated_message: data.gated_message,
+        low_confidence: data.low_confidence || false,
+        answer_found: data.answer_found,
+      };
+
+      setMessages((prev) => [...prev, aiMessage]);
+    } catch (e: any) {
+      console.error("Query error:", e);
+      toast.error(e.message || "Failed to send query");
+    } finally {
+      setIsLoading(false);
+      setTimeout(() => {
+        scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+      }, 100);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendQuery();
+    }
+  };
 
   return (
     <div className="flex flex-col h-[calc(100vh-5rem)]">
@@ -57,19 +129,34 @@ const Chat = () => {
             Compliance Chat
           </h1>
         </div>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          3 of 5 free queries remaining today
-        </p>
+        {profile?.subscription_tier === "free" && (
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {queriesRemaining > 0
+              ? `${queriesRemaining} of 5 free queries remaining today`
+              : "Daily limit reached — upgrade to Pro"}
+          </p>
+        )}
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+        {messages.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-full text-center px-8">
+            <Shield className="h-12 w-12 text-primary/30 mb-4" />
+            <p className="text-sm font-semibold text-foreground mb-1">
+              Ask a compliance question
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Upload a standard first, then ask questions about it. The AI will
+              reference specific clauses from your uploaded documents.
+            </p>
+          </div>
+        )}
+
         {messages.map((msg) => (
           <div
             key={msg.id}
-            className={
-              msg.role === "user" ? "flex justify-end" : "flex justify-start"
-            }
+            className={msg.role === "user" ? "flex justify-end" : "flex justify-start"}
           >
             {msg.role === "user" ? (
               <div className="max-w-[85%] rounded-2xl rounded-br-md bg-primary px-4 py-3">
@@ -77,31 +164,47 @@ const Chat = () => {
               </div>
             ) : (
               <Card className="max-w-[90%] p-4 shadow-sm">
+                {/* Low confidence warning */}
+                {msg.low_confidence && (
+                  <div className="flex items-start gap-2 mb-3 rounded-lg bg-warning/10 p-3">
+                    <AlertTriangle className="h-4 w-4 text-warning flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-warning font-medium">
+                      I'm not fully confident in this answer — I'd recommend verifying directly with the relevant standard.
+                    </p>
+                  </div>
+                )}
+
                 <p className="text-sm text-card-foreground leading-relaxed">
                   {msg.content}
                 </p>
 
                 {/* Clause badges */}
-                {msg.clauses && (
+                {msg.citations && msg.citations.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mt-3">
-                    {msg.clauses.map((clause) => (
+                    {msg.citations.map((citation, idx) => (
                       <Badge
-                        key={clause}
-                        className="bg-primary/10 text-primary border-0 text-xs font-semibold"
+                        key={idx}
+                        className={`border-0 text-xs font-semibold ${
+                          citation.gated
+                            ? "bg-muted text-muted-foreground"
+                            : "bg-primary/10 text-primary"
+                        }`}
                       >
-                        {clause}
+                        {citation.gated ? "🔒 " : ""}
+                        {citation.clause_number}
+                        {citation.standard_code ? ` (${citation.standard_code})` : ""}
                       </Badge>
                     ))}
                   </div>
                 )}
 
                 {/* Safety warning */}
-                {msg.safetyWarning && (
+                {msg.safety_critical && (
                   <div className="flex items-start gap-2 mt-3 rounded-lg bg-destructive/10 p-3">
                     <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0 mt-0.5" />
                     <p className="text-xs text-destructive font-medium">
-                      Safety-critical work must be assessed and signed off by a
-                      licensed professional on-site.
+                      {msg.safety_message ||
+                        "Safety-critical work must be assessed and signed off by a licensed professional on-site."}
                     </p>
                   </div>
                 )}
@@ -113,13 +216,10 @@ const Chat = () => {
                       <Lock className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
                       <div>
                         <p className="text-xs font-semibold text-foreground">
-                          You're on the right track — upgrade to Pro to get the
-                          full clause and complete guidance.
+                          {msg.gated_message ||
+                            "You're on the right track — upgrade to Pro to get the full clause and complete guidance."}
                         </p>
-                        <Button
-                          size="sm"
-                          className="mt-2 h-7 text-xs font-semibold gap-1"
-                        >
+                        <Button size="sm" className="mt-2 h-7 text-xs font-semibold gap-1">
                           <Zap className="h-3 w-3" />
                           Upgrade to Pro
                         </Button>
@@ -131,6 +231,17 @@ const Chat = () => {
             )}
           </div>
         ))}
+
+        {isLoading && (
+          <div className="flex justify-start">
+            <Card className="p-4 shadow-sm">
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                <p className="text-sm text-muted-foreground">Searching your standards...</p>
+              </div>
+            </Card>
+          </div>
+        )}
       </div>
 
       {/* Input */}
@@ -143,16 +254,10 @@ const Chat = () => {
           >
             <Camera className="h-5 w-5" />
           </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-10 w-10 flex-shrink-0 text-muted-foreground"
-          >
-            <Mic className="h-5 w-5" />
-          </Button>
           <Textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
             placeholder="Ask about compliance..."
             className="min-h-[40px] max-h-[120px] resize-none text-sm"
             rows={1}
@@ -160,7 +265,8 @@ const Chat = () => {
           <Button
             size="icon"
             className="h-10 w-10 flex-shrink-0"
-            disabled={!input.trim()}
+            disabled={!input.trim() || isLoading}
+            onClick={sendQuery}
           >
             <Send className="h-4 w-4" />
           </Button>
