@@ -37,6 +37,9 @@
     --input: 0 0% 89.8%;
     --ring: 0 72% 50.6%;
 
+    --warning: 38 92% 50%;
+    --warning-foreground: 38 92% 20%;
+
     --radius: 0.75rem;
 
     --sidebar-background: 0 0% 98%;
