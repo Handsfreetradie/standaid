@@ -1,0 +1,42 @@
+import { Home, BookOpen, MessageSquare, User } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { cn } from "@/lib/utils";
+
+const tabs = [
+  { path: "/", icon: Home, label: "Home" },
+  { path: "/standards", icon: BookOpen, label: "Standards" },
+  { path: "/chat", icon: MessageSquare, label: "Chat" },
+  { path: "/profile", icon: User, label: "Profile" },
+];
+
+const BottomNav = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  return (
+    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card pb-safe">
+      <div className="mx-auto flex max-w-md items-center justify-around py-2">
+        {tabs.map(({ path, icon: Icon, label }) => {
+          const isActive = location.pathname === path;
+          return (
+            <button
+              key={path}
+              onClick={() => navigate(path)}
+              className={cn(
+                "flex flex-col items-center gap-0.5 px-4 py-1.5 text-xs font-medium transition-colors min-w-[64px] min-h-[44px] justify-center",
+                isActive
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Icon className={cn("h-5 w-5", isActive && "stroke-[2.5]")} />
+              <span>{label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+};
+
+export default BottomNav;
