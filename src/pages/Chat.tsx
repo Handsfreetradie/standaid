@@ -166,9 +166,9 @@ const Chat = () => {
               <Card className="max-w-[90%] p-4 shadow-sm">
                 {/* Low confidence warning */}
                 {msg.low_confidence && (
-                  <div className="flex items-start gap-2 mb-3 rounded-lg bg-amber-500/10 p-3">
-                    <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
-                    <p className="text-xs text-amber-700 font-medium">
+                  <div className="flex items-start gap-2 mb-3 rounded-lg bg-warning/10 p-3">
+                    <AlertTriangle className="h-4 w-4 text-warning flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-warning font-medium">
                       I'm not fully confident in this answer — I'd recommend verifying directly with the relevant standard.
                     </p>
                   </div>
