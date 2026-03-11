@@ -94,7 +94,7 @@ const OnboardingPricing = ({ onNext, onBack }: Props) => {
             {freeFeatures.map((f) => (
               <div key={f.text} className="flex items-start gap-2">
                 {f.included ? (
-                  <Check className="h-4 w-4 text-green-600 flex-shrink-0 mt-0.5" />
+                  <Check className="h-4 w-4 flex-shrink-0 mt-0.5" style={{ color: "hsl(142 71% 45%)" }} />
                 ) : (
                   <X className="h-4 w-4 text-muted-foreground/40 flex-shrink-0 mt-0.5" />
                 )}
