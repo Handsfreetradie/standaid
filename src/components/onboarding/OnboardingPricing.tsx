@@ -127,7 +127,7 @@ const OnboardingPricing = ({ onNext, onBack }: Props) => {
           <div className="space-y-2.5">
             {proFeatures.map((f) => (
               <div key={f} className="flex items-start gap-2">
-                <Check className="h-4 w-4 text-green-600 flex-shrink-0 mt-0.5" />
+                <Check className="h-4 w-4 flex-shrink-0 mt-0.5" style={{ color: "hsl(142 71% 45%)" }} />
                 <span className="text-xs text-foreground">{f}</span>
               </div>
             ))}

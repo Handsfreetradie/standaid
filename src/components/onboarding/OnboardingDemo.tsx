@@ -80,7 +80,7 @@ const OnboardingDemo = ({ onNext, onSkip }: Props) => {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="text-lg font-extrabold text-foreground">4.2%</span>
-                <span className="text-sm font-semibold text-green-600">✅ Compliant</span>
+                <span className="text-sm font-semibold" style={{ color: "hsl(142 71% 45%)" }}>✅ Compliant</span>
               </div>
             </div>
             <div className="flex flex-wrap gap-1.5 mt-3">
