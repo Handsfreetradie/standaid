@@ -10,9 +10,18 @@ import Standards from "./pages/Standards";
 import Chat from "./pages/Chat";
 import Profile from "./pages/Profile";
 import Auth from "./pages/Auth";
+import Onboarding from "./pages/Onboarding";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
+
+const ONBOARDING_DONE_KEY = "standaid_onboarding_complete";
+
+function OnboardingGate({ children }: { children: React.ReactNode }) {
+  const done = localStorage.getItem(ONBOARDING_DONE_KEY) === "true";
+  if (!done) return <Navigate to="/onboarding" replace />;
+  return <>{children}</>;
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -30,19 +39,24 @@ function AuthRoute({ children }: { children: React.ReactNode }) {
 
 const AppRoutes = () => (
   <Routes>
+    <Route path="/onboarding" element={<Onboarding />} />
     <Route
       path="/auth"
       element={
-        <AuthRoute>
-          <Auth />
-        </AuthRoute>
+        <OnboardingGate>
+          <AuthRoute>
+            <Auth />
+          </AuthRoute>
+        </OnboardingGate>
       }
     />
     <Route
       element={
-        <ProtectedRoute>
-          <AppLayout />
-        </ProtectedRoute>
+        <OnboardingGate>
+          <ProtectedRoute>
+            <AppLayout />
+          </ProtectedRoute>
+        </OnboardingGate>
       }
     >
       <Route path="/" element={<Index />} />
