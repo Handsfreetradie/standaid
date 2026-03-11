@@ -24,7 +24,7 @@ const OnboardingSplash = ({ onNext }: Props) => {
       >
         <h1 className="font-display text-[48px] font-extrabold tracking-tight leading-tight">
           <span className="text-foreground">Stand</span>
-          <span className="text-primary">Aid</span>
+          <span className="text-primary">Ai</span><span className="text-foreground">d</span>
         </h1>
         <p className="text-muted-foreground text-lg mt-3">
           Know your standard. On every job.
