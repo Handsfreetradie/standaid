@@ -334,7 +334,7 @@ const Learn = () => {
             const isCorrect = opt === q.correct_answer;
             let optClass = "border-border bg-card hover:border-primary/30";
             if (answered) {
-              if (isCorrect) optClass = "border-green-500 bg-green-50 dark:bg-green-950/30";
+              if (isCorrect) optClass = "border-primary bg-primary/5";
               else if (isSelected && !isCorrect) optClass = "border-destructive bg-destructive/5";
             } else if (isSelected) {
               optClass = "border-primary bg-primary/5";
@@ -350,7 +350,7 @@ const Learn = () => {
                 <div className="flex items-start gap-3">
                   <span className="font-bold text-sm text-muted-foreground">{letter}</span>
                   <span className="text-sm text-foreground">{opt}</span>
-                  {answered && isCorrect && <CheckCircle2 className="h-5 w-5 text-green-600 ml-auto flex-shrink-0" />}
+                  {answered && isCorrect && <CheckCircle2 className="h-5 w-5 text-primary ml-auto flex-shrink-0" />}
                   {answered && isSelected && !isCorrect && <XCircle className="h-5 w-5 text-destructive ml-auto flex-shrink-0" />}
                 </div>
               </button>
