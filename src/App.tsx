@@ -8,6 +8,7 @@ import AppLayout from "./components/AppLayout";
 import Index from "./pages/Index";
 import Standards from "./pages/Standards";
 import Chat from "./pages/Chat";
+import Learn from "./pages/Learn";
 import Profile from "./pages/Profile";
 import Auth from "./pages/Auth";
 import Onboarding from "./pages/Onboarding";
