@@ -50,24 +50,24 @@ const OnboardingDemo = ({ onNext, onSkip }: Props) => {
           <p className="text-xs text-muted-foreground font-medium mb-2">AI Compliance Chat</p>
           <div className="flex justify-end mb-2">
             <div className="bg-primary text-primary-foreground rounded-2xl rounded-br-md px-4 py-3 max-w-[85%]">
-              <p className="text-sm">Can I install a power point 1 metre from a bathroom basin?</p>
+              <p className="text-sm">What's the maximum height for a residential handrail?</p>
             </div>
           </div>
           <Card className="p-4">
             <p className="text-sm text-card-foreground leading-relaxed">
-              No — this location is non-compliant. Socket outlets must not be installed within Zone 1 or Zone 2 of a bathroom.
+              Handrails on stairways in residential buildings must be between 865 mm and 1000 mm high, measured vertically above the nosing line.
             </p>
             <div className="flex flex-wrap gap-1.5 mt-3">
               <Badge className="bg-primary/10 text-primary border-0 text-xs font-semibold">
-                Clause 4.4.2
+                Clause D2.16
               </Badge>
               <Badge variant="secondary" className="text-xs">
-                AS/NZS 3000:2018
+                NCC Volume Two
               </Badge>
             </div>
-            <div className="flex items-start gap-2 mt-3 rounded-lg bg-destructive/10 p-3">
-              <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-destructive font-medium">Safety Critical</p>
+            <div className="flex items-start gap-2 mt-3 rounded-lg bg-primary/5 p-3">
+              <AlertTriangle className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-primary font-medium">Verified from uploaded standard</p>
             </div>
           </Card>
         </div>
