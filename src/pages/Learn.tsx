@@ -385,8 +385,8 @@ const Learn = () => {
     const passed = examResult.passed;
     return (
       <div className="px-5 py-6 pb-24 max-w-md mx-auto text-center">
-        <div className={`h-20 w-20 rounded-full mx-auto mb-4 flex items-center justify-center ${passed ? "bg-green-100 dark:bg-green-950" : "bg-destructive/10"}`}>
-          <Trophy className={`h-10 w-10 ${passed ? "text-green-600" : "text-destructive"}`} />
+        <div className={`h-20 w-20 rounded-full mx-auto mb-4 flex items-center justify-center ${passed ? "bg-accent" : "bg-destructive/10"}`}>
+          <Trophy className={`h-10 w-10 ${passed ? "text-primary" : "text-destructive"}`} />
         </div>
         <h2 className="font-display text-2xl font-extrabold text-foreground mb-1">
           {passed ? "Exam Passed! 🎉" : "Keep Practicing"}
