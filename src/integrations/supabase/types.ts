@@ -14,6 +14,178 @@ export type Database = {
   }
   public: {
     Tables: {
+      capstone_exam_answers: {
+        Row: {
+          answered_at: string
+          exam_id: string
+          id: string
+          is_correct: boolean
+          question_id: string
+          user_answer: string | null
+        }
+        Insert: {
+          answered_at?: string
+          exam_id: string
+          id?: string
+          is_correct?: boolean
+          question_id: string
+          user_answer?: string | null
+        }
+        Update: {
+          answered_at?: string
+          exam_id?: string
+          id?: string
+          is_correct?: boolean
+          question_id?: string
+          user_answer?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "capstone_exam_answers_exam_id_fkey"
+            columns: ["exam_id"]
+            isOneToOne: false
+            referencedRelation: "capstone_exams"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "capstone_exam_answers_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "capstone_questions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      capstone_exams: {
+        Row: {
+          completed_at: string | null
+          correct_answers: number
+          created_at: string
+          id: string
+          status: string
+          time_limit_seconds: number | null
+          time_taken_seconds: number | null
+          title: string
+          topic_breakdown: Json | null
+          total_questions: number
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          correct_answers?: number
+          created_at?: string
+          id?: string
+          status?: string
+          time_limit_seconds?: number | null
+          time_taken_seconds?: number | null
+          title?: string
+          topic_breakdown?: Json | null
+          total_questions?: number
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          correct_answers?: number
+          created_at?: string
+          id?: string
+          status?: string
+          time_limit_seconds?: number | null
+          time_taken_seconds?: number | null
+          title?: string
+          topic_breakdown?: Json | null
+          total_questions?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
+      capstone_questions: {
+        Row: {
+          clause_reference: string | null
+          correct_answer: string
+          created_at: string
+          difficulty: string
+          explanation: string | null
+          id: string
+          options: Json
+          question: string
+          standard_id: string | null
+          topic: string | null
+          user_id: string
+        }
+        Insert: {
+          clause_reference?: string | null
+          correct_answer: string
+          created_at?: string
+          difficulty?: string
+          explanation?: string | null
+          id?: string
+          options?: Json
+          question: string
+          standard_id?: string | null
+          topic?: string | null
+          user_id: string
+        }
+        Update: {
+          clause_reference?: string | null
+          correct_answer?: string
+          created_at?: string
+          difficulty?: string
+          explanation?: string | null
+          id?: string
+          options?: Json
+          question?: string
+          standard_id?: string | null
+          topic?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "capstone_questions_standard_id_fkey"
+            columns: ["standard_id"]
+            isOneToOne: false
+            referencedRelation: "standards"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      capstone_study_guides: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          standard_id: string | null
+          title: string
+          topics: Json | null
+          user_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          standard_id?: string | null
+          title: string
+          topics?: Json | null
+          user_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          standard_id?: string | null
+          title?: string
+          topics?: Json | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "capstone_study_guides_standard_id_fkey"
+            columns: ["standard_id"]
+            isOneToOne: false
+            referencedRelation: "standards"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       citations: {
         Row: {
           chunk_content: string | null
