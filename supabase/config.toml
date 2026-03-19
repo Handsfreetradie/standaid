@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.upload-standard]
 verify_jwt = false
+
+[functions.capstone]
+verify_jwt = false
