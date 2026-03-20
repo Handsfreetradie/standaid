@@ -68,6 +68,7 @@ const AppRoutes = () => (
       <Route path="/learn" element={<Learn />} />
       <Route path="/chat" element={<Chat />} />
       <Route path="/profile" element={<Profile />} />
+      <Route path="/chunk-test" element={<ChunkTest />} />
     </Route>
     <Route path="*" element={<NotFound />} />
   </Routes>
