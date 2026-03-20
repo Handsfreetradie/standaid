@@ -1,26 +1,31 @@
 import { useState } from "react";
-import { Calculator, Zap, Construction, Droplets, ChevronRight, Cable, Gauge, Flame, Ruler, Wrench } from "lucide-react";
+import { Calculator, Zap, Construction, Droplets, ChevronRight, Cable, Gauge, Activity } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import VoltageDropTool from "@/components/tools/VoltageDropTool";
 import ConcreteVolumeTool from "@/components/tools/ConcreteVolumeTool";
 import PipeSizingTool from "@/components/tools/PipeSizingTool";
 import CableSizerTool from "@/components/tools/CableSizerTool";
 import ConduitFillTool from "@/components/tools/ConduitFillTool";
+import MaxDemandTool from "@/components/tools/MaxDemandTool";
 
-type ToolMode = "menu" | "voltage-drop" | "concrete-volume" | "pipe-sizing" | "cable-sizer" | "conduit-fill";
+type ToolMode = "menu" | "voltage-drop" | "concrete-volume" | "pipe-sizing" | "cable-sizer" | "conduit-fill" | "max-demand";
 
 const TOOLS: { id: ToolMode; title: string; desc: string; icon: React.ReactNode; category: string }[] = [
   {
     id: "voltage-drop", title: "Voltage Drop", icon: <Zap className="h-5 w-5 text-yellow-600" />,
-    desc: "AS/NZS 3008 — copper & aluminium, all phases", category: "Electrical",
+    desc: "AS/NZS 3008 — AC/DC, full cable spec & derating", category: "Electrical",
   },
   {
     id: "cable-sizer", title: "Cable Sizer", icon: <Cable className="h-5 w-5 text-blue-600" />,
-    desc: "Find the right cable size for your load & run", category: "Electrical",
+    desc: "Auto-select cable by load, run & conditions", category: "Electrical",
+  },
+  {
+    id: "max-demand", title: "Maximum Demand", icon: <Activity className="h-5 w-5 text-red-600" />,
+    desc: "AS/NZS 3000 — Diversity & main breaker sizing", category: "Electrical",
   },
   {
     id: "conduit-fill", title: "Conduit Fill", icon: <Gauge className="h-5 w-5 text-purple-600" />,
-    desc: "AS/NZS 3080 — max fill capacity check", category: "Electrical",
+    desc: "AS/NZS 3080 — Multi-cable fill check", category: "Electrical",
   },
   {
     id: "concrete-volume", title: "Concrete Volume", icon: <Construction className="h-5 w-5 text-orange-600" />,
@@ -44,10 +49,10 @@ const Tools = () => {
   if (mode === "voltage-drop") return <VoltageDropTool onBack={() => setMode("menu")} />;
   if (mode === "cable-sizer") return <CableSizerTool onBack={() => setMode("menu")} />;
   if (mode === "conduit-fill") return <ConduitFillTool onBack={() => setMode("menu")} />;
+  if (mode === "max-demand") return <MaxDemandTool onBack={() => setMode("menu")} />;
   if (mode === "concrete-volume") return <ConcreteVolumeTool onBack={() => setMode("menu")} />;
   if (mode === "pipe-sizing") return <PipeSizingTool onBack={() => setMode("menu")} />;
 
-  // Group by category
   const categories = [...new Set(TOOLS.map(t => t.category))];
 
   return (
@@ -58,7 +63,7 @@ const Tools = () => {
         </div>
         <div>
           <h1 className="font-display text-xl font-extrabold text-foreground">Trade Tools</h1>
-          <p className="text-sm text-muted-foreground">Professional-grade calculators — 100% local</p>
+          <p className="text-sm text-muted-foreground">Professional-grade — AC/DC, full cable spec</p>
         </div>
       </div>
 
