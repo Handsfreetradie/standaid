@@ -306,6 +306,21 @@ const Learn = () => {
 
           <Card
             className="p-4 cursor-pointer hover:border-primary/50 transition-colors"
+            onClick={handlePhotoUpload}
+          >
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center flex-shrink-0">
+                <Camera className="h-5 w-5 text-primary" />
+              </div>
+              <div className="flex-1">
+                <p className="font-bold text-foreground text-sm">Photo Analysis</p>
+                <p className="text-xs text-muted-foreground">Upload handwritten work for AI hints</p>
+              </div>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </div>
+          </Card>
+
+            className="p-4 cursor-pointer hover:border-primary/50 transition-colors"
             onClick={() => { loadGuides(); setMode("study-guide"); }}
           >
             <div className="flex items-center gap-3">
