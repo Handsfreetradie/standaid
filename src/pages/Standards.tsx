@@ -25,6 +25,7 @@ const Standards = () => {
   const { data: standards = [], isLoading } = useStandards();
   const { data: profile } = useProfile();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const tier = profile?.subscription_tier || "free";
 
