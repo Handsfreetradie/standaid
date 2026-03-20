@@ -169,7 +169,7 @@ async function generateEmbedding(text: string, apiKey: string): Promise<number[]
   return data.data[0].embedding;
 }
 
-// Basic regex-based extraction (fallback)
+// Basic regex-based extraction
 function extractTextBasic(fileBytes: Uint8Array): string {
   const decoder = new TextDecoder("latin1");
   const rawText = decoder.decode(fileBytes);
@@ -196,13 +196,24 @@ function extractTextBasic(fileBytes: Uint8Array): string {
   return allText.join(" ").replace(/\s+/g, " ").trim();
 }
 
-// AI-based PDF text extraction using Gemini vision
+// Clean extracted text: remove PDF operator noise before quality check
+function cleanExtractedText(text: string): string {
+  return text
+    .replace(/\b(BT|ET|Tj|TJ|Tf|Td|Tm|cm|re|f|W|n|q|Q|rg|RG|gs|Do|CS|cs|SC|sc)\b/g, " ")
+    .replace(/\b\d+\.\d+\s+\d+\.\d+\s+\d+\.\d+\s+(rg|RG)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// AI-based PDF text extraction using Gemini vision (only for small/scanned PDFs)
 async function extractTextWithAI(fileBytes: Uint8Array, apiKey: string): Promise<string> {
+  // Hard cap: refuse AI extraction for files > 3MB to avoid OOM
+  if (fileBytes.length > 3 * 1024 * 1024) {
+    throw new Error("PDF too large for AI extraction");
+  }
+
   const binaryStr = Array.from(fileBytes).map(b => String.fromCharCode(b)).join("");
   const base64 = btoa(binaryStr);
-
-  // Cap at ~4MB base64 to stay within edge function limits
-  const pdfBase64 = base64.length > 4 * 1024 * 1024 ? base64.slice(0, 4 * 1024 * 1024) : base64;
 
   const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
@@ -221,16 +232,14 @@ Rules:
 - Keep paragraph breaks as double newlines
 - Keep tables as readable text
 - Do NOT summarize, paraphrase, or add any content
-- Do NOT add commentary or explanations
-- Extract text VERBATIM — every word must match the original
-- Include page markers like [PAGE 2], [PAGE 3] etc. between pages if detectable
-- For scanned/image-based pages, use OCR to extract text accurately`,
+- Extract text VERBATIM
+- Include page markers like [PAGE 2], [PAGE 3] etc. between pages`,
         },
         {
           role: "user",
           content: [
-            { type: "text", text: "Extract ALL text from this PDF document verbatim. Preserve all headings, clause numbers, tables, and structure exactly as they appear." },
-            { type: "image_url", image_url: { url: `data:application/pdf;base64,${pdfBase64}` } },
+            { type: "text", text: "Extract ALL text from this PDF document verbatim." },
+            { type: "image_url", image_url: { url: `data:application/pdf;base64,${base64}` } },
           ],
         },
       ],
@@ -253,21 +262,24 @@ Rules:
 }
 
 async function extractTextFromPdf(fileBytes: Uint8Array, apiKey: string): Promise<{ text: string; pages: string[] }> {
-  // Step 1: Try basic extraction first (fast, free)
   const basicText = extractTextBasic(fileBytes);
   console.log(`Basic extraction: ${basicText.length} chars`);
 
-  if (basicText.length > 500) {
-    const alphaCount = (basicText.match(/[a-zA-Z0-9]/g) || []).length;
-    const alphaRatio = alphaCount / basicText.length;
-    if (alphaRatio > 0.5) {
-      console.log("Basic extraction quality sufficient");
-      return { text: basicText, pages: [basicText] };
+  if (basicText.length > 200) {
+    // Clean PDF operators before quality check
+    const cleaned = cleanExtractedText(basicText);
+    const alphaCount = (cleaned.match(/[a-zA-Z0-9]/g) || []).length;
+    const alphaRatio = cleaned.length > 0 ? alphaCount / cleaned.length : 0;
+    console.log(`Cleaned text: ${cleaned.length} chars, alpha ratio: ${alphaRatio.toFixed(2)}`);
+
+    if (alphaRatio > 0.3 && cleaned.length > 200) {
+      console.log("Basic extraction quality sufficient, skipping AI OCR");
+      return { text: cleaned, pages: [cleaned] };
     }
   }
 
-  // Step 2: Fall back to AI-based OCR
-  console.log("Using AI-based OCR extraction...");
+  // Only use AI for small PDFs (< 3MB) to avoid OOM
+  console.log("Attempting AI-based OCR extraction...");
   try {
     const aiText = await extractTextWithAI(fileBytes, apiKey);
     console.log(`AI extraction: ${aiText.length} chars`);
@@ -284,7 +296,7 @@ async function extractTextFromPdf(fileBytes: Uint8Array, apiKey: string): Promis
     if (basicText.length > 50) {
       return { text: basicText, pages: [basicText] };
     }
-    throw new Error("Could not extract text from this PDF. Try a digital (text-selectable) version.");
+    throw new Error("Could not extract text from this PDF.");
   }
 }
 
