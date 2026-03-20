@@ -231,7 +231,7 @@ const Learn = () => {
             <GraduationCap className="h-5 w-5 text-primary" />
           </div>
           <div>
-            <h1 className="font-display text-xl font-extrabold text-foreground">Capstone Helper</h1>
+            <h1 className="font-display text-xl font-extrabold text-foreground">Exam Helper</h1>
             <p className="text-sm text-muted-foreground">Study, practice, and ace your exams</p>
           </div>
         </div>

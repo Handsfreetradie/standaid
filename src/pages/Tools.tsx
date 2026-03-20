@@ -90,9 +90,6 @@ const Tools = () => {
               <Card key={tool.id} className="p-4 cursor-pointer hover:border-primary/50 transition-colors active:scale-[0.99]"
                 onClick={() => setMode(tool.id)}>
                 <div className="flex items-center gap-3">
-                  <div className={`h-10 w-10 rounded-lg flex items-center justify-center flex-shrink-0 ${ICON_BG[cat] || "bg-muted"}`}>
-                    {tool.icon}
-                  </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-bold text-foreground text-sm">{tool.title}</p>
                     <p className="text-xs text-muted-foreground truncate">{tool.desc}</p>
