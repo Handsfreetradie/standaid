@@ -14,6 +14,7 @@ import Profile from "./pages/Profile";
 import Auth from "./pages/Auth";
 import Onboarding from "./pages/Onboarding";
 import NotFound from "./pages/NotFound";
+import ChunkTest from "./pages/ChunkTest";
 
 const queryClient = new QueryClient();
 
