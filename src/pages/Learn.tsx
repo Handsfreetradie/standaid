@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { GraduationCap, BookOpen, ClipboardList, FileText, ChevronRight, Loader2, CheckCircle2, XCircle, ArrowLeft, Trophy, Clock } from "lucide-react";
+import { GraduationCap, BookOpen, ClipboardList, FileText, ChevronRight, Loader2, CheckCircle2, XCircle, ArrowLeft, Trophy, Clock, Camera } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +9,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 
-type Mode = "menu" | "quiz" | "exam" | "exam-active" | "exam-result" | "study-guide" | "study-view";
+type Mode = "menu" | "quiz" | "exam" | "exam-active" | "exam-result" | "study-guide" | "study-view" | "photo-analysis";
 
 interface Question {
   id: string;
@@ -43,6 +43,8 @@ const Learn = () => {
   // Study guide state
   const [guides, setGuides] = useState<any[]>([]);
   const [activeGuide, setActiveGuide] = useState<any>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoAnalysis, setPhotoAnalysis] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) loadStandards();
@@ -170,11 +172,54 @@ const Learn = () => {
     }
   };
 
+  const handlePhotoUpload = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.capture = "environment";
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      if (file.size > 10 * 1024 * 1024) { toast.error("Image must be under 10MB"); return; }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = (reader.result as string).split(",")[1];
+        setPhotoPreview(reader.result as string);
+        analyzePhoto(base64);
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  };
+
+  const analyzePhoto = async (base64: string) => {
+    if (!selectedStandard) { toast.error("Select a standard first"); return; }
+    setLoading(true);
+    setPhotoAnalysis(null);
+    setMode("photo-analysis");
+    try {
+      const { data, error } = await supabase.functions.invoke("capstone", {
+        body: { action: "analyze_photo", standardId: selectedStandard, imageBase64: base64 },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      setPhotoAnalysis(data.analysis);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to analyze photo");
+      setMode("menu");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const goBack = () => {
     setMode("menu");
     setExamId(null);
     setExamResult(null);
     setActiveGuide(null);
+    setPhotoPreview(null);
+    setPhotoAnalysis(null);
   };
 
   // ── MENU ──
@@ -254,6 +299,22 @@ const Learn = () => {
               <div className="flex-1">
                 <p className="font-bold text-foreground text-sm">Study Guide</p>
                 <p className="text-xs text-muted-foreground">AI-generated revision notes</p>
+              </div>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </div>
+          </Card>
+
+          <Card
+            className="p-4 cursor-pointer hover:border-primary/50 transition-colors"
+            onClick={handlePhotoUpload}
+          >
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center flex-shrink-0">
+                <Camera className="h-5 w-5 text-primary" />
+              </div>
+              <div className="flex-1">
+                <p className="font-bold text-foreground text-sm">Photo Analysis</p>
+                <p className="text-xs text-muted-foreground">Upload handwritten work for AI hints</p>
               </div>
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </div>
@@ -466,6 +527,48 @@ const Learn = () => {
             <ReactMarkdown>{activeGuide.content}</ReactMarkdown>
           </div>
         </Card>
+      </div>
+    );
+  }
+
+  // ── PHOTO ANALYSIS ──
+  if (mode === "photo-analysis") {
+    return (
+      <div className="px-5 py-6 pb-24 max-w-md mx-auto">
+        <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
+          <ArrowLeft className="h-4 w-4" /> Back
+        </button>
+        <h2 className="font-display text-lg font-extrabold text-foreground mb-4">Photo Analysis</h2>
+
+        {photoPreview && (
+          <Card className="p-2 mb-4 overflow-hidden">
+            <img src={photoPreview} alt="Uploaded work" className="w-full rounded-lg max-h-64 object-contain" />
+          </Card>
+        )}
+
+        {loading && (
+          <div className="flex items-center justify-center py-8">
+            <div className="flex flex-col items-center gap-3">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="text-sm text-muted-foreground">Analyzing against standard...</p>
+            </div>
+          </div>
+        )}
+
+        {photoAnalysis && (
+          <Card className="p-5">
+            <Badge className="bg-accent text-primary border-0 text-xs mb-3">AI Hints</Badge>
+            <div className="prose prose-sm dark:prose-invert max-w-none text-foreground">
+              <ReactMarkdown>{photoAnalysis}</ReactMarkdown>
+            </div>
+          </Card>
+        )}
+
+        {!loading && photoAnalysis && (
+          <Button onClick={handlePhotoUpload} variant="outline" className="w-full mt-4 h-11">
+            Upload Another Photo
+          </Button>
+        )}
       </div>
     );
   }

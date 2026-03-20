@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import AppLayout from "./components/AppLayout";
 import Index from "./pages/Index";
 import Standards from "./pages/Standards";
+import Tools from "./pages/Tools";
 import Chat from "./pages/Chat";
 import Learn from "./pages/Learn";
 import Profile from "./pages/Profile";
@@ -61,6 +62,7 @@ const AppRoutes = () => (
       }
     >
       <Route path="/" element={<Index />} />
+      <Route path="/tools" element={<Tools />} />
       <Route path="/standards" element={<Standards />} />
       <Route path="/learn" element={<Learn />} />
       <Route path="/chat" element={<Chat />} />

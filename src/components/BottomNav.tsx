@@ -1,9 +1,9 @@
-import { Home, BookOpen, MessageSquare, User, GraduationCap } from "lucide-react";
+import { Calculator, BookOpen, MessageSquare, User, GraduationCap } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
 const tabs = [
-  { path: "/", icon: Home, label: "Home" },
+  { path: "/tools", icon: Calculator, label: "Tools" },
   { path: "/standards", icon: BookOpen, label: "Standards" },
   { path: "/learn", icon: GraduationCap, label: "Learn" },
   { path: "/chat", icon: MessageSquare, label: "Chat" },
