@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Calculator, Zap, Construction, Droplets, ChevronRight, Cable, Gauge, Activity } from "lucide-react";
+import { Calculator, Zap, Construction, Droplets, ChevronRight, Cable, Gauge, Activity, Flame, Wind, Ruler, LayoutGrid, TriangleRight, ArrowDownToLine } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import VoltageDropTool from "@/components/tools/VoltageDropTool";
 import ConcreteVolumeTool from "@/components/tools/ConcreteVolumeTool";
@@ -7,51 +7,66 @@ import PipeSizingTool from "@/components/tools/PipeSizingTool";
 import CableSizerTool from "@/components/tools/CableSizerTool";
 import ConduitFillTool from "@/components/tools/ConduitFillTool";
 import MaxDemandTool from "@/components/tools/MaxDemandTool";
+import BrickCalculatorTool from "@/components/tools/BrickCalculatorTool";
+import TimberSpanTool from "@/components/tools/TimberSpanTool";
+import RoofPitchTool from "@/components/tools/RoofPitchTool";
+import HeatLoadTool from "@/components/tools/HeatLoadTool";
+import DuctSizingTool from "@/components/tools/DuctSizingTool";
+import GasPipeSizingTool from "@/components/tools/GasPipeSizingTool";
+import DrainageFallTool from "@/components/tools/DrainageFallTool";
 
-type ToolMode = "menu" | "voltage-drop" | "concrete-volume" | "pipe-sizing" | "cable-sizer" | "conduit-fill" | "max-demand";
+type ToolMode = "menu" | "voltage-drop" | "concrete-volume" | "pipe-sizing" | "cable-sizer" | "conduit-fill" | "max-demand" | "brick-calc" | "timber-span" | "roof-pitch" | "heat-load" | "duct-sizing" | "gas-pipe" | "drainage-fall";
 
 const TOOLS: { id: ToolMode; title: string; desc: string; icon: React.ReactNode; category: string }[] = [
-  {
-    id: "voltage-drop", title: "Voltage Drop", icon: <Zap className="h-5 w-5 text-yellow-600" />,
-    desc: "AS/NZS 3008 — AC/DC, full cable spec & derating", category: "Electrical",
-  },
-  {
-    id: "cable-sizer", title: "Cable Sizer", icon: <Cable className="h-5 w-5 text-blue-600" />,
-    desc: "Auto-select cable by load, run & conditions", category: "Electrical",
-  },
-  {
-    id: "max-demand", title: "Maximum Demand", icon: <Activity className="h-5 w-5 text-red-600" />,
-    desc: "AS/NZS 3000 — Diversity & main breaker sizing", category: "Electrical",
-  },
-  {
-    id: "conduit-fill", title: "Conduit Fill", icon: <Gauge className="h-5 w-5 text-purple-600" />,
-    desc: "AS/NZS 3080 — Multi-cable fill check", category: "Electrical",
-  },
-  {
-    id: "concrete-volume", title: "Concrete Volume", icon: <Construction className="h-5 w-5 text-orange-600" />,
-    desc: "Slabs, footings & pads — with waste & rebar", category: "General",
-  },
-  {
-    id: "pipe-sizing", title: "Pipe Sizing", icon: <Droplets className="h-5 w-5 text-blue-500" />,
-    desc: "Flow rate to pipe diameter by application", category: "Plumbing",
-  },
+  // Electrical
+  { id: "voltage-drop", title: "Voltage Drop", icon: <Zap className="h-5 w-5 text-yellow-600" />, desc: "AC/DC, full cable spec & derating", category: "Electrical" },
+  { id: "cable-sizer", title: "Cable Sizer", icon: <Cable className="h-5 w-5 text-blue-600" />, desc: "Auto-select cable by load, run & conditions", category: "Electrical" },
+  { id: "max-demand", title: "Maximum Demand", icon: <Activity className="h-5 w-5 text-red-600" />, desc: "Diversity & main breaker sizing", category: "Electrical" },
+  { id: "conduit-fill", title: "Conduit Fill", icon: <Gauge className="h-5 w-5 text-purple-600" />, desc: "AS/NZS 3080 multi-cable fill check", category: "Electrical" },
+  // HVAC / Refrigeration
+  { id: "heat-load", title: "Heat Load", icon: <Flame className="h-5 w-5 text-orange-600" />, desc: "Cooling & heating capacity estimator", category: "HVAC" },
+  { id: "duct-sizing", title: "Duct Sizing", icon: <Wind className="h-5 w-5 text-sky-600" />, desc: "Round & rectangular duct by airflow", category: "HVAC" },
+  // Plumbing / Gas
+  { id: "pipe-sizing", title: "Pipe Sizing", icon: <Droplets className="h-5 w-5 text-blue-500" />, desc: "Flow rate to pipe diameter", category: "Plumbing / Gas" },
+  { id: "gas-pipe", title: "Gas Pipe Sizing", icon: <Flame className="h-5 w-5 text-red-500" />, desc: "AS/NZS 5601 — size by load & run", category: "Plumbing / Gas" },
+  { id: "drainage-fall", title: "Drainage Fall", icon: <ArrowDownToLine className="h-5 w-5 text-teal-600" />, desc: "AS/NZS 3500.2 pipe grades & fall", category: "Plumbing / Gas" },
+  // Building / Carpentry
+  { id: "brick-calc", title: "Brick & Block", icon: <LayoutGrid className="h-5 w-5 text-amber-700" />, desc: "Estimate bricks, mortar & sand", category: "Building" },
+  { id: "timber-span", title: "Timber Span", icon: <Ruler className="h-5 w-5 text-yellow-800" />, desc: "AS 1684 — joist, rafter & bearer spans", category: "Building" },
+  { id: "roof-pitch", title: "Roof Pitch", icon: <TriangleRight className="h-5 w-5 text-stone-600" />, desc: "Pitch, rafter length & roof area", category: "Building" },
+  { id: "concrete-volume", title: "Concrete Volume", icon: <Construction className="h-5 w-5 text-orange-600" />, desc: "Slabs, footings & pads with waste", category: "Building" },
 ];
 
 const ICON_BG: Record<string, string> = {
   Electrical: "bg-yellow-500/10",
-  Plumbing: "bg-blue-500/10",
-  General: "bg-orange-500/10",
+  HVAC: "bg-orange-500/10",
+  "Plumbing / Gas": "bg-blue-500/10",
+  Building: "bg-amber-500/10",
+};
+
+const TOOL_COMPONENTS: Record<string, React.FC<{ onBack: () => void }>> = {
+  "voltage-drop": VoltageDropTool,
+  "cable-sizer": CableSizerTool,
+  "conduit-fill": ConduitFillTool,
+  "max-demand": MaxDemandTool,
+  "concrete-volume": ConcreteVolumeTool,
+  "pipe-sizing": PipeSizingTool,
+  "brick-calc": BrickCalculatorTool,
+  "timber-span": TimberSpanTool,
+  "roof-pitch": RoofPitchTool,
+  "heat-load": HeatLoadTool,
+  "duct-sizing": DuctSizingTool,
+  "gas-pipe": GasPipeSizingTool,
+  "drainage-fall": DrainageFallTool,
 };
 
 const Tools = () => {
   const [mode, setMode] = useState<ToolMode>("menu");
 
-  if (mode === "voltage-drop") return <VoltageDropTool onBack={() => setMode("menu")} />;
-  if (mode === "cable-sizer") return <CableSizerTool onBack={() => setMode("menu")} />;
-  if (mode === "conduit-fill") return <ConduitFillTool onBack={() => setMode("menu")} />;
-  if (mode === "max-demand") return <MaxDemandTool onBack={() => setMode("menu")} />;
-  if (mode === "concrete-volume") return <ConcreteVolumeTool onBack={() => setMode("menu")} />;
-  if (mode === "pipe-sizing") return <PipeSizingTool onBack={() => setMode("menu")} />;
+  if (mode !== "menu") {
+    const ToolComponent = TOOL_COMPONENTS[mode];
+    if (ToolComponent) return <ToolComponent onBack={() => setMode("menu")} />;
+  }
 
   const categories = [...new Set(TOOLS.map(t => t.category))];
 
@@ -63,7 +78,7 @@ const Tools = () => {
         </div>
         <div>
           <h1 className="font-display text-xl font-extrabold text-foreground">Trade Tools</h1>
-          <p className="text-sm text-muted-foreground">Professional-grade — AC/DC, full cable spec</p>
+          <p className="text-sm text-muted-foreground">{TOOLS.length} professional calculators</p>
         </div>
       </div>
 
@@ -89,7 +104,6 @@ const Tools = () => {
           </div>
         </div>
       ))}
-
     </div>
   );
 };
