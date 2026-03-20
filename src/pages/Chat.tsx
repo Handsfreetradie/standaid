@@ -121,6 +121,46 @@ const Chat = () => {
     }
   };
 
+  const handleVoiceQuery = useCallback(async (text: string): Promise<string | undefined> => {
+    if (!text.trim() || !session) return undefined;
+
+    const userMessage: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: text.trim(),
+    };
+    setMessages((prev) => [...prev, userMessage]);
+    setIsLoading(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke("query", {
+        body: { question: text.trim() },
+      });
+
+      if (error) throw new Error(error.message || "Query failed");
+
+      const answer = data?.answer || data?.message || data?.error || "No response.";
+      const aiMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "ai",
+        content: answer,
+        citations: data?.citations || [],
+        safety_critical: data?.safety_critical || false,
+        safety_message: data?.safety_message,
+        confidence: data?.confidence,
+        low_confidence: data?.low_confidence || false,
+        answer_found: data?.answer_found,
+      };
+      setMessages((prev) => [...prev, aiMessage]);
+      return answer;
+    } catch (e: any) {
+      console.error("Voice query error:", e);
+      return "Sorry, I couldn't process that. Please try again.";
+    } finally {
+      setIsLoading(false);
+    }
+  }, [session]);
+
   return (
     <div className="flex flex-col h-[calc(100vh-5rem)]">
       {/* Header */}
