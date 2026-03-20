@@ -531,6 +531,48 @@ const Learn = () => {
     );
   }
 
+  // ── PHOTO ANALYSIS ──
+  if (mode === "photo-analysis") {
+    return (
+      <div className="px-5 py-6 pb-24 max-w-md mx-auto">
+        <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
+          <ArrowLeft className="h-4 w-4" /> Back
+        </button>
+        <h2 className="font-display text-lg font-extrabold text-foreground mb-4">Photo Analysis</h2>
+
+        {photoPreview && (
+          <Card className="p-2 mb-4 overflow-hidden">
+            <img src={photoPreview} alt="Uploaded work" className="w-full rounded-lg max-h-64 object-contain" />
+          </Card>
+        )}
+
+        {loading && (
+          <div className="flex items-center justify-center py-8">
+            <div className="flex flex-col items-center gap-3">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="text-sm text-muted-foreground">Analyzing against standard...</p>
+            </div>
+          </div>
+        )}
+
+        {photoAnalysis && (
+          <Card className="p-5">
+            <Badge className="bg-accent text-primary border-0 text-xs mb-3">AI Hints</Badge>
+            <div className="prose prose-sm dark:prose-invert max-w-none text-foreground">
+              <ReactMarkdown>{photoAnalysis}</ReactMarkdown>
+            </div>
+          </Card>
+        )}
+
+        {!loading && photoAnalysis && (
+          <Button onClick={handlePhotoUpload} variant="outline" className="w-full mt-4 h-11">
+            Upload Another Photo
+          </Button>
+        )}
+      </div>
+    );
+  }
+
   return null;
 };
 
