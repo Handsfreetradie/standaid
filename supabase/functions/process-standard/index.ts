@@ -361,11 +361,8 @@ serve(async (req) => {
     const isPartial = tier === "free";
     const indexLimit = isPartial ? Math.ceil(totalChunks * 0.25) : totalChunks;
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      await supabaseAdmin.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
-      return new Response(JSON.stringify({ error: "API key not configured" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
+
+
 
     const BATCH_SIZE = 10;
     let indexedCount = 0;
