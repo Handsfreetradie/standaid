@@ -328,10 +328,16 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Failed to download file" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    if (!LOVABLE_API_KEY) {
+      await supabaseAdmin.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
+      return new Response(JSON.stringify({ error: "API key not configured" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     const fileBytes = new Uint8Array(await fileData.arrayBuffer());
     let extracted: { text: string; pages: string[] };
     try {
-      extracted = await extractTextFromPdf(fileBytes);
+      extracted = await extractTextFromPdf(fileBytes, LOVABLE_API_KEY);
     } catch (e) {
       console.error("Text extraction failed:", e);
       await supabaseAdmin.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
