@@ -43,6 +43,8 @@ const Learn = () => {
   // Study guide state
   const [guides, setGuides] = useState<any[]>([]);
   const [activeGuide, setActiveGuide] = useState<any>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoAnalysis, setPhotoAnalysis] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) loadStandards();
