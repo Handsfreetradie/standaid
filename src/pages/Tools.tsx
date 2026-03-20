@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Calculator, Zap, Construction, Droplets, ChevronRight, Cable, Gauge, Activity, Flame, Wind, Ruler, LayoutGrid, TriangleRight, ArrowDownToLine } from "lucide-react";
+import { Calculator, ChevronRight } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import VoltageDropTool from "@/components/tools/VoltageDropTool";
 import ConcreteVolumeTool from "@/components/tools/ConcreteVolumeTool";
@@ -17,32 +17,26 @@ import DrainageFallTool from "@/components/tools/DrainageFallTool";
 
 type ToolMode = "menu" | "voltage-drop" | "concrete-volume" | "pipe-sizing" | "cable-sizer" | "conduit-fill" | "max-demand" | "brick-calc" | "timber-span" | "roof-pitch" | "heat-load" | "duct-sizing" | "gas-pipe" | "drainage-fall";
 
-const TOOLS: { id: ToolMode; title: string; desc: string; icon: React.ReactNode; category: string }[] = [
+const TOOLS: { id: ToolMode; title: string; desc: string; category: string }[] = [
   // Electrical
-  { id: "voltage-drop", title: "Voltage Drop", icon: <Zap className="h-5 w-5 text-yellow-600" />, desc: "AC/DC, full cable spec & derating", category: "Electrical" },
-  { id: "cable-sizer", title: "Cable Sizer", icon: <Cable className="h-5 w-5 text-blue-600" />, desc: "Auto-select cable by load, run & conditions", category: "Electrical" },
-  { id: "max-demand", title: "Maximum Demand", icon: <Activity className="h-5 w-5 text-red-600" />, desc: "Diversity & main breaker sizing", category: "Electrical" },
-  { id: "conduit-fill", title: "Conduit Fill", icon: <Gauge className="h-5 w-5 text-purple-600" />, desc: "AS/NZS 3080 multi-cable fill check", category: "Electrical" },
+  { id: "voltage-drop", title: "Voltage Drop", desc: "AC/DC, full cable spec & derating", category: "Electrical" },
+  { id: "cable-sizer", title: "Cable Sizer", desc: "Auto-select cable by load, run & conditions", category: "Electrical" },
+  { id: "max-demand", title: "Maximum Demand", desc: "Diversity & main breaker sizing", category: "Electrical" },
+  { id: "conduit-fill", title: "Conduit Fill", desc: "AS/NZS 3080 multi-cable fill check", category: "Electrical" },
   // HVAC / Refrigeration
-  { id: "heat-load", title: "Heat Load", icon: <Flame className="h-5 w-5 text-orange-600" />, desc: "Cooling & heating capacity estimator", category: "HVAC" },
-  { id: "duct-sizing", title: "Duct Sizing", icon: <Wind className="h-5 w-5 text-sky-600" />, desc: "Round & rectangular duct by airflow", category: "HVAC" },
+  { id: "heat-load", title: "Heat Load", desc: "Cooling & heating capacity estimator", category: "HVAC" },
+  { id: "duct-sizing", title: "Duct Sizing", desc: "Round & rectangular duct by airflow", category: "HVAC" },
   // Plumbing / Gas
-  { id: "pipe-sizing", title: "Pipe Sizing", icon: <Droplets className="h-5 w-5 text-blue-500" />, desc: "Flow rate to pipe diameter", category: "Plumbing / Gas" },
-  { id: "gas-pipe", title: "Gas Pipe Sizing", icon: <Flame className="h-5 w-5 text-red-500" />, desc: "AS/NZS 5601 — size by load & run", category: "Plumbing / Gas" },
-  { id: "drainage-fall", title: "Drainage Fall", icon: <ArrowDownToLine className="h-5 w-5 text-teal-600" />, desc: "AS/NZS 3500.2 pipe grades & fall", category: "Plumbing / Gas" },
+  { id: "pipe-sizing", title: "Pipe Sizing", desc: "Flow rate to pipe diameter", category: "Plumbing / Gas" },
+  { id: "gas-pipe", title: "Gas Pipe Sizing", desc: "AS/NZS 5601 — size by load & run", category: "Plumbing / Gas" },
+  { id: "drainage-fall", title: "Drainage Fall", desc: "AS/NZS 3500.2 pipe grades & fall", category: "Plumbing / Gas" },
   // Building / Carpentry
-  { id: "brick-calc", title: "Brick & Block", icon: <LayoutGrid className="h-5 w-5 text-amber-700" />, desc: "Estimate bricks, mortar & sand", category: "Building" },
-  { id: "timber-span", title: "Timber Span", icon: <Ruler className="h-5 w-5 text-yellow-800" />, desc: "AS 1684 — joist, rafter & bearer spans", category: "Building" },
-  { id: "roof-pitch", title: "Roof Pitch", icon: <TriangleRight className="h-5 w-5 text-stone-600" />, desc: "Pitch, rafter length & roof area", category: "Building" },
-  { id: "concrete-volume", title: "Concrete Volume", icon: <Construction className="h-5 w-5 text-orange-600" />, desc: "Slabs, footings & pads with waste", category: "Building" },
+  { id: "brick-calc", title: "Brick & Block", desc: "Estimate bricks, mortar & sand", category: "Building" },
+  { id: "timber-span", title: "Timber Span", desc: "AS 1684 — joist, rafter & bearer spans", category: "Building" },
+  { id: "roof-pitch", title: "Roof Pitch", desc: "Pitch, rafter length & roof area", category: "Building" },
+  { id: "concrete-volume", title: "Concrete Volume", desc: "Slabs, footings & pads with waste", category: "Building" },
 ];
 
-const ICON_BG: Record<string, string> = {
-  Electrical: "bg-yellow-500/10",
-  HVAC: "bg-orange-500/10",
-  "Plumbing / Gas": "bg-blue-500/10",
-  Building: "bg-amber-500/10",
-};
 
 const TOOL_COMPONENTS: Record<string, React.FC<{ onBack: () => void }>> = {
   "voltage-drop": VoltageDropTool,
@@ -90,9 +84,6 @@ const Tools = () => {
               <Card key={tool.id} className="p-4 cursor-pointer hover:border-primary/50 transition-colors active:scale-[0.99]"
                 onClick={() => setMode(tool.id)}>
                 <div className="flex items-center gap-3">
-                  <div className={`h-10 w-10 rounded-lg flex items-center justify-center flex-shrink-0 ${ICON_BG[cat] || "bg-muted"}`}>
-                    {tool.icon}
-                  </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-bold text-foreground text-sm">{tool.title}</p>
                     <p className="text-xs text-muted-foreground truncate">{tool.desc}</p>
