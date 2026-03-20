@@ -1,5 +1,6 @@
-import { useState, useRef } from "react";
-import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Loader2 } from "lucide-react";
+import { useState, useRef, useCallback } from "react";
+import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Loader2, Mic } from "lucide-react";
+import VoiceMode from "@/components/VoiceMode";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +37,7 @@ const Chat = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [voiceMode, setVoiceMode] = useState(false);
   const { session } = useAuth();
   const { data: profile } = useProfile();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -118,6 +120,46 @@ const Chat = () => {
       sendQuery();
     }
   };
+
+  const handleVoiceQuery = useCallback(async (text: string): Promise<string | undefined> => {
+    if (!text.trim() || !session) return undefined;
+
+    const userMessage: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: text.trim(),
+    };
+    setMessages((prev) => [...prev, userMessage]);
+    setIsLoading(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke("query", {
+        body: { question: text.trim() },
+      });
+
+      if (error) throw new Error(error.message || "Query failed");
+
+      const answer = data?.answer || data?.message || data?.error || "No response.";
+      const aiMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "ai",
+        content: answer,
+        citations: data?.citations || [],
+        safety_critical: data?.safety_critical || false,
+        safety_message: data?.safety_message,
+        confidence: data?.confidence,
+        low_confidence: data?.low_confidence || false,
+        answer_found: data?.answer_found,
+      };
+      setMessages((prev) => [...prev, aiMessage]);
+      return answer;
+    } catch (e: any) {
+      console.error("Voice query error:", e);
+      return "Sorry, I couldn't process that. Please try again.";
+    } finally {
+      setIsLoading(false);
+    }
+  }, [session]);
 
   return (
     <div className="flex flex-col h-[calc(100vh-5rem)]">
@@ -264,6 +306,14 @@ const Chat = () => {
           />
           <Button
             size="icon"
+            variant="outline"
+            className="h-10 w-10 flex-shrink-0 text-primary"
+            onClick={() => setVoiceMode(true)}
+          >
+            <Mic className="h-4 w-4" />
+          </Button>
+          <Button
+            size="icon"
             className="h-10 w-10 flex-shrink-0"
             disabled={!input.trim() || isLoading}
             onClick={sendQuery}
@@ -272,6 +322,15 @@ const Chat = () => {
           </Button>
         </div>
       </div>
+
+      {/* Voice Mode Overlay */}
+      {voiceMode && (
+        <VoiceMode
+          onTranscript={handleVoiceQuery}
+          isQuerying={isLoading}
+          onClose={() => setVoiceMode(false)}
+        />
+      )}
     </div>
   );
 };
