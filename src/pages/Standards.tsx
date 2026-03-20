@@ -215,6 +215,51 @@ const Standards = () => {
                     {statusIcon[s.extraction_status as keyof typeof statusIcon]}
                   </div>
                 </div>
+
+                {/* Progress section */}
+                {(s.extraction_status === "pending" || s.extraction_status === "processing") && (
+                  <div className="mt-3 space-y-1.5">
+                    <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
+                      <div className="h-full rounded-full bg-primary animate-pulse" style={{ width: s.extraction_status === "pending" ? "15%" : "60%" }} />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {s.extraction_status === "pending" ? "Queued — waiting to start…" : "Extracting & indexing content…"}
+                    </p>
+                  </div>
+                )}
+
+                {s.extraction_status === "failed" && (
+                  <div className="mt-3">
+                    <Badge variant="destructive" className="text-xs">Extraction failed — try re-uploading</Badge>
+                  </div>
+                )}
+
+                {s.extraction_status === "complete" && (
+                  <div className="mt-3 space-y-1.5">
+                    <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all"
+                        style={{ width: `${indexedPercent}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">
+                        {(s.indexed_chunks || 0)} / {(s.total_chunks || 0)} chunks indexed ({indexedPercent}%)
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {s.extraction_quality_score != null && (
+                          <Badge variant={s.extraction_quality_score >= 70 ? "secondary" : "destructive"} className="text-xs">
+                            {Math.round(s.extraction_quality_score)}% quality
+                          </Badge>
+                        )}
+                        {(s.indexed_chunks || 0) === 0 && (
+                          <Badge variant="destructive" className="text-xs">No content</Badge>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between mt-3">
                   <span className="text-xs text-muted-foreground">
                     {new Date(s.created_at).toLocaleDateString("en-AU", {
@@ -223,28 +268,6 @@ const Standards = () => {
                       year: "numeric",
                     })}
                   </span>
-                  <div className="flex items-center gap-3">
-                    {s.extraction_status === "complete" && s.extraction_quality_score != null && (
-                      <Badge variant={s.extraction_quality_score >= 70 ? "secondary" : "destructive"} className="text-xs">
-                        {Math.round(s.extraction_quality_score)}% quality
-                      </Badge>
-                    )}
-                    {s.extraction_status === "complete" && (s.indexed_chunks || 0) > 0 && (
-                      <div className="flex items-center gap-1.5">
-                        <div className="h-1.5 w-20 rounded-full bg-secondary overflow-hidden">
-                          <div
-                            className="h-full rounded-full bg-primary"
-                            style={{ width: `${indexedPercent}%` }}
-                          />
-                        </div>
-                        <span className="text-xs font-medium text-primary">
-                          {indexedPercent}% indexed
-                        </span>
-                      </div>
-                    )}
-                    {s.extraction_status === "complete" && (s.indexed_chunks || 0) === 0 && (
-                      <Badge variant="destructive" className="text-xs">No content indexed</Badge>
-                    )}
                     <Button
                       size="icon"
                       variant="ghost"
