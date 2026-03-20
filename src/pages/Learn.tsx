@@ -320,6 +320,7 @@ const Learn = () => {
             </div>
           </Card>
 
+          <Card
             className="p-4 cursor-pointer hover:border-primary/50 transition-colors"
             onClick={() => { loadGuides(); setMode("study-guide"); }}
           >
