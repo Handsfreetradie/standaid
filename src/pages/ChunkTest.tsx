@@ -293,7 +293,7 @@ const ChunkTest = () => {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
-              <CheckCircle className="h-4 w-4 text-green-600" /> 3. Chunks ({chunks.length})
+              <CheckCircle className="h-4 w-4 text-primary" /> 3. Chunks ({chunks.length})
             </CardTitle>
           </CardHeader>
           <CardContent>
