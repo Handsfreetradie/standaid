@@ -306,6 +306,14 @@ const Chat = () => {
           />
           <Button
             size="icon"
+            variant="outline"
+            className="h-10 w-10 flex-shrink-0 text-primary"
+            onClick={() => setVoiceMode(true)}
+          >
+            <Mic className="h-4 w-4" />
+          </Button>
+          <Button
+            size="icon"
             className="h-10 w-10 flex-shrink-0"
             disabled={!input.trim() || isLoading}
             onClick={sendQuery}
@@ -314,6 +322,15 @@ const Chat = () => {
           </Button>
         </div>
       </div>
+
+      {/* Voice Mode Overlay */}
+      {voiceMode && (
+        <VoiceMode
+          onTranscript={handleVoiceQuery}
+          isQuerying={isLoading}
+          onClose={() => setVoiceMode(false)}
+        />
+      )}
     </div>
   );
 };
