@@ -70,6 +70,7 @@ const AppRoutes = () => (
       <Route path="/chat" element={<Chat />} />
       <Route path="/profile" element={<Profile />} />
       <Route path="/chunk-test" element={<ChunkTest />} />
+      <Route path="/standards/upload" element={<StandardsUpload />} />
     </Route>
     <Route path="*" element={<NotFound />} />
   </Routes>

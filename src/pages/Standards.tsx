@@ -147,15 +147,10 @@ const Standards = () => {
         <Button
           size="sm"
           className="h-9 gap-1.5"
-          onClick={handleUpload}
-          disabled={uploading}
+          onClick={() => navigate("/standards/upload")}
         >
-          {uploading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Upload className="h-4 w-4" />
-          )}
-          {uploading ? "Uploading..." : "Upload"}
+          <Upload className="h-4 w-4" />
+          Upload
         </Button>
       </div>
 
