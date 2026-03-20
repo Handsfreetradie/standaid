@@ -12,6 +12,7 @@ import Chat from "./pages/Chat";
 import Learn from "./pages/Learn";
 import Profile from "./pages/Profile";
 import Auth from "./pages/Auth";
+import StandardsUpload from "./pages/StandardsUpload";
 import Onboarding from "./pages/Onboarding";
 import NotFound from "./pages/NotFound";
 import ChunkTest from "./pages/ChunkTest";
