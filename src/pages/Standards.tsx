@@ -224,7 +224,7 @@ const Standards = () => {
                     })}
                   </span>
                   <div className="flex items-center gap-3">
-                    {s.extraction_status === "complete" && (
+                    {s.extraction_status === "complete" && (s.indexed_chunks || 0) > 0 && (
                       <div className="flex items-center gap-1.5">
                         <div className="h-1.5 w-20 rounded-full bg-secondary overflow-hidden">
                           <div
@@ -236,6 +236,9 @@ const Standards = () => {
                           {indexedPercent}% indexed
                         </span>
                       </div>
+                    )}
+                    {s.extraction_status === "complete" && (s.indexed_chunks || 0) === 0 && (
+                      <Badge variant="destructive" className="text-xs">No content indexed</Badge>
                     )}
                     <Button
                       size="icon"
