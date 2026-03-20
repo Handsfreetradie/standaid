@@ -90,9 +90,6 @@ const Tools = () => {
         </div>
       ))}
 
-      <p className="text-xs text-muted-foreground text-center mt-4">
-        All calculations run locally — no tokens used, no internet needed.
-      </p>
     </div>
   );
 };
