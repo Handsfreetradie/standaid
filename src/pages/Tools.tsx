@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Calculator, Zap, Construction, Droplets, ChevronRight, Cable, Gauge, Activity, Flame, Wind, Ruler, LayoutGrid, TriangleRight, ArrowDownToLine } from "lucide-react";
+import { Calculator, ChevronRight } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import VoltageDropTool from "@/components/tools/VoltageDropTool";
 import ConcreteVolumeTool from "@/components/tools/ConcreteVolumeTool";
