@@ -1,5 +1,6 @@
-import { useState, useRef } from "react";
-import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Loader2 } from "lucide-react";
+import { useState, useRef, useCallback } from "react";
+import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Loader2, Mic } from "lucide-react";
+import VoiceMode from "@/components/VoiceMode";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
