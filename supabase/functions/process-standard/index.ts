@@ -381,23 +381,25 @@ serve(async (req) => {
 
     for (let i = 0; i < allChunks.length; i += BATCH_SIZE) {
       const batch = allChunks.slice(i, i + BATCH_SIZE);
-      const chunkRecords = [];
 
-      for (const chunk of batch) {
-        const shouldIndex = chunk.chunk_index < indexLimit;
-        let embedding = null;
-
-        if (shouldIndex) {
+      // Generate embeddings in parallel within each batch
+      const embeddingResults = await Promise.all(
+        batch.map(async (chunk) => {
+          if (chunk.chunk_index >= indexLimit) return null;
           try {
-            const embeddingVector = await generateEmbedding(chunk.content, LOVABLE_API_KEY);
-            embedding = JSON.stringify(embeddingVector);
-            indexedCount++;
+            return await generateEmbedding(chunk.content, LOVABLE_API_KEY);
           } catch (e) {
             console.error(`Embedding failed for chunk ${chunk.chunk_index}:`, e);
+            return null;
           }
-        }
+        })
+      );
 
-        chunkRecords.push({
+      const chunkRecords = batch.map((chunk, idx) => {
+        const embedding = embeddingResults[idx];
+        const shouldIndex = chunk.chunk_index < indexLimit;
+        if (shouldIndex && embedding) indexedCount++;
+        return {
           standard_id,
           user_id: userId,
           clause_number: chunk.clause_number,
@@ -405,15 +407,13 @@ serve(async (req) => {
           content: chunk.content,
           page_number: chunk.page_number,
           chunk_index: chunk.chunk_index,
-          embedding,
+          embedding: embedding ? JSON.stringify(embedding) : null,
           is_indexed: shouldIndex && embedding !== null,
-        });
-      }
+        };
+      });
 
       const { error: chunkError } = await supabaseAdmin.from("standard_chunks").insert(chunkRecords);
       if (chunkError) console.error("Chunk insert error:", chunkError);
-
-      if (i + BATCH_SIZE < allChunks.length) await new Promise((r) => setTimeout(r, 500));
     }
 
     await supabaseAdmin.from("standards").update({
