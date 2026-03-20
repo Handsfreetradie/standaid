@@ -224,6 +224,11 @@ const Standards = () => {
                     })}
                   </span>
                   <div className="flex items-center gap-3">
+                    {s.extraction_status === "complete" && s.extraction_quality_score != null && (
+                      <Badge variant={s.extraction_quality_score >= 70 ? "secondary" : "destructive"} className="text-xs">
+                        {Math.round(s.extraction_quality_score)}% quality
+                      </Badge>
+                    )}
                     {s.extraction_status === "complete" && (s.indexed_chunks || 0) > 0 && (
                       <div className="flex items-center gap-1.5">
                         <div className="h-1.5 w-20 rounded-full bg-secondary overflow-hidden">
