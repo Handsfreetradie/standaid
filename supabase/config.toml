@@ -11,3 +11,9 @@ verify_jwt = false
 
 [functions.capstone]
 verify_jwt = false
+
+[functions.chunk-test]
+verify_jwt = false
+
+[functions.query-test]
+verify_jwt = false
