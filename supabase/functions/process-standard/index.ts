@@ -169,7 +169,8 @@ async function generateEmbedding(text: string, apiKey: string): Promise<number[]
   return data.data[0].embedding;
 }
 
-async function extractTextFromPdf(fileBytes: Uint8Array): Promise<{ text: string; pages: string[] }> {
+// Basic regex-based extraction (fallback)
+function extractTextBasic(fileBytes: Uint8Array): string {
   const decoder = new TextDecoder("latin1");
   const rawText = decoder.decode(fileBytes);
 
@@ -192,8 +193,99 @@ async function extractTextFromPdf(fileBytes: Uint8Array): Promise<{ text: string
     }
   }
 
-  const fullText = allText.join(" ").replace(/\s+/g, " ").trim();
-  return { text: fullText, pages: [fullText] };
+  return allText.join(" ").replace(/\s+/g, " ").trim();
+}
+
+// AI-based PDF text extraction using Gemini vision
+async function extractTextWithAI(fileBytes: Uint8Array, apiKey: string): Promise<string> {
+  const binaryStr = Array.from(fileBytes).map(b => String.fromCharCode(b)).join("");
+  const base64 = btoa(binaryStr);
+
+  // Cap at ~4MB base64 to stay within edge function limits
+  const pdfBase64 = base64.length > 4 * 1024 * 1024 ? base64.slice(0, 4 * 1024 * 1024) : base64;
+
+  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "google/gemini-2.5-flash",
+      messages: [
+        {
+          role: "system",
+          content: `You are a precise document text extractor. Extract ALL text from this PDF document EXACTLY as written.
+Rules:
+- Preserve ALL section headings, clause numbers (e.g., 1.1, 1.1.1), and structure
+- Keep paragraph breaks as double newlines
+- Keep tables as readable text
+- Do NOT summarize, paraphrase, or add any content
+- Do NOT add commentary or explanations
+- Extract text VERBATIM — every word must match the original
+- Include page markers like [PAGE 2], [PAGE 3] etc. between pages if detectable
+- For scanned/image-based pages, use OCR to extract text accurately`,
+        },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Extract ALL text from this PDF document verbatim. Preserve all headings, clause numbers, tables, and structure exactly as they appear." },
+            { type: "image_url", image_url: { url: `data:application/pdf;base64,${pdfBase64}` } },
+          ],
+        },
+      ],
+      max_tokens: 16000,
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    console.error("AI extraction error:", response.status, errText);
+    throw new Error(`AI extraction failed: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const extractedText = data.choices?.[0]?.message?.content;
+  if (!extractedText || extractedText.length < 50) {
+    throw new Error("AI extraction returned insufficient text");
+  }
+  return extractedText;
+}
+
+async function extractTextFromPdf(fileBytes: Uint8Array, apiKey: string): Promise<{ text: string; pages: string[] }> {
+  // Step 1: Try basic extraction first (fast, free)
+  const basicText = extractTextBasic(fileBytes);
+  console.log(`Basic extraction: ${basicText.length} chars`);
+
+  if (basicText.length > 500) {
+    const alphaCount = (basicText.match(/[a-zA-Z0-9]/g) || []).length;
+    const alphaRatio = alphaCount / basicText.length;
+    if (alphaRatio > 0.5) {
+      console.log("Basic extraction quality sufficient");
+      return { text: basicText, pages: [basicText] };
+    }
+  }
+
+  // Step 2: Fall back to AI-based OCR
+  console.log("Using AI-based OCR extraction...");
+  try {
+    const aiText = await extractTextWithAI(fileBytes, apiKey);
+    console.log(`AI extraction: ${aiText.length} chars`);
+
+    const pageMarkerRegex = /\[PAGE\s+\d+\]/gi;
+    const pages = aiText.split(pageMarkerRegex).filter((p) => p.trim().length > 0);
+
+    return {
+      text: aiText.replace(pageMarkerRegex, "\n\n").trim(),
+      pages: pages.length > 1 ? pages : [aiText],
+    };
+  } catch (aiError) {
+    console.error("AI extraction failed, falling back to basic:", aiError);
+    if (basicText.length > 50) {
+      return { text: basicText, pages: [basicText] };
+    }
+    throw new Error("Could not extract text from this PDF. Try a digital (text-selectable) version.");
+  }
 }
 
 serve(async (req) => {
