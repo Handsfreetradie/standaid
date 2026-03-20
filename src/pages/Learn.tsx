@@ -172,11 +172,54 @@ const Learn = () => {
     }
   };
 
+  const handlePhotoUpload = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.capture = "environment";
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      if (file.size > 10 * 1024 * 1024) { toast.error("Image must be under 10MB"); return; }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = (reader.result as string).split(",")[1];
+        setPhotoPreview(reader.result as string);
+        analyzePhoto(base64);
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  };
+
+  const analyzePhoto = async (base64: string) => {
+    if (!selectedStandard) { toast.error("Select a standard first"); return; }
+    setLoading(true);
+    setPhotoAnalysis(null);
+    setMode("photo-analysis");
+    try {
+      const { data, error } = await supabase.functions.invoke("capstone", {
+        body: { action: "analyze_photo", standardId: selectedStandard, imageBase64: base64 },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      setPhotoAnalysis(data.analysis);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to analyze photo");
+      setMode("menu");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const goBack = () => {
     setMode("menu");
     setExamId(null);
     setExamResult(null);
     setActiveGuide(null);
+    setPhotoPreview(null);
+    setPhotoAnalysis(null);
   };
 
   // ── MENU ──
