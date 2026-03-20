@@ -9,7 +9,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 
-type Mode = "menu" | "quiz" | "exam" | "exam-active" | "exam-result" | "study-guide" | "study-view";
+type Mode = "menu" | "quiz" | "exam" | "exam-active" | "exam-result" | "study-guide" | "study-view" | "photo-analysis";
 
 interface Question {
   id: string;
