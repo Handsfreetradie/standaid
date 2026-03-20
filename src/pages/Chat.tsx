@@ -37,6 +37,7 @@ const Chat = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [voiceMode, setVoiceMode] = useState(false);
   const { session } = useAuth();
   const { data: profile } = useProfile();
   const scrollRef = useRef<HTMLDivElement>(null);
