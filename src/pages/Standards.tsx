@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { BookOpen, Upload, Lock, Search, Loader2, Trash2, CheckCircle2, AlertCircle, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -24,6 +25,7 @@ const Standards = () => {
   const { data: standards = [], isLoading } = useStandards();
   const { data: profile } = useProfile();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const tier = profile?.subscription_tier || "free";
 
@@ -145,15 +147,10 @@ const Standards = () => {
         <Button
           size="sm"
           className="h-9 gap-1.5"
-          onClick={handleUpload}
-          disabled={uploading}
+          onClick={() => navigate("/standards/upload")}
         >
-          {uploading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Upload className="h-4 w-4" />
-          )}
-          {uploading ? "Uploading..." : "Upload"}
+          <Upload className="h-4 w-4" />
+          Upload
         </Button>
       </div>
 
