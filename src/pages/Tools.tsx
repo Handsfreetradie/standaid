@@ -37,12 +37,6 @@ const TOOLS: { id: ToolMode; title: string; desc: string; category: string }[] =
   { id: "concrete-volume", title: "Concrete Volume", desc: "Slabs, footings & pads with waste", category: "Building" },
 ];
 
-const ICON_BG: Record<string, string> = {
-  Electrical: "bg-yellow-500/10",
-  HVAC: "bg-orange-500/10",
-  "Plumbing / Gas": "bg-blue-500/10",
-  Building: "bg-amber-500/10",
-};
 
 const TOOL_COMPONENTS: Record<string, React.FC<{ onBack: () => void }>> = {
   "voltage-drop": VoltageDropTool,
