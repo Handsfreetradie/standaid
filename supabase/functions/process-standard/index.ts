@@ -147,7 +147,7 @@ serve(async (req) => {
     const supabaseAdmin = createClient(Deno.env.get("SUPABASE_URL")!, serviceRoleKey);
 
     const authHeader = req.headers.get("Authorization");
-    const internalAuth = req.headers.get("x-internal-auth");
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.replace("Bearer ", "") : null;
     const { standard_id, user_id: internalUserId } = await req.json();
 
     if (!standard_id) {
@@ -157,10 +157,10 @@ serve(async (req) => {
     let userId: string | null = null;
 
     // Internal trusted call from backend functions
-    if (internalAuth && internalAuth === serviceRoleKey && internalUserId) {
+    if (token && token === serviceRoleKey && internalUserId) {
       userId = internalUserId;
     } else {
-      if (!authHeader?.startsWith("Bearer ")) {
+      if (!token) {
         return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
       }
 
@@ -168,7 +168,6 @@ serve(async (req) => {
         global: { headers: { Authorization: authHeader } },
       });
 
-      const token = authHeader.replace("Bearer ", "");
       const { data: claimsData, error: claimsError } = await supabaseUser.auth.getClaims(token);
       if (claimsError || !claimsData?.claims) {
         return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
