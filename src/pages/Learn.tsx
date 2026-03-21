@@ -427,6 +427,22 @@ const Learn = () => {
           </Card>
 
           <Card
+            className="p-4 cursor-pointer hover:border-primary/50 transition-colors border-primary/20 bg-primary/[0.02]"
+            onClick={() => setMode("exam-prep")}
+          >
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                <Target className="h-5 w-5 text-primary" />
+              </div>
+              <div className="flex-1">
+                <p className="font-bold text-foreground text-sm">Exam Prep</p>
+                <p className="text-xs text-muted-foreground">Upload a past exam or list topics to study</p>
+              </div>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </div>
+          </Card>
+
+          <Card
             className="p-4 cursor-pointer hover:border-primary/50 transition-colors"
             onClick={() => { loadGuides(); setMode("study-guide"); }}
           >
