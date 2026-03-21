@@ -42,6 +42,7 @@ function extractTextBasic(fileBytes: Uint8Array): string {
 
 function cleanExtractedText(text: string): string {
   return text
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, " ")
     .replace(/\b(BT|ET|Tj|TJ|Tf|Td|Tm|cm|re|f|W|n|q|Q|rg|RG|gs|Do|CS|cs|SC|sc)\b/g, " ")
     .replace(/\b\d+\.\d+\s+\d+\.\d+\s+\d+\.\d+\s+(rg|RG)\b/g, " ")
     .replace(/\s+/g, " ")
@@ -143,26 +144,36 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabaseAdmin = createClient(Deno.env.get("SUPABASE_URL")!, serviceRoleKey);
+
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
-    }
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.replace("Bearer ", "") : null;
+    const { standard_id, user_id: internalUserId } = await req.json();
 
-    const supabaseAdmin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const supabaseUser = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
-      global: { headers: { Authorization: authHeader } },
-    });
-
-    const token = authHeader.replace("Bearer ", "");
-    const { data: claimsData, error: claimsError } = await supabaseUser.auth.getClaims(token);
-    if (claimsError || !claimsData?.claims) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
-    }
-    const userId = claimsData.claims.sub as string;
-
-    const { standard_id } = await req.json();
     if (!standard_id) {
       return new Response(JSON.stringify({ error: "standard_id is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    let userId: string | null = null;
+
+    // Internal trusted call from backend functions
+    if (token && token === serviceRoleKey && internalUserId) {
+      userId = internalUserId;
+    } else {
+      if (!token) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+      }
+
+      const supabaseUser = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+      });
+
+      const { data: claimsData, error: claimsError } = await supabaseUser.auth.getClaims(token);
+      if (claimsError || !claimsData?.claims) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+      }
+      userId = claimsData.claims.sub as string;
     }
 
     // Fetch standard record
@@ -188,6 +199,7 @@ serve(async (req) => {
     let rawText: string;
     try {
       rawText = await extractText(fileBytes, LOVABLE_API_KEY);
+      rawText = cleanExtractedText(rawText);
     } catch (e) {
       console.error("Extraction failed:", e);
       await supabaseAdmin.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
@@ -203,7 +215,13 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "No meaningful text found in document." }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Step 3: Store each chunk with processed = false (is_indexed = false, no embedding)
+    // Step 3: Replace old chunks and store each new chunk with processed = false (is_indexed = false, no embedding)
+    await supabaseAdmin
+      .from("standard_chunks")
+      .delete()
+      .eq("standard_id", standard_id)
+      .eq("user_id", userId);
+
     const BATCH_SIZE = 50;
     for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
       const batch = chunks.slice(i, i + BATCH_SIZE);
@@ -220,7 +238,17 @@ serve(async (req) => {
       }));
 
       const { error: insertErr } = await supabaseAdmin.from("standard_chunks").insert(records);
-      if (insertErr) console.error("Chunk insert error:", insertErr);
+      if (insertErr) {
+        console.error("Chunk insert error:", insertErr);
+        await supabaseAdmin
+          .from("standards")
+          .update({ extraction_status: "failed" })
+          .eq("id", standard_id);
+        return new Response(JSON.stringify({ error: "Failed to store extracted chunks" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     // Update standard as complete
