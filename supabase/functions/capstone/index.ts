@@ -406,6 +406,124 @@ Rules:
       return new Response(JSON.stringify({ guide }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // ── EXAM PREP: Generate from uploaded exam or listed topics ──
+    if (action === "exam_prep") {
+      let contextParts: string[] = [];
+
+      if (examPdfText && examPdfText.trim().length > 0) {
+        contextParts.push(`PREVIOUS EXAM CONTENT:\n${examPdfText.slice(0, 15000)}`);
+      }
+
+      if (examTopics && examTopics.trim().length > 0) {
+        contextParts.push(`EXAM TOPICS/AREAS IDENTIFIED BY THE STUDENT:\n${examTopics}`);
+      }
+
+      if (!contextParts.length) throw new Error("Please provide exam content or topics");
+
+      let standardContext = "";
+      let standardTitle = "General Trade Knowledge";
+      if (standardId) {
+        const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 40);
+        if (chunks.length > 0) {
+          standardContext = `\n\nRELEVANT STANDARD CONTENT:\n${chunks.map((c) => `[${c.clause_number || ""}${c.clause_title ? " - " + c.clause_title : ""}] ${c.content}`).join("\n\n")}`;
+        }
+        const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
+        if (standard) standardTitle = standard.standard_code || standard.title;
+      }
+
+      const fullContext = contextParts.join("\n\n") + standardContext;
+
+      const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "google/gemini-3-flash-preview",
+          messages: [
+            {
+              role: "system",
+              content: `You are an expert trade educator helping an apprentice prepare for an exam on "${standardTitle}". 
+The student has provided either a previous exam paper, a list of expected exam topics, or both.
+Your job:
+1. Analyze the exam content/topics to identify the key areas being tested
+2. Generate a focused study guide covering those areas
+3. Generate 10 practice questions in the style of the exam
+
+Rules:
+- If a previous exam is provided, match the question style and difficulty
+- Ground all content in the standard where possible, referencing clause numbers
+- Be apprentice-friendly: clear language, practical examples
+- Focus ONLY on the topics/areas identified`,
+            },
+            {
+              role: "user",
+              content: `Help me prepare for my upcoming exam. Here's what I know about it:\n\n${fullContext}`,
+            },
+          ],
+          tools: [{
+            type: "function",
+            function: {
+              name: "return_exam_prep",
+              description: "Return exam prep materials",
+              parameters: {
+                type: "object",
+                properties: {
+                  identified_topics: { type: "array", items: { type: "string" }, description: "Key topics identified" },
+                  study_guide: { type: "string", description: "Markdown study guide" },
+                  questions: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        question: { type: "string" },
+                        options: { type: "array", items: { type: "string" }, minItems: 4, maxItems: 4 },
+                        correct_answer: { type: "string" },
+                        explanation: { type: "string" },
+                        clause_reference: { type: "string" },
+                        topic: { type: "string" },
+                      },
+                      required: ["question", "options", "correct_answer", "explanation", "clause_reference", "topic"],
+                    },
+                  },
+                },
+                required: ["identified_topics", "study_guide", "questions"],
+                additionalProperties: false,
+              },
+            },
+          }],
+          tool_choice: { type: "function", function: { name: "return_exam_prep" } },
+        }),
+      });
+
+      if (!aiResponse.ok) {
+        const status = aiResponse.status;
+        if (status === 429) return new Response(JSON.stringify({ error: "Rate limited." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        if (status === 402) return new Response(JSON.stringify({ error: "AI credits exhausted." }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        throw new Error("AI generation failed");
+      }
+
+      const aiData = await aiResponse.json();
+      const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
+      if (!toolCall) throw new Error("No exam prep generated");
+      const result = JSON.parse(toolCall.function.arguments);
+
+      const { data: guide } = await supabase.from("capstone_study_guides").insert({
+        user_id: user.id, standard_id: standardId || null,
+        title: `Exam Prep — ${result.identified_topics.slice(0, 3).join(", ")}`,
+        content: result.study_guide, topics: result.identified_topics,
+      }).select().single();
+
+      const qInserts = result.questions.map((q: any) => ({
+        user_id: user.id, standard_id: standardId || null, question: q.question, options: q.options,
+        correct_answer: q.correct_answer, explanation: q.explanation, clause_reference: q.clause_reference,
+        difficulty: "medium", topic: q.topic || null,
+      }));
+      const { data: savedQuestions } = await supabase.from("capstone_questions").insert(qInserts).select();
+
+      return new Response(JSON.stringify({ topics: result.identified_topics, guide, questions: savedQuestions }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     throw new Error(`Unknown action: ${action}`);
   } catch (e) {
     console.error("capstone error:", e);
