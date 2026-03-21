@@ -6,98 +6,90 @@
 
 @layer base {
   :root {
-    /* StandardsAI Brand — Industrial Modern */
     --background: 0 0% 100%;
-    --foreground: 0 0% 16.9%;
+    --foreground: 249 75% 4%;
 
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 16.9%;
+    --card-foreground: 249 75% 4%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 16.9%;
+    --popover-foreground: 249 75% 4%;
 
-    /* Bold Red accent */
-    --primary: 0 72% 50.6%;
+    --primary: 249 75% 4%;
     --primary-foreground: 0 0% 100%;
 
-    /* Light grey surfaces */
-    --secondary: 0 0% 94.9%;
-    --secondary-foreground: 0 0% 16.9%;
+    --secondary: 240 10% 93%;
+    --secondary-foreground: 249 75% 4%;
 
-    --muted: 0 0% 94.9%;
-    --muted-foreground: 0 0% 45%;
+    --muted: 240 10% 93%;
+    --muted-foreground: 240 5% 48%;
 
-    --accent: 0 0% 94.9%;
-    --accent-foreground: 0 0% 16.9%;
+    --accent: 220 13% 92%;
+    --accent-foreground: 249 75% 4%;
 
-    --destructive: 0 84.2% 60.2%;
+    --destructive: 349 80% 47%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 72% 50.6%;
+    --border: 0 0% 90%;
+    --input: 0 0% 0% / 0;
+    --input-background: 240 8% 95%;
+    --switch-background: 220 7% 81%;
+    --ring: 0 0% 55%;
 
     --warning: 38 92% 50%;
     --warning-foreground: 38 92% 20%;
 
-    --radius: 0.75rem;
+    --radius: 0.625rem;
 
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 0 0% 16.9%;
-    --sidebar-primary: 0 72% 50.6%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 0 0% 94.9%;
-    --sidebar-accent-foreground: 0 0% 16.9%;
-    --sidebar-border: 0 0% 89.8%;
-    --sidebar-ring: 0 72% 50.6%;
-
-    /* Custom tokens */
-    --surface-elevated: 0 0% 100%;
-    --charcoal: 0 0% 16.9%;
-    --red-glow: 0 72% 50.6%;
+    --sidebar-background: 0 0% 97%;
+    --sidebar-foreground: 249 75% 4%;
+    --sidebar-primary: 249 75% 4%;
+    --sidebar-primary-foreground: 0 0% 97%;
+    --sidebar-accent: 0 0% 96%;
+    --sidebar-accent-foreground: 0 0% 13%;
+    --sidebar-border: 0 0% 87%;
+    --sidebar-ring: 0 0% 55%;
   }
 
   .dark {
-    --background: 0 0% 7%;
-    --foreground: 0 0% 94.9%;
+    --background: 0 0% 9%;
+    --foreground: 0 0% 98%;
 
-    --card: 0 0% 10%;
-    --card-foreground: 0 0% 94.9%;
+    --card: 0 0% 9%;
+    --card-foreground: 0 0% 98%;
 
-    --popover: 0 0% 10%;
-    --popover-foreground: 0 0% 94.9%;
+    --popover: 0 0% 9%;
+    --popover-foreground: 0 0% 98%;
 
-    --primary: 0 72% 50.6%;
-    --primary-foreground: 0 0% 100%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 13%;
 
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 94.9%;
+    --secondary: 0 0% 18%;
+    --secondary-foreground: 0 0% 98%;
 
-    --muted: 0 0% 14.9%;
+    --muted: 0 0% 18%;
     --muted-foreground: 0 0% 55%;
 
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 94.9%;
+    --accent: 0 0% 18%;
+    --accent-foreground: 0 0% 98%;
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 94.9%;
+    --destructive: 15 60% 30%;
+    --destructive-foreground: 15 70% 55%;
 
     --border: 0 0% 18%;
     --input: 0 0% 18%;
-    --ring: 0 72% 50.6%;
+    --input-background: 0 0% 18%;
+    --switch-background: 0 0% 32%;
+    --ring: 0 0% 32%;
 
-    --sidebar-background: 0 0% 7%;
-    --sidebar-foreground: 0 0% 94.9%;
-    --sidebar-primary: 0 72% 50.6%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 0 0% 14.9%;
-    --sidebar-accent-foreground: 0 0% 94.9%;
+    --sidebar-background: 0 0% 13%;
+    --sidebar-foreground: 0 0% 98%;
+    --sidebar-primary: 249 75% 50%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 0 0% 18%;
+    --sidebar-accent-foreground: 0 0% 98%;
     --sidebar-border: 0 0% 18%;
-    --sidebar-ring: 0 72% 50.6%;
-
-    --surface-elevated: 0 0% 10%;
-    --charcoal: 0 0% 94.9%;
-    --red-glow: 0 72% 50.6%;
+    --sidebar-ring: 0 0% 32%;
   }
 }
 
@@ -115,6 +107,7 @@
 
   h1, h2, h3, h4, h5, h6 {
     font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    font-weight: 500;
   }
 }
 
