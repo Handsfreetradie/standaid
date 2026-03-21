@@ -62,7 +62,6 @@ async function getChunksWithRecovery(
       "Content-Type": "application/json",
       Authorization: `Bearer ${serviceRoleKey}`,
       apikey: serviceRoleKey,
-      "x-internal-auth": serviceRoleKey,
     },
     body: JSON.stringify({ standard_id: standardId, user_id: userId }),
   });
