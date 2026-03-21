@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,52 +6,49 @@
 
 @layer base {
   :root {
-    /* StandAId Brand — Warm cream background with red accent */
-    --background: 0 0% 100%;
-    --foreground: 0 0% 13%;
+    --background: 30 14% 96%;
+    --foreground: 0 0% 12%;
 
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 13%;
+    --card-foreground: 0 0% 12%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 13%;
+    --popover-foreground: 0 0% 12%;
 
-    /* Bold Red accent */
-    --primary: 0 72% 50%;
+    --primary: 0 84% 50%;
     --primary-foreground: 0 0% 100%;
 
-    /* Light warm surfaces */
-    --secondary: 10 30% 95%;
-    --secondary-foreground: 0 0% 13%;
+    --secondary: 30 14% 96%;
+    --secondary-foreground: 0 0% 12%;
 
-    --muted: 10 20% 94%;
-    --muted-foreground: 0 0% 45%;
+    --muted: 240 3% 92%;
+    --muted-foreground: 240 3% 54%;
 
-    --accent: 10 25% 93%;
-    --accent-foreground: 0 0% 13%;
+    --accent: 240 4% 93%;
+    --accent-foreground: 0 0% 12%;
 
     --destructive: 349 80% 47%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 10 15% 90%;
-    --input: 10 15% 90%;
-    --input-background: 10 20% 96%;
-    --switch-background: 10 10% 81%;
-    --ring: 0 72% 50%;
+    --border: 0 0% 0% / 0.06;
+    --input: 0 0% 0% / 0.06;
+    --input-background: 240 4% 96%;
+    --switch-background: 240 3% 83%;
+    --ring: 0 84% 50%;
 
     --warning: 38 92% 50%;
     --warning-foreground: 38 92% 20%;
 
-    --radius: 0.75rem;
+    --radius: 0.625rem;
 
-    --sidebar-background: 10 40% 97%;
-    --sidebar-foreground: 0 0% 13%;
-    --sidebar-primary: 0 72% 50%;
+    --sidebar-background: 30 14% 97%;
+    --sidebar-foreground: 0 0% 12%;
+    --sidebar-primary: 0 84% 50%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 10 25% 93%;
-    --sidebar-accent-foreground: 0 0% 13%;
-    --sidebar-border: 10 15% 90%;
-    --sidebar-ring: 0 72% 50%;
+    --sidebar-accent: 240 4% 93%;
+    --sidebar-accent-foreground: 0 0% 12%;
+    --sidebar-border: 0 0% 0% / 0.06;
+    --sidebar-ring: 0 84% 50%;
   }
 
   .dark {
@@ -64,7 +61,7 @@
     --popover: 0 0% 10%;
     --popover-foreground: 0 0% 95%;
 
-    --primary: 0 72% 50%;
+    --primary: 0 84% 50%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 0 0% 15%;
@@ -79,20 +76,20 @@
     --destructive: 0 63% 31%;
     --destructive-foreground: 0 0% 95%;
 
-    --border: 0 0% 18%;
-    --input: 0 0% 18%;
+    --border: 0 0% 100% / 0.08;
+    --input: 0 0% 100% / 0.08;
     --input-background: 0 0% 15%;
     --switch-background: 0 0% 32%;
-    --ring: 0 72% 50%;
+    --ring: 0 84% 50%;
 
     --sidebar-background: 0 0% 7%;
     --sidebar-foreground: 0 0% 95%;
-    --sidebar-primary: 0 72% 50%;
+    --sidebar-primary: 0 84% 50%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 0 0% 15%;
     --sidebar-accent-foreground: 0 0% 95%;
-    --sidebar-border: 0 0% 18%;
-    --sidebar-ring: 0 72% 50%;
+    --sidebar-border: 0 0% 100% / 0.08;
+    --sidebar-ring: 0 84% 50%;
   }
 }
 
@@ -101,17 +98,71 @@
     @apply border-border;
   }
 
+  html {
+    font-size: 16px;
+  }
+
   body {
-    @apply bg-background text-foreground font-sans antialiased;
+    @apply text-foreground antialiased;
     font-family: 'Inter', system-ui, sans-serif;
+    background: linear-gradient(to right, #FFFFFF, #FFF5F5);
+    min-height: 100vh;
     -webkit-tap-highlight-color: transparent;
     -webkit-font-smoothing: antialiased;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
-    font-weight: 500;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
   }
+
+  h1 { line-height: 1.08; }
+  h2 { line-height: 1.1; }
+  h3 { line-height: 1.12; }
+  h4 { line-height: 1.15; }
+}
+
+/* Noise texture overlay */
+.noise-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.15;
+}
+
+/* Dot grid pattern overlay */
+.dot-grid-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(0,0,0,0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,0,0,0.02) 1px, transparent 1px);
+  background-size: 8px 8px;
+  -webkit-mask-image: linear-gradient(to right, rgba(0,0,0,1), rgba(0,0,0,0));
+  mask-image: linear-gradient(to right, rgba(0,0,0,1), rgba(0,0,0,0));
+}
+
+/* Tag pill component */
+.tag-pill {
+  @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold uppercase;
+  letter-spacing: 0.14em;
+  color: #DC2626;
+  background: rgba(220, 38, 38, 0.03);
+  border: 1px solid rgba(220, 38, 38, 0.125);
+}
+
+/* Section decorative orbs */
+.orb-top {
+  background: radial-gradient(ellipse 70% 55% at 50% -5%, rgba(220, 38, 38, 0.07) 0%, transparent 65%);
+}
+
+.orb-bottom-right {
+  background: radial-gradient(ellipse 50% 50% at 85% 90%, rgba(220, 38, 38, 0.05) 0%, transparent 60%);
 }
 
 /* PWA safe areas */
