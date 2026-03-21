@@ -46,21 +46,25 @@ async function fetchStandardChunks(
 async function getChunksWithRecovery(
   supabase: any,
   standardId: string,
-  authHeader: string,
+  userId: string,
   limit: number,
 ): Promise<StandardChunk[]> {
   let chunks = await fetchStandardChunks(supabase, standardId, limit);
   if (chunks.length > 0) return chunks;
+
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+  if (!serviceRoleKey) return chunks;
 
   const processUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/process-standard`;
   const processResponse = await fetch(processUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: authHeader,
-      apikey: Deno.env.get("SUPABASE_ANON_KEY") || "",
+      Authorization: `Bearer ${serviceRoleKey}`,
+      apikey: serviceRoleKey,
+      "x-internal-auth": serviceRoleKey,
     },
-    body: JSON.stringify({ standard_id: standardId }),
+    body: JSON.stringify({ standard_id: standardId, user_id: userId }),
   });
 
   const processBody = await processResponse.text();
@@ -95,7 +99,7 @@ serve(async (req) => {
 
     // ── GENERATE QUIZ QUESTIONS ──
     if (action === "generate_questions") {
-      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 30);
+      const chunks = await getChunksWithRecovery(supabase, standardId, user.id, 30);
 
       if (!chunks?.length) throw new Error("No content found for this standard");
 
@@ -175,7 +179,7 @@ serve(async (req) => {
     if (action === "analyze_photo") {
       if (!imageBase64) throw new Error("No image provided");
 
-      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 20);
+      const chunks = await getChunksWithRecovery(supabase, standardId, user.id, 20);
 
       if (!chunks?.length) throw new Error("No content found for this standard");
 
@@ -369,7 +373,7 @@ Rules:
 
     // ── GENERATE STUDY GUIDE ──
     if (action === "generate_study_guide") {
-      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 40);
+      const chunks = await getChunksWithRecovery(supabase, standardId, user.id, 40);
       if (!chunks?.length) throw new Error("No content found");
 
       const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
