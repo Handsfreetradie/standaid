@@ -213,7 +213,6 @@ ${chunk.content}`;
     }).join("\n\n---\n\n");
 
     // Confidence assessment
-    const topSimilarity = matchedChunks[0]?.similarity || 0;
     const isLowConfidence = topSimilarity < 0.80;
 
     // Call AI for response generation
