@@ -14,7 +14,7 @@ type StandardChunk = {
 };
 
 async function fetchStandardChunks(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   standardId: string,
   limit: number,
 ): Promise<StandardChunk[]> {
@@ -44,7 +44,7 @@ async function fetchStandardChunks(
 }
 
 async function getChunksWithRecovery(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   standardId: string,
   authHeader: string,
   limit: number,
@@ -291,13 +291,16 @@ Rules:
       if (!explanation) throw new Error("No explanation generated");
 
       // Cache the result
-      await supabase.from("queries").insert({
+      const { error: cacheInsertError } = await supabase.from("queries").insert({
         user_id: user.id,
         question: cacheKey,
         response: explanation,
         confidence_score: 1.0,
         safety_flagged: false,
-      }).catch(() => {});
+      });
+      if (cacheInsertError) {
+        console.warn("Failed to cache explanation:", cacheInsertError.message);
+      }
 
       return new Response(JSON.stringify({ explanation, cached: false }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
