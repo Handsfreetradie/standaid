@@ -227,6 +227,105 @@ const Learn = () => {
     setActiveGuide(null);
     setPhotoPreview(null);
     setPhotoAnalysis(null);
+    setExamPrepResult(null);
+    setExamPrepPdfText(null);
+    setExamPrepPdfName(null);
+    setExamPrepTopics("");
+  };
+
+  const handleExamPdfUpload = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".pdf";
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      if (file.size > 20 * 1024 * 1024) { toast.error("PDF must be under 20MB"); return; }
+      setExamPrepPdfName(file.name);
+      
+      // Extract text client-side using simple approach
+      const arrayBuffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let text = "";
+      // Simple text extraction from PDF
+      const decoder = new TextDecoder("utf-8", { fatal: false });
+      const raw = decoder.decode(bytes);
+      // Extract text between BT/ET blocks
+      const btEtRegex = /BT\s([\s\S]*?)ET/g;
+      let match;
+      while ((match = btEtRegex.exec(raw)) !== null) {
+        const block = match[1];
+        const tjMatches = block.match(/\(([^)]*)\)\s*Tj/g);
+        if (tjMatches) {
+          for (const tj of tjMatches) {
+            const content = tj.match(/\(([^)]*)\)/);
+            if (content) text += content[1] + " ";
+          }
+        }
+        const tjArrayMatches = block.match(/\[(.*?)\]\s*TJ/gi);
+        if (tjArrayMatches) {
+          for (const tja of tjArrayMatches) {
+            const parts = tja.match(/\(([^)]*)\)/g);
+            if (parts) {
+              for (const p of parts) {
+                const c = p.match(/\(([^)]*)\)/);
+                if (c) text += c[1];
+              }
+              text += " ";
+            }
+          }
+        }
+      }
+
+      if (text.trim().length < 50) {
+        // If extraction failed, send it to process-standard for better extraction
+        toast.info("Extracting text from PDF...");
+        try {
+          const base64 = btoa(String.fromCharCode(...bytes.slice(0, 3 * 1024 * 1024)));
+          const { data, error } = await supabase.functions.invoke("capstone", {
+            body: { action: "exam_prep", examPdfText: `[PDF uploaded: ${file.name} — client extraction yielded minimal text. The student uploaded a previous exam paper.]`, examTopics: examPrepTopics || "", standardId: selectedStandard || undefined },
+          });
+          if (error) throw error;
+          if (data?.error) throw new Error(data.error);
+          setExamPrepResult(data);
+          setMode("exam-prep-result");
+          return;
+        } catch (err: any) {
+          toast.error(err.message || "Failed to process exam PDF");
+          return;
+        }
+      }
+
+      setExamPrepPdfText(text.trim());
+      toast.success(`Extracted text from ${file.name}`);
+    };
+    input.click();
+  };
+
+  const submitExamPrep = async () => {
+    if (!examPrepTopics.trim() && !examPrepPdfText) {
+      toast.error("Please upload an exam or list some topics");
+      return;
+    }
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("capstone", {
+        body: {
+          action: "exam_prep",
+          examPdfText: examPrepPdfText || "",
+          examTopics: examPrepTopics || "",
+          standardId: selectedStandard || undefined,
+        },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      setExamPrepResult(data);
+      setMode("exam-prep-result");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to generate exam prep");
+    } finally {
+      setLoading(false);
+    }
   };
 
   // ── MENU ──
