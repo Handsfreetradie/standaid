@@ -47,6 +47,12 @@ const Learn = () => {
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [photoAnalysis, setPhotoAnalysis] = useState<string | null>(null);
 
+  // Exam prep state
+  const [examPrepTopics, setExamPrepTopics] = useState("");
+  const [examPrepPdfText, setExamPrepPdfText] = useState<string | null>(null);
+  const [examPrepPdfName, setExamPrepPdfName] = useState<string | null>(null);
+  const [examPrepResult, setExamPrepResult] = useState<any>(null);
+
   useEffect(() => {
     if (user) loadStandards();
   }, [user]);
