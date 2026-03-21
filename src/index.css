@@ -6,49 +6,52 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 249 75% 4%;
+    /* StandAId Brand — Warm cream background with red accent */
+    --background: 10 60% 97%;
+    --foreground: 0 0% 13%;
 
     --card: 0 0% 100%;
-    --card-foreground: 249 75% 4%;
+    --card-foreground: 0 0% 13%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 249 75% 4%;
+    --popover-foreground: 0 0% 13%;
 
-    --primary: 249 75% 4%;
+    /* Bold Red accent */
+    --primary: 0 72% 50%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 240 10% 93%;
-    --secondary-foreground: 249 75% 4%;
+    /* Light warm surfaces */
+    --secondary: 10 30% 95%;
+    --secondary-foreground: 0 0% 13%;
 
-    --muted: 240 10% 93%;
-    --muted-foreground: 240 5% 48%;
+    --muted: 10 20% 94%;
+    --muted-foreground: 0 0% 45%;
 
-    --accent: 220 13% 92%;
-    --accent-foreground: 249 75% 4%;
+    --accent: 10 25% 93%;
+    --accent-foreground: 0 0% 13%;
 
     --destructive: 349 80% 47%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 0 0% 90%;
-    --input: 0 0% 0% / 0;
-    --input-background: 240 8% 95%;
-    --switch-background: 220 7% 81%;
-    --ring: 0 0% 55%;
+    --border: 10 15% 90%;
+    --input: 10 15% 90%;
+    --input-background: 10 20% 96%;
+    --switch-background: 10 10% 81%;
+    --ring: 0 72% 50%;
 
     --warning: 38 92% 50%;
     --warning-foreground: 38 92% 20%;
 
-    --radius: 0.625rem;
+    --radius: 0.75rem;
 
-    --sidebar-background: 0 0% 97%;
-    --sidebar-foreground: 249 75% 4%;
-    --sidebar-primary: 249 75% 4%;
-    --sidebar-primary-foreground: 0 0% 97%;
-    --sidebar-accent: 0 0% 96%;
+    --sidebar-background: 10 40% 97%;
+    --sidebar-foreground: 0 0% 13%;
+    --sidebar-primary: 0 72% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 10 25% 93%;
     --sidebar-accent-foreground: 0 0% 13%;
-    --sidebar-border: 0 0% 87%;
-    --sidebar-ring: 0 0% 55%;
+    --sidebar-border: 10 15% 90%;
+    --sidebar-ring: 0 72% 50%;
   }
 
   .dark {
