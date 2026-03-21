@@ -129,14 +129,24 @@ serve(async (req) => {
     if (action === "analyze_photo") {
       if (!imageBase64) throw new Error("No image provided");
 
-      const { data: chunks } = await supabase
+      let { data: chunks } = await supabase
         .from("standard_chunks")
         .select("content, clause_number, clause_title")
         .eq("standard_id", standardId)
         .eq("is_indexed", true)
         .limit(20);
 
-      if (!chunks?.length) throw new Error("No indexed content found for this standard");
+      if (!chunks?.length) {
+        const { data: fb } = await supabase
+          .from("standard_chunks")
+          .select("content, clause_number, clause_title")
+          .eq("standard_id", standardId)
+          .order("chunk_index", { ascending: true })
+          .limit(20);
+        chunks = fb;
+      }
+
+      if (!chunks?.length) throw new Error("No content found for this standard");
 
       const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
 
