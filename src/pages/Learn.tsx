@@ -1,15 +1,16 @@
 import { useState, useEffect } from "react";
-import { GraduationCap, BookOpen, ClipboardList, FileText, ChevronRight, Loader2, CheckCircle2, XCircle, ArrowLeft, Trophy, Clock, Camera } from "lucide-react";
+import { GraduationCap, BookOpen, ClipboardList, FileText, ChevronRight, Loader2, CheckCircle2, XCircle, ArrowLeft, Trophy, Clock, Camera, Target, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 
-type Mode = "menu" | "quiz" | "exam" | "exam-active" | "exam-result" | "study-guide" | "study-view" | "photo-analysis";
+type Mode = "menu" | "quiz" | "exam" | "exam-active" | "exam-result" | "study-guide" | "study-view" | "photo-analysis" | "exam-prep" | "exam-prep-result";
 
 interface Question {
   id: string;
@@ -45,6 +46,12 @@ const Learn = () => {
   const [activeGuide, setActiveGuide] = useState<any>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [photoAnalysis, setPhotoAnalysis] = useState<string | null>(null);
+
+  // Exam prep state
+  const [examPrepTopics, setExamPrepTopics] = useState("");
+  const [examPrepPdfText, setExamPrepPdfText] = useState<string | null>(null);
+  const [examPrepPdfName, setExamPrepPdfName] = useState<string | null>(null);
+  const [examPrepResult, setExamPrepResult] = useState<any>(null);
 
   useEffect(() => {
     if (user) loadStandards();
@@ -220,6 +227,105 @@ const Learn = () => {
     setActiveGuide(null);
     setPhotoPreview(null);
     setPhotoAnalysis(null);
+    setExamPrepResult(null);
+    setExamPrepPdfText(null);
+    setExamPrepPdfName(null);
+    setExamPrepTopics("");
+  };
+
+  const handleExamPdfUpload = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".pdf";
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      if (file.size > 20 * 1024 * 1024) { toast.error("PDF must be under 20MB"); return; }
+      setExamPrepPdfName(file.name);
+      
+      // Extract text client-side using simple approach
+      const arrayBuffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let text = "";
+      // Simple text extraction from PDF
+      const decoder = new TextDecoder("utf-8", { fatal: false });
+      const raw = decoder.decode(bytes);
+      // Extract text between BT/ET blocks
+      const btEtRegex = /BT\s([\s\S]*?)ET/g;
+      let match;
+      while ((match = btEtRegex.exec(raw)) !== null) {
+        const block = match[1];
+        const tjMatches = block.match(/\(([^)]*)\)\s*Tj/g);
+        if (tjMatches) {
+          for (const tj of tjMatches) {
+            const content = tj.match(/\(([^)]*)\)/);
+            if (content) text += content[1] + " ";
+          }
+        }
+        const tjArrayMatches = block.match(/\[(.*?)\]\s*TJ/gi);
+        if (tjArrayMatches) {
+          for (const tja of tjArrayMatches) {
+            const parts = tja.match(/\(([^)]*)\)/g);
+            if (parts) {
+              for (const p of parts) {
+                const c = p.match(/\(([^)]*)\)/);
+                if (c) text += c[1];
+              }
+              text += " ";
+            }
+          }
+        }
+      }
+
+      if (text.trim().length < 50) {
+        // If extraction failed, send it to process-standard for better extraction
+        toast.info("Extracting text from PDF...");
+        try {
+          const base64 = btoa(String.fromCharCode(...bytes.slice(0, 3 * 1024 * 1024)));
+          const { data, error } = await supabase.functions.invoke("capstone", {
+            body: { action: "exam_prep", examPdfText: `[PDF uploaded: ${file.name} — client extraction yielded minimal text. The student uploaded a previous exam paper.]`, examTopics: examPrepTopics || "", standardId: selectedStandard || undefined },
+          });
+          if (error) throw error;
+          if (data?.error) throw new Error(data.error);
+          setExamPrepResult(data);
+          setMode("exam-prep-result");
+          return;
+        } catch (err: any) {
+          toast.error(err.message || "Failed to process exam PDF");
+          return;
+        }
+      }
+
+      setExamPrepPdfText(text.trim());
+      toast.success(`Extracted text from ${file.name}`);
+    };
+    input.click();
+  };
+
+  const submitExamPrep = async () => {
+    if (!examPrepTopics.trim() && !examPrepPdfText) {
+      toast.error("Please upload an exam or list some topics");
+      return;
+    }
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("capstone", {
+        body: {
+          action: "exam_prep",
+          examPdfText: examPrepPdfText || "",
+          examTopics: examPrepTopics || "",
+          standardId: selectedStandard || undefined,
+        },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      setExamPrepResult(data);
+      setMode("exam-prep-result");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to generate exam prep");
+    } finally {
+      setLoading(false);
+    }
   };
 
   // ── MENU ──
@@ -315,6 +421,22 @@ const Learn = () => {
               <div className="flex-1">
                 <p className="font-bold text-foreground text-sm">Photo Analysis</p>
                 <p className="text-xs text-muted-foreground">Upload handwritten work for AI hints</p>
+              </div>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </div>
+          </Card>
+
+          <Card
+            className="p-4 cursor-pointer hover:border-primary/50 transition-colors border-primary/20 bg-primary/[0.02]"
+            onClick={() => setMode("exam-prep")}
+          >
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                <Target className="h-5 w-5 text-primary" />
+              </div>
+              <div className="flex-1">
+                <p className="font-bold text-foreground text-sm">Exam Prep</p>
+                <p className="text-xs text-muted-foreground">Upload a past exam or list topics to study</p>
               </div>
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </div>
@@ -569,6 +691,148 @@ const Learn = () => {
             Upload Another Photo
           </Button>
         )}
+      </div>
+    );
+  }
+
+  // ── EXAM PREP INPUT ──
+  if (mode === "exam-prep") {
+    return (
+      <div className="px-5 py-6 pb-24 max-w-md mx-auto">
+        <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
+          <ArrowLeft className="h-4 w-4" /> Back
+        </button>
+
+        <div className="flex items-center gap-3 mb-6">
+          <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
+            <Target className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <h2 className="font-display text-lg font-extrabold text-foreground">Exam Prep</h2>
+            <p className="text-xs text-muted-foreground">Upload a past exam or list what you'll be tested on</p>
+          </div>
+        </div>
+
+        {/* Standard selector (optional) */}
+        <div className="mb-5">
+          <label className="text-sm font-medium text-foreground mb-2 block">Link to a standard (optional)</label>
+          <Select value={selectedStandard} onValueChange={setSelectedStandard}>
+            <SelectTrigger className="h-12">
+              <SelectValue placeholder="Choose a standard..." />
+            </SelectTrigger>
+            <SelectContent>
+              {standards.map((s) => (
+                <SelectItem key={s.id} value={s.id}>
+                  {s.standard_code || s.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Upload past exam */}
+        <Card className="p-4 mb-4">
+          <p className="text-sm font-bold text-foreground mb-2">Upload a Previous Exam</p>
+          <p className="text-xs text-muted-foreground mb-3">Upload a PDF of a past exam paper and the AI will generate study materials matching its style</p>
+          <Button variant="outline" className="w-full h-11" onClick={handleExamPdfUpload}>
+            <Upload className="h-4 w-4 mr-2" />
+            {examPrepPdfName ? examPrepPdfName : "Choose PDF..."}
+          </Button>
+          {examPrepPdfText && (
+            <div className="flex items-center gap-2 mt-2">
+              <CheckCircle2 className="h-4 w-4 text-primary" />
+              <p className="text-xs text-primary font-medium">Text extracted successfully</p>
+            </div>
+          )}
+        </Card>
+
+        {/* List topics */}
+        <Card className="p-4 mb-6">
+          <p className="text-sm font-bold text-foreground mb-2">List Exam Topics</p>
+          <p className="text-xs text-muted-foreground mb-3">Write down the areas you know the exam will cover</p>
+          <Textarea
+            placeholder="e.g.&#10;- Cable sizing for domestic installations&#10;- Earthing and bonding requirements&#10;- Circuit protection and fuse ratings&#10;- Maximum demand calculations"
+            value={examPrepTopics}
+            onChange={(e) => setExamPrepTopics(e.target.value)}
+            className="min-h-[120px] text-sm"
+          />
+        </Card>
+
+        <Button
+          onClick={submitExamPrep}
+          className="w-full h-12 font-bold rounded-xl"
+          disabled={loading || (!examPrepTopics.trim() && !examPrepPdfText)}
+        >
+          {loading ? (
+            <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Generating Exam Prep...</>
+          ) : (
+            "Generate Study Materials & Mock Questions"
+          )}
+        </Button>
+      </div>
+    );
+  }
+
+  // ── EXAM PREP RESULT ──
+  if (mode === "exam-prep-result" && examPrepResult) {
+    return (
+      <div className="px-5 py-6 pb-24 max-w-md mx-auto">
+        <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
+          <ArrowLeft className="h-4 w-4" /> Back
+        </button>
+
+        <div className="flex items-center gap-3 mb-6">
+          <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
+            <CheckCircle2 className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <h2 className="font-display text-lg font-extrabold text-foreground">Exam Prep Ready!</h2>
+            <p className="text-xs text-muted-foreground">Your study materials have been generated</p>
+          </div>
+        </div>
+
+        {/* Identified topics */}
+        {examPrepResult.topics?.length > 0 && (
+          <Card className="p-4 mb-4">
+            <p className="text-sm font-bold text-foreground mb-2">Key Topics Identified</p>
+            <div className="flex flex-wrap gap-2">
+              {examPrepResult.topics.map((t: string, i: number) => (
+                <Badge key={i} className="bg-primary/10 text-primary border-0 text-xs">{t}</Badge>
+              ))}
+            </div>
+          </Card>
+        )}
+
+        {/* Study guide */}
+        {examPrepResult.guide && (
+          <Card className="p-4 mb-4">
+            <p className="text-sm font-bold text-foreground mb-3">📖 Study Guide</p>
+            <div className="prose prose-sm dark:prose-invert max-w-none text-foreground">
+              <ReactMarkdown>{examPrepResult.guide.content}</ReactMarkdown>
+            </div>
+          </Card>
+        )}
+
+        {/* Practice with generated questions */}
+        {examPrepResult.questions?.length > 0 && (
+          <Button
+            className="w-full h-12 font-bold rounded-xl mb-3"
+            onClick={() => {
+              setQuestions(examPrepResult.questions);
+              setCurrentQ(0);
+              setScore({ correct: 0, total: 0 });
+              setSelectedAnswer(null);
+              setAnswered(false);
+              setMode("quiz");
+            }}
+          >
+            Practice {examPrepResult.questions.length} Mock Questions
+          </Button>
+        )}
+
+        <Button variant="outline" onClick={() => setMode("exam-prep")} className="w-full h-11">
+          Prepare for Another Exam
+        </Button>
       </div>
     );
   }
