@@ -18,7 +18,7 @@ const Index = () => {
       <div className="mb-8">
         <div className="flex items-center gap-2 mb-1">
           <Shield className="h-7 w-7 text-primary" />
-          <h1 className="font-display text-2xl font-extrabold tracking-tight text-foreground">
+          <h1 className="font-sans text-2xl font-extrabold tracking-tight text-foreground">
             StandardsAI
           </h1>
         </div>
@@ -57,7 +57,7 @@ const Index = () => {
 
       {/* Recent Activity */}
       <div className="mb-6">
-        <h2 className="font-display text-lg font-bold text-foreground mb-3">
+        <h2 className="font-sans text-lg font-bold text-foreground mb-3">
           Recent Activity
         </h2>
         <div className="space-y-3">

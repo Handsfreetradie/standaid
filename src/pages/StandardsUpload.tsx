@@ -178,7 +178,7 @@ const StandardsUpload = () => {
           <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
             <Upload className="h-8 w-8 text-primary" />
           </div>
-          <h1 className="font-display text-2xl font-extrabold text-foreground mb-2">
+          <h1 className="font-sans text-2xl font-extrabold text-foreground mb-2">
             Upload a Standard
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -223,7 +223,7 @@ const StandardsUpload = () => {
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
 
-        <h2 className="font-display text-xl font-extrabold text-foreground mb-2">Select your document</h2>
+        <h2 className="font-sans text-xl font-extrabold text-foreground mb-2">Select your document</h2>
         <p className="text-sm text-muted-foreground mb-6">PDF or DOCX, up to 50MB.</p>
 
         <input
@@ -257,7 +257,7 @@ const StandardsUpload = () => {
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
 
-        <h2 className="font-display text-xl font-extrabold text-foreground mb-2">Name your document</h2>
+        <h2 className="font-sans text-xl font-extrabold text-foreground mb-2">Name your document</h2>
         <p className="text-sm text-muted-foreground mb-6">
           Give it a recognisable name so you can find it later.
         </p>
@@ -316,7 +316,7 @@ const StandardsUpload = () => {
           <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
             <Loader2 className="h-8 w-8 text-primary animate-spin" />
           </div>
-          <h2 className="font-display text-xl font-extrabold text-foreground mb-2">Processing Document</h2>
+          <h2 className="font-sans text-xl font-extrabold text-foreground mb-2">Processing Document</h2>
           <p className="text-sm text-muted-foreground">{file?.name}</p>
         </div>
 
@@ -359,7 +359,7 @@ const StandardsUpload = () => {
           <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
             <CheckCircle2 className="h-8 w-8 text-primary" />
           </div>
-          <h2 className="font-display text-xl font-extrabold text-foreground mb-2">Upload Complete!</h2>
+          <h2 className="font-sans text-xl font-extrabold text-foreground mb-2">Upload Complete!</h2>
           <p className="text-sm text-muted-foreground">
             Your standard is ready for AI-powered queries.
           </p>

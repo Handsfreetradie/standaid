@@ -136,7 +136,7 @@ const Standards = () => {
     <div className="px-5 py-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="font-display text-2xl font-extrabold tracking-tight text-foreground">
+          <h1 className="font-sans text-2xl font-extrabold tracking-tight text-foreground">
             Standards Library
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
