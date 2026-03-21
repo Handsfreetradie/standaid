@@ -1,15 +1,16 @@
 import { useState, useEffect } from "react";
-import { GraduationCap, BookOpen, ClipboardList, FileText, ChevronRight, Loader2, CheckCircle2, XCircle, ArrowLeft, Trophy, Clock, Camera } from "lucide-react";
+import { GraduationCap, BookOpen, ClipboardList, FileText, ChevronRight, Loader2, CheckCircle2, XCircle, ArrowLeft, Trophy, Clock, Camera, Target, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 
-type Mode = "menu" | "quiz" | "exam" | "exam-active" | "exam-result" | "study-guide" | "study-view" | "photo-analysis";
+type Mode = "menu" | "quiz" | "exam" | "exam-active" | "exam-result" | "study-guide" | "study-view" | "photo-analysis" | "exam-prep" | "exam-prep-result";
 
 interface Question {
   id: string;
