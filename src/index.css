@@ -7,7 +7,7 @@
 @layer base {
   :root {
     /* StandAId Brand — Warm cream background with red accent */
-    --background: 10 60% 97%;
+    --background: 0 0% 100%;
     --foreground: 0 0% 13%;
 
     --card: 0 0% 100%;
