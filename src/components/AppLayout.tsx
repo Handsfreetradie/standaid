@@ -8,7 +8,8 @@ const AppLayout = () => {
       <header className="sticky top-0 z-40 bg-background/95 backdrop-blur-sm border-b border-border px-5 py-3">
         <h1 className="font-display text-[28px] font-extrabold tracking-tight leading-tight">
           <span className="text-foreground">Stand</span>
-          <span className="text-primary">Ai</span>
+          <span className="text-primary">A</span>
+          <span className="text-primary">I</span>
           <span className="text-foreground">d</span>
         </h1>
       </header>
