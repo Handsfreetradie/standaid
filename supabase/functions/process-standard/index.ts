@@ -562,14 +562,93 @@ serve(async (req) => {
       }
     }
 
+    // Update total chunks count
+    await supabaseAdmin
+      .from("standards")
+      .update({ total_chunks: totalChunks })
+      .eq("id", standard_id);
+
+    // Generate embeddings via Lovable AI Gateway
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    if (!LOVABLE_API_KEY) {
+      console.error("LOVABLE_API_KEY not set, skipping embeddings");
+    } else {
+      const EMB_BATCH = 20;
+      let indexedCount = 0;
+
+      // Get all chunk IDs we just inserted
+      const { data: insertedChunks } = await supabaseAdmin
+        .from("standard_chunks")
+        .select("id, content")
+        .eq("standard_id", standard_id)
+        .eq("user_id", userId)
+        .order("chunk_index", { ascending: true });
+
+      if (insertedChunks?.length) {
+        for (let i = 0; i < insertedChunks.length; i += EMB_BATCH) {
+          const batch = insertedChunks.slice(i, i + EMB_BATCH);
+          const texts = batch.map((c: any) => c.content.slice(0, 8000));
+
+          try {
+            const embResponse = await fetch("https://ai.gateway.lovable.dev/v1/embeddings", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${LOVABLE_API_KEY}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                model: "text-embedding-3-small",
+                input: texts,
+              }),
+            });
+
+            if (embResponse.ok) {
+              const embData = await embResponse.json();
+              const embeddings = embData.data as Array<{ embedding: number[]; index: number }>;
+
+              for (const emb of embeddings) {
+                const chunk = batch[emb.index];
+                await supabaseAdmin
+                  .from("standard_chunks")
+                  .update({
+                    embedding: JSON.stringify(emb.embedding),
+                    is_indexed: true,
+                  })
+                  .eq("id", chunk.id);
+                indexedCount++;
+              }
+
+              // Update progress
+              await supabaseAdmin
+                .from("standards")
+                .update({ indexed_chunks: indexedCount })
+                .eq("id", standard_id);
+            } else {
+              console.error("Embedding API error:", embResponse.status, await embResponse.text());
+            }
+          } catch (embErr) {
+            console.error("Embedding batch error:", embErr);
+          }
+        }
+      }
+    }
+
     const qualityScore = rawText.length > 5000 ? 90 : rawText.length > 1000 ? 70 : 40;
+
+    // Get final indexed count
+    const { count: finalIndexed } = await supabaseAdmin
+      .from("standard_chunks")
+      .select("*", { count: "exact", head: true })
+      .eq("standard_id", standard_id)
+      .eq("is_indexed", true);
+
     await supabaseAdmin
       .from("standards")
       .update({
         extraction_status: "complete",
         extraction_quality_score: qualityScore,
         total_chunks: totalChunks,
-        indexed_chunks: 0,
+        indexed_chunks: finalIndexed || 0,
       })
       .eq("id", standard_id);
 
@@ -577,16 +656,8 @@ serve(async (req) => {
       JSON.stringify({
         status: "complete",
         total_chunks: totalChunks,
-        raw_text_length: rawText.length,
+        indexed_chunks: finalIndexed || 0,
         quality_score: qualityScore,
-        chunks: chunks.map((c) => ({
-          chunk_id: c.chunk_index,
-          text: c.text.slice(0, 500) + (c.text.length > 500 ? "…" : ""),
-          char_count: c.text.length,
-          clause_number: c.clause_number,
-          clause_title: c.clause_title,
-          processed: false,
-        })),
       }),
       {
         status: 200,
