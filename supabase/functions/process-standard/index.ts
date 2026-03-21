@@ -42,6 +42,7 @@ function extractTextBasic(fileBytes: Uint8Array): string {
 
 function cleanExtractedText(text: string): string {
   return text
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, " ")
     .replace(/\b(BT|ET|Tj|TJ|Tf|Td|Tm|cm|re|f|W|n|q|Q|rg|RG|gs|Do|CS|cs|SC|sc)\b/g, " ")
     .replace(/\b\d+\.\d+\s+\d+\.\d+\s+\d+\.\d+\s+(rg|RG)\b/g, " ")
     .replace(/\s+/g, " ")
@@ -198,6 +199,7 @@ serve(async (req) => {
     let rawText: string;
     try {
       rawText = await extractText(fileBytes, LOVABLE_API_KEY);
+      rawText = cleanExtractedText(rawText);
     } catch (e) {
       console.error("Extraction failed:", e);
       await supabaseAdmin.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
@@ -213,7 +215,13 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "No meaningful text found in document." }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Step 3: Store each chunk with processed = false (is_indexed = false, no embedding)
+    // Step 3: Replace old chunks and store each new chunk with processed = false (is_indexed = false, no embedding)
+    await supabaseAdmin
+      .from("standard_chunks")
+      .delete()
+      .eq("standard_id", standard_id)
+      .eq("user_id", userId);
+
     const BATCH_SIZE = 50;
     for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
       const batch = chunks.slice(i, i + BATCH_SIZE);
@@ -230,7 +238,17 @@ serve(async (req) => {
       }));
 
       const { error: insertErr } = await supabaseAdmin.from("standard_chunks").insert(records);
-      if (insertErr) console.error("Chunk insert error:", insertErr);
+      if (insertErr) {
+        console.error("Chunk insert error:", insertErr);
+        await supabaseAdmin
+          .from("standards")
+          .update({ extraction_status: "failed" })
+          .eq("id", standard_id);
+        return new Response(JSON.stringify({ error: "Failed to store extracted chunks" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     // Update standard as complete
