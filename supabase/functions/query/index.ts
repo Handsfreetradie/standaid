@@ -96,7 +96,7 @@ serve(async (req) => {
           message: "You've used all 5 free queries today. Upgrade to Pro for unlimited queries.",
           queries_used: 5,
           queries_limit: 5,
-        }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
     }
 
