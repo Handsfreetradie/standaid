@@ -83,6 +83,34 @@ function decodePdfHexString(encoded: string): string {
   return new TextDecoder("latin1").decode(bytes);
 }
 
+function isReadableText(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length < 3) return false;
+  const alphaNumCount = (trimmed.match(/[A-Za-z0-9]/g) || []).length;
+  const ratio = alphaNumCount / Math.max(trimmed.length, 1);
+  return ratio >= 0.4;
+}
+
+function extractLooseReadableStrings(content: string): string[] {
+  const lines: string[] = [];
+
+  const literalRegex = /\(((?:\\.|[^\\)]){2,})\)/g;
+  let litMatch: RegExpExecArray | null;
+  while ((litMatch = literalRegex.exec(content)) !== null) {
+    const text = decodePdfLiteralString(litMatch[1]).replace(/\s+/g, " ").trim();
+    if (isReadableText(text)) lines.push(text);
+  }
+
+  const hexRegex = /<([0-9A-Fa-f\s]{8,})>/g;
+  let hexMatch: RegExpExecArray | null;
+  while ((hexMatch = hexRegex.exec(content)) !== null) {
+    const text = decodePdfHexString(hexMatch[1]).replace(/\s+/g, " ").trim();
+    if (isReadableText(text)) lines.push(text);
+  }
+
+  return lines;
+}
+
 function extractTextLinesFromContent(content: string): string[] {
   const lines: string[] = [];
   const btRegex = /BT([\s\S]*?)ET/g;
@@ -157,7 +185,7 @@ function normalizeExtractedLines(lines: string[]): string[] {
 
 async function extractText(fileBytes: Uint8Array): Promise<string> {
   const raw = bytesToLatin1(fileBytes);
-  const streamRegex = /stream\r?\n([\s\S]*?)\r?\nendstream/g;
+  const streamRegex = /stream[\r\n]+([\s\S]*?)endstream/g;
   const collectedLines: string[] = [];
   const seenLines = new Set<string>();
 
@@ -172,7 +200,7 @@ async function extractText(fileBytes: Uint8Array): Promise<string> {
     const decoded = isFlate ? await tryInflateStreamBytes(streamBytes) : streamBody;
     if (!decoded) continue;
 
-    const lines = extractTextLinesFromContent(decoded);
+    const lines = [...extractTextLinesFromContent(decoded), ...extractLooseReadableStrings(decoded)];
     for (const line of lines) {
       if (!seenLines.has(line)) {
         seenLines.add(line);
@@ -182,7 +210,7 @@ async function extractText(fileBytes: Uint8Array): Promise<string> {
   }
 
   if (collectedLines.length === 0) {
-    const fallbackLines = extractTextLinesFromContent(raw);
+    const fallbackLines = [...extractTextLinesFromContent(raw), ...extractLooseReadableStrings(raw)];
     for (const line of fallbackLines) {
       if (!seenLines.has(line)) {
         seenLines.add(line);
