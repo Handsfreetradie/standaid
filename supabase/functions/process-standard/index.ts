@@ -289,9 +289,6 @@ function parseSectionHeading(line: string): { section: string; title: string | n
   const explicit = line.match(/^section\s+(\d{1,2})\s*[:\-.]?\s*(.*)$/i);
   if (explicit) return { section: explicit[1], title: explicit[2]?.trim() || null };
 
-  const numeric = line.match(/^(\d{1,2})\s+(?!\d+\.)([A-Z][\w\s\-/,()]{3,})$/);
-  if (numeric) return { section: numeric[1], title: numeric[2]?.trim() || null };
-
   return null;
 }
 
@@ -306,7 +303,7 @@ function parseClauseHeading(line: string): { clause: string; title: string | nul
 }
 
 function parseTableHeading(line: string): { tableNumber: string | null; title: string | null } | null {
-  const match = line.match(/^table\s+([A-Za-z]?\d+(?:\.\d+)*)\s*[:\-.]?\s*(.*)$/i);
+  const match = line.match(/^table\s+([A-Za-z]?\d+(?:[-.]\d+)*)\s*[:\-.]?\s*(.*)$/i);
   if (!match) return null;
   return { tableNumber: match[1] || null, title: match[2]?.trim() || null };
 }
