@@ -71,7 +71,7 @@ const Tools = () => {
           <Calculator className="h-5 w-5 text-primary" />
         </div>
         <div>
-          <h1 className="font-display text-xl font-extrabold text-foreground">Trade Tools</h1>
+          <h1 className="font-sans text-xl font-extrabold text-foreground">Trade Tools</h1>
           <p className="text-sm text-muted-foreground">{TOOLS.length} professional calculators</p>
         </div>
       </div>

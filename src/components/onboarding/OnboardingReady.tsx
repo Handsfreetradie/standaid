@@ -53,7 +53,7 @@ const OnboardingReady = ({ firstName, industryCount, onFinish }: Props) => {
           <Check className="h-10 w-10 text-primary" strokeWidth={3} />
         </div>
 
-        <h2 className="font-display text-2xl font-extrabold text-foreground">
+        <h2 className="font-sans text-2xl font-extrabold text-foreground">
           You're ready, {firstName || "mate"}!
         </h2>
         <p className="text-muted-foreground text-sm mt-2">

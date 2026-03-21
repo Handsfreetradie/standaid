@@ -23,7 +23,7 @@ const ToolLayout = ({ title, subtitle, disclaimer, onBack, children, result, onC
       <button onClick={onBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
         <ArrowLeft className="h-4 w-4" /> Back
       </button>
-      <h2 className="font-display text-lg font-extrabold text-foreground mb-1">{title}</h2>
+      <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">{title}</h2>
       <p className="text-xs text-muted-foreground mb-5">{subtitle}</p>
 
       <div className="space-y-4">

@@ -337,7 +337,7 @@ const Learn = () => {
             <GraduationCap className="h-5 w-5 text-primary" />
           </div>
           <div>
-            <h1 className="font-display text-xl font-extrabold text-foreground">Exam Helper</h1>
+            <h1 className="font-sans text-xl font-extrabold text-foreground">Exam Helper</h1>
             <p className="text-sm text-muted-foreground">Study, practice, and ace your exams</p>
           </div>
         </div>
@@ -571,7 +571,7 @@ const Learn = () => {
         <div className={`h-20 w-20 rounded-full mx-auto mb-4 flex items-center justify-center ${passed ? "bg-accent" : "bg-destructive/10"}`}>
           <Trophy className={`h-10 w-10 ${passed ? "text-primary" : "text-destructive"}`} />
         </div>
-        <h2 className="font-display text-2xl font-extrabold text-foreground mb-1">
+        <h2 className="font-sans text-2xl font-extrabold text-foreground mb-1">
           {passed ? "Exam Passed! 🎉" : "Keep Practicing"}
         </h2>
         <p className="text-muted-foreground text-sm mb-6">
@@ -606,7 +606,7 @@ const Learn = () => {
           <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> Back
           </button>
-          <h2 className="font-display text-lg font-extrabold text-foreground">My Study Guides</h2>
+          <h2 className="font-sans text-lg font-extrabold text-foreground">My Study Guides</h2>
         </div>
 
         {!guides.length ? (
@@ -643,7 +643,7 @@ const Learn = () => {
             <ArrowLeft className="h-4 w-4" /> Back
           </button>
         </div>
-        <h2 className="font-display text-lg font-extrabold text-foreground mb-4">{activeGuide.title}</h2>
+        <h2 className="font-sans text-lg font-extrabold text-foreground mb-4">{activeGuide.title}</h2>
         <Card className="p-5">
           <div className="prose prose-sm dark:prose-invert max-w-none text-foreground">
             <ReactMarkdown>{activeGuide.content}</ReactMarkdown>
@@ -660,7 +660,7 @@ const Learn = () => {
         <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
-        <h2 className="font-display text-lg font-extrabold text-foreground mb-4">Photo Analysis</h2>
+        <h2 className="font-sans text-lg font-extrabold text-foreground mb-4">Photo Analysis</h2>
 
         {photoPreview && (
           <Card className="p-2 mb-4 overflow-hidden">
@@ -708,7 +708,7 @@ const Learn = () => {
             <Target className="h-5 w-5 text-primary" />
           </div>
           <div>
-            <h2 className="font-display text-lg font-extrabold text-foreground">Exam Prep</h2>
+            <h2 className="font-sans text-lg font-extrabold text-foreground">Exam Prep</h2>
             <p className="text-xs text-muted-foreground">Upload a past exam or list what you'll be tested on</p>
           </div>
         </div>
@@ -786,7 +786,7 @@ const Learn = () => {
             <CheckCircle2 className="h-5 w-5 text-primary" />
           </div>
           <div>
-            <h2 className="font-display text-lg font-extrabold text-foreground">Exam Prep Ready!</h2>
+            <h2 className="font-sans text-lg font-extrabold text-foreground">Exam Prep Ready!</h2>
             <p className="text-xs text-muted-foreground">Your study materials have been generated</p>
           </div>
         </div>
