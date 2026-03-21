@@ -6,175 +6,18 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-interface Section {
-  heading: string | null;
-  clauseNumber: string | null;
-  lines: string[];
-  pageNumber: number;
-}
+const CHUNK_SIZE = 2000;
+const OVERLAP = 200;
 
-interface Chunk {
-  clause_number: string | null;
-  clause_title: string | null;
-  content: string;
-  page_number: number;
-  chunk_index: number;
-}
+// ── PDF text extraction (regex-based, no AI) ──
 
-// Heading patterns for AU/NZ standards
-const SECTION_HEADING = /^(SECTION\s+\d+|PART\s+\d+|APPENDIX\s+[A-Z])/i;
-const CLAUSE_PATTERN = /^(\d+(?:\.\d+)*)\s+(.*)$/;
-
-// Target ~500 tokens ≈ ~2000 chars
-const TARGET_CHUNK_CHARS = 2000;
-const MAX_CHUNK_CHARS = 2500;
-
-function sortIntoSections(text: string, pages: string[]): Section[] {
-  const lines = text.split("\n");
-  const sections: Section[] = [];
-  let current: Section = { heading: null, clauseNumber: null, lines: [], pageNumber: 1 };
-
-  // Build page offset map
-  let charCount = 0;
-  const pageOffsets: number[] = [];
-  for (const page of pages) {
-    pageOffsets.push(charCount);
-    charCount += page.length;
-  }
-
-  let totalChars = 0;
-
-  for (const line of lines) {
-    totalChars += line.length + 1;
-
-    // Determine current page
-    let currentPage = 1;
-    for (let p = pageOffsets.length - 1; p >= 0; p--) {
-      if (totalChars >= pageOffsets[p]) {
-        currentPage = p + 1;
-        break;
-      }
-    }
-
-    const sectionMatch = line.match(SECTION_HEADING);
-    const clauseMatch = line.match(CLAUSE_PATTERN);
-
-    if (sectionMatch) {
-      // Save previous section
-      if (current.lines.length > 0) sections.push({ ...current });
-      current = { heading: line.trim(), clauseNumber: null, lines: [line], pageNumber: currentPage };
-    } else if (clauseMatch) {
-      // New clause within a section — start sub-section
-      if (current.lines.length > 0) sections.push({ ...current });
-      current = {
-        heading: clauseMatch[2].trim(),
-        clauseNumber: clauseMatch[1],
-        lines: [line],
-        pageNumber: currentPage,
-      };
-    } else {
-      current.lines.push(line);
-    }
-  }
-
-  if (current.lines.length > 0) sections.push(current);
-  return sections;
-}
-
-function chunkSections(sections: Section[]): Chunk[] {
-  const chunks: Chunk[] = [];
-  let chunkIndex = 0;
-
-  for (const section of sections) {
-    const sectionText = section.lines.join("\n").trim();
-    if (sectionText.length < 20) continue;
-
-    if (sectionText.length <= MAX_CHUNK_CHARS) {
-      // Fits in one chunk — keep together
-      chunks.push({
-        clause_number: section.clauseNumber,
-        clause_title: section.heading,
-        content: sectionText,
-        page_number: section.pageNumber,
-        chunk_index: chunkIndex++,
-      });
-    } else {
-      // Split on paragraph boundaries, preserving content exactly
-      const paragraphs = sectionText.split(/\n\s*\n/);
-      let buffer = "";
-
-      for (const para of paragraphs) {
-        if (buffer.length + para.length + 2 > TARGET_CHUNK_CHARS && buffer.length > 0) {
-          chunks.push({
-            clause_number: section.clauseNumber,
-            clause_title: section.heading,
-            content: buffer.trim(),
-            page_number: section.pageNumber,
-            chunk_index: chunkIndex++,
-          });
-          buffer = "";
-        }
-        buffer += (buffer ? "\n\n" : "") + para;
-      }
-
-      if (buffer.trim().length > 20) {
-        chunks.push({
-          clause_number: section.clauseNumber,
-          clause_title: section.heading,
-          content: buffer.trim(),
-          page_number: section.pageNumber,
-          chunk_index: chunkIndex++,
-        });
-      }
-    }
-  }
-
-  // Fallback if nothing was detected
-  if (chunks.length === 0) {
-    const fullText = sections.map((s) => s.lines.join("\n")).join("\n");
-    const paragraphs = fullText.split(/\n\s*\n/);
-    let buffer = "";
-    for (const para of paragraphs) {
-      buffer += para + "\n\n";
-      if (buffer.length > TARGET_CHUNK_CHARS) {
-        chunks.push({
-          clause_number: null,
-          clause_title: null,
-          content: buffer.trim(),
-          page_number: 1,
-          chunk_index: chunkIndex++,
-        });
-        buffer = "";
-      }
-    }
-    if (buffer.trim().length > 20) {
-      chunks.push({ clause_number: null, clause_title: null, content: buffer.trim(), page_number: 1, chunk_index: chunkIndex++ });
-    }
-  }
-
-  return chunks;
-}
-
-async function generateEmbedding(text: string, apiKey: string): Promise<number[]> {
-  const response = await fetch("https://ai.gateway.lovable.dev/v1/embeddings", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "text-embedding-3-small", input: text.slice(0, 8000) }),
-  });
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Embedding API error: ${response.status} ${errText}`);
-  }
-  const data = await response.json();
-  return data.data[0].embedding;
-}
-
-// Basic regex-based extraction
 function extractTextBasic(fileBytes: Uint8Array): string {
   const decoder = new TextDecoder("latin1");
   const rawText = decoder.decode(fileBytes);
 
   const allText: string[] = [];
+
+  // Extract parenthesised text strings
   const textRegex = /\(([^)]*)\)/g;
   let match;
   while ((match = textRegex.exec(rawText)) !== null) {
@@ -184,6 +27,7 @@ function extractTextBasic(fileBytes: Uint8Array): string {
     if (text.trim().length > 0 && !/^[<>{}[\]]+$/.test(text)) allText.push(text);
   }
 
+  // Extract TJ array text
   const tjRegex = /\[([^\]]*)\]\s*TJ/g;
   while ((match = tjRegex.exec(rawText)) !== null) {
     const innerTextRegex = /\(([^)]*)\)/g;
@@ -196,7 +40,6 @@ function extractTextBasic(fileBytes: Uint8Array): string {
   return allText.join(" ").replace(/\s+/g, " ").trim();
 }
 
-// Clean extracted text: remove PDF operator noise before quality check
 function cleanExtractedText(text: string): string {
   return text
     .replace(/\b(BT|ET|Tj|TJ|Tf|Td|Tm|cm|re|f|W|n|q|Q|rg|RG|gs|Do|CS|cs|SC|sc)\b/g, " ")
@@ -205,100 +48,96 @@ function cleanExtractedText(text: string): string {
     .trim();
 }
 
-// AI-based PDF text extraction using Gemini vision (only for small/scanned PDFs)
+// AI-OCR fallback for scanned/image PDFs (< 3MB only)
 async function extractTextWithAI(fileBytes: Uint8Array, apiKey: string): Promise<string> {
-  // Hard cap: refuse AI extraction for files > 3MB to avoid OOM
-  if (fileBytes.length > 3 * 1024 * 1024) {
-    throw new Error("PDF too large for AI extraction");
-  }
+  if (fileBytes.length > 3 * 1024 * 1024) throw new Error("PDF too large for AI extraction");
 
   const binaryStr = Array.from(fileBytes).map(b => String.fromCharCode(b)).join("");
   const base64 = btoa(binaryStr);
 
   const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model: "google/gemini-2.5-flash",
       messages: [
-        {
-          role: "system",
-          content: `You are a precise document text extractor. Extract ALL text from this PDF document EXACTLY as written.
-Rules:
-- Preserve ALL section headings, clause numbers (e.g., 1.1, 1.1.1), and structure
-- Keep paragraph breaks as double newlines
-- Keep tables as readable text
-- Do NOT summarize, paraphrase, or add any content
-- Extract text VERBATIM
-- Include page markers like [PAGE 2], [PAGE 3] etc. between pages`,
-        },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: "Extract ALL text from this PDF document verbatim." },
-            { type: "image_url", image_url: { url: `data:application/pdf;base64,${base64}` } },
-          ],
-        },
+        { role: "system", content: "Extract ALL text from this PDF verbatim. Preserve headings, clause numbers, paragraph breaks. Do NOT summarize." },
+        { role: "user", content: [
+          { type: "text", text: "Extract ALL text from this PDF document verbatim." },
+          { type: "image_url", image_url: { url: `data:application/pdf;base64,${base64}` } },
+        ]},
       ],
       max_tokens: 16000,
     }),
   });
 
-  if (!response.ok) {
-    const errText = await response.text();
-    console.error("AI extraction error:", response.status, errText);
-    throw new Error(`AI extraction failed: ${response.status}`);
-  }
-
+  if (!response.ok) throw new Error(`AI extraction failed: ${response.status}`);
   const data = await response.json();
-  const extractedText = data.choices?.[0]?.message?.content;
-  if (!extractedText || extractedText.length < 50) {
-    throw new Error("AI extraction returned insufficient text");
-  }
-  return extractedText;
+  const text = data.choices?.[0]?.message?.content;
+  if (!text || text.length < 50) throw new Error("AI extraction returned insufficient text");
+  return text;
 }
 
-async function extractTextFromPdf(fileBytes: Uint8Array, apiKey: string): Promise<{ text: string; pages: string[] }> {
-  const basicText = extractTextBasic(fileBytes);
-  console.log(`Basic extraction: ${basicText.length} chars`);
-
-  if (basicText.length > 200) {
-    // Clean PDF operators before quality check
-    const cleaned = cleanExtractedText(basicText);
-    const alphaCount = (cleaned.match(/[a-zA-Z0-9]/g) || []).length;
-    const alphaRatio = cleaned.length > 0 ? alphaCount / cleaned.length : 0;
-    console.log(`Cleaned text: ${cleaned.length} chars, alpha ratio: ${alphaRatio.toFixed(2)}`);
-
-    if (alphaRatio > 0.3 && cleaned.length > 200) {
-      console.log("Basic extraction quality sufficient, skipping AI OCR");
-      return { text: cleaned, pages: [cleaned] };
+function extractText(fileBytes: Uint8Array, apiKey: string): Promise<string> {
+  return (async () => {
+    const basic = extractTextBasic(fileBytes);
+    if (basic.length > 200) {
+      const cleaned = cleanExtractedText(basic);
+      const alphaCount = (cleaned.match(/[a-zA-Z0-9]/g) || []).length;
+      if (cleaned.length > 200 && alphaCount / cleaned.length > 0.3) {
+        console.log(`Regex extraction OK: ${cleaned.length} chars`);
+        return cleaned;
+      }
     }
-  }
-
-  // Only use AI for small PDFs (< 3MB) to avoid OOM
-  console.log("Attempting AI-based OCR extraction...");
-  try {
-    const aiText = await extractTextWithAI(fileBytes, apiKey);
-    console.log(`AI extraction: ${aiText.length} chars`);
-
-    const pageMarkerRegex = /\[PAGE\s+\d+\]/gi;
-    const pages = aiText.split(pageMarkerRegex).filter((p) => p.trim().length > 0);
-
-    return {
-      text: aiText.replace(pageMarkerRegex, "\n\n").trim(),
-      pages: pages.length > 1 ? pages : [aiText],
-    };
-  } catch (aiError) {
-    console.error("AI extraction failed, falling back to basic:", aiError);
-    if (basicText.length > 50) {
-      return { text: basicText, pages: [basicText] };
+    console.log("Falling back to AI-OCR extraction…");
+    try {
+      return await extractTextWithAI(fileBytes, apiKey);
+    } catch {
+      if (basic.length > 50) return cleanExtractedText(basic);
+      throw new Error("Could not extract text from this PDF.");
     }
-    throw new Error("Could not extract text from this PDF.");
-  }
+  })();
 }
+
+// ── Chunking with overlap ──
+
+function chunkText(text: string): { text: string; chunk_index: number }[] {
+  const chunks: { text: string; chunk_index: number }[] = [];
+  let start = 0;
+  let idx = 0;
+
+  while (start < text.length) {
+    let end = Math.min(start + CHUNK_SIZE, text.length);
+
+    // Try to break at a sentence or paragraph boundary
+    if (end < text.length) {
+      const slice = text.slice(start, end);
+      const lastBreak = Math.max(
+        slice.lastIndexOf("\n\n"),
+        slice.lastIndexOf(". "),
+        slice.lastIndexOf(".\n"),
+      );
+      if (lastBreak > CHUNK_SIZE * 0.5) {
+        end = start + lastBreak + 1;
+      }
+    }
+
+    const chunkText = text.slice(start, end).trim();
+    if (chunkText.length > 20) {
+      chunks.push({ text: chunkText, chunk_index: idx++ });
+    }
+
+    // Advance with overlap
+    start = end - OVERLAP;
+    if (start >= text.length) break;
+    // Prevent infinite loop if overlap pushes us back too far
+    if (end >= text.length) break;
+  }
+
+  return chunks;
+}
+
+// ── Main handler ──
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -326,109 +165,93 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "standard_id is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const { data: standard, error: standardError } = await supabaseAdmin
+    // Fetch standard record
+    const { data: standard, error: stdErr } = await supabaseAdmin
       .from("standards").select("*").eq("id", standard_id).eq("user_id", userId).single();
-    if (standardError || !standard) {
+    if (stdErr || !standard) {
       return new Response(JSON.stringify({ error: "Standard not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     await supabaseAdmin.from("standards").update({ extraction_status: "processing" }).eq("id", standard_id);
 
-    const { data: fileData, error: downloadError } = await supabaseAdmin.storage.from("standards").download(standard.file_path!);
-    if (downloadError || !fileData) {
+    // Download PDF from storage
+    const { data: fileData, error: dlErr } = await supabaseAdmin.storage.from("standards").download(standard.file_path!);
+    if (dlErr || !fileData) {
       await supabaseAdmin.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
       return new Response(JSON.stringify({ error: "Failed to download file" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      await supabaseAdmin.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
-      return new Response(JSON.stringify({ error: "API key not configured" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY") || "";
     const fileBytes = new Uint8Array(await fileData.arrayBuffer());
-    let extracted: { text: string; pages: string[] };
+
+    // Step 1: Extract raw text
+    let rawText: string;
     try {
-      extracted = await extractTextFromPdf(fileBytes, LOVABLE_API_KEY);
+      rawText = await extractText(fileBytes, LOVABLE_API_KEY);
     } catch (e) {
-      console.error("Text extraction failed:", e);
+      console.error("Extraction failed:", e);
       await supabaseAdmin.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
-      return new Response(JSON.stringify({ error: "We had trouble reading this PDF. Try a higher quality scan or a digital version." }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Could not extract text from this PDF." }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const qualityScore = extracted.text.length > 500 ? 85 : extracted.text.length > 100 ? 50 : 10;
-    if (qualityScore < 30) {
-      await supabaseAdmin.from("standards").update({ extraction_status: "failed", extraction_quality_score: qualityScore }).eq("id", standard_id);
-      return new Response(JSON.stringify({ error: "Text quality too low. Try a higher quality scan." }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    // Step 2: Chunk with ~2000 char size and 200 char overlap
+    const chunks = chunkText(rawText);
+    const totalChunks = chunks.length;
+
+    if (totalChunks === 0) {
+      await supabaseAdmin.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
+      return new Response(JSON.stringify({ error: "No meaningful text found in document." }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Step 1: Sort into sections by headings
-    const sections = sortIntoSections(extracted.text, extracted.pages);
-    // Step 2: Chunk each section into ~500 token pieces
-    const allChunks = chunkSections(sections);
-    const totalChunks = allChunks.length;
+    // Step 3: Store each chunk with processed = false (is_indexed = false, no embedding)
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+      const batch = chunks.slice(i, i + BATCH_SIZE);
+      const records = batch.map(c => ({
+        standard_id,
+        user_id: userId,
+        content: c.text,
+        chunk_index: c.chunk_index,
+        is_indexed: false,
+        embedding: null,
+        clause_number: null,
+        clause_title: null,
+        page_number: null,
+      }));
 
-    const { data: profile } = await supabaseAdmin.from("profiles").select("subscription_tier").eq("user_id", userId).single();
-    const tier = profile?.subscription_tier || "free";
-    const isPartial = tier === "free";
-    const indexLimit = isPartial ? Math.ceil(totalChunks * 0.25) : totalChunks;
-
-
-
-
-    const BATCH_SIZE = 10;
-    let indexedCount = 0;
-
-    for (let i = 0; i < allChunks.length; i += BATCH_SIZE) {
-      const batch = allChunks.slice(i, i + BATCH_SIZE);
-
-      // Generate embeddings in parallel within each batch
-      const embeddingResults = await Promise.all(
-        batch.map(async (chunk) => {
-          if (chunk.chunk_index >= indexLimit) return null;
-          try {
-            return await generateEmbedding(chunk.content, LOVABLE_API_KEY);
-          } catch (e) {
-            console.error(`Embedding failed for chunk ${chunk.chunk_index}:`, e);
-            return null;
-          }
-        })
-      );
-
-      const chunkRecords = batch.map((chunk, idx) => {
-        const embedding = embeddingResults[idx];
-        const shouldIndex = chunk.chunk_index < indexLimit;
-        if (shouldIndex && embedding) indexedCount++;
-        return {
-          standard_id,
-          user_id: userId,
-          clause_number: chunk.clause_number,
-          clause_title: chunk.clause_title,
-          content: chunk.content,
-          page_number: chunk.page_number,
-          chunk_index: chunk.chunk_index,
-          embedding: embedding ? JSON.stringify(embedding) : null,
-          is_indexed: shouldIndex && embedding !== null,
-        };
-      });
-
-      const { error: chunkError } = await supabaseAdmin.from("standard_chunks").insert(chunkRecords);
-      if (chunkError) console.error("Chunk insert error:", chunkError);
+      const { error: insertErr } = await supabaseAdmin.from("standard_chunks").insert(records);
+      if (insertErr) console.error("Chunk insert error:", insertErr);
     }
 
+    // Update standard as complete
+    const qualityScore = rawText.length > 500 ? 85 : rawText.length > 100 ? 50 : 10;
     await supabaseAdmin.from("standards").update({
       extraction_status: "complete",
       extraction_quality_score: qualityScore,
-      is_partial: isPartial,
       total_chunks: totalChunks,
-      indexed_chunks: indexedCount,
+      indexed_chunks: 0,
     }).eq("id", standard_id);
 
-    return new Response(JSON.stringify({ status: "complete", total_chunks: totalChunks, indexed_chunks: indexedCount, quality_score: qualityScore, is_partial: isPartial }), {
-      status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    // Return chunk array for inspection
+    return new Response(JSON.stringify({
+      status: "complete",
+      total_chunks: totalChunks,
+      raw_text_length: rawText.length,
+      quality_score: qualityScore,
+      chunks: chunks.map(c => ({
+        chunk_id: c.chunk_index,
+        text: c.text.slice(0, 500) + (c.text.length > 500 ? "…" : ""),
+        char_count: c.text.length,
+        processed: false,
+      })),
+    }), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
     console.error("Processing error:", e);
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 });
