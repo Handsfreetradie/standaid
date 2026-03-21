@@ -108,6 +108,11 @@ serve(async (req) => {
       });
     }
 
+    // Try vector search first, fallback to keyword matching
+    let matchedChunks: any[] = [];
+    let topSimilarity = 0;
+    let usedFallback = false;
+
     // Generate query embedding
     const embResponse = await fetch("https://ai.gateway.lovable.dev/v1/embeddings", {
       method: "POST",
@@ -121,37 +126,50 @@ serve(async (req) => {
       }),
     });
 
-    if (!embResponse.ok) {
-      if (embResponse.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded, please try again later." }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    if (embResponse.ok) {
+      const embData = await embResponse.json();
+      const queryEmbedding = embData.data[0].embedding;
+
+      const { data: vectorChunks, error: matchError } = await supabaseAdmin
+        .rpc("match_chunks", {
+          query_embedding: JSON.stringify(queryEmbedding),
+          match_user_id: userId,
+          match_threshold: 0.72,
+          match_count: 8,
         });
+
+      if (!matchError && vectorChunks?.length) {
+        matchedChunks = vectorChunks;
+        topSimilarity = matchedChunks[0]?.similarity || 0;
       }
-      throw new Error(`Embedding API error: ${embResponse.status}`);
     }
 
-    const embData = await embResponse.json();
-    const queryEmbedding = embData.data[0].embedding;
+    // Fallback: keyword-based search on unindexed chunks
+    if (matchedChunks.length === 0) {
+      usedFallback = true;
+      const keywords = question.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
+      
+      // Get all chunks for this user
+      const { data: allChunks } = await supabaseAdmin
+        .from("standard_chunks")
+        .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
+        .eq("user_id", userId)
+        .limit(1000);
 
-    // Vector similarity search
-    const { data: matchedChunks, error: matchError } = await supabaseAdmin
-      .rpc("match_chunks", {
-        query_embedding: JSON.stringify(queryEmbedding),
-        match_user_id: userId,
-        match_threshold: 0.72,
-        match_count: 8,
-      });
-
-    if (matchError) {
-      console.error("Vector search error:", matchError);
-      return new Response(JSON.stringify({ error: "Search failed" }), { 
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } 
-      });
+      if (allChunks?.length) {
+        const scored = allChunks.map((chunk: any) => {
+          const lower = chunk.content.toLowerCase();
+          const score = keywords.reduce((acc: number, kw: string) => acc + (lower.includes(kw) ? 1 : 0), 0);
+          return { ...chunk, similarity: score / keywords.length };
+        });
+        scored.sort((a: any, b: any) => b.similarity - a.similarity);
+        matchedChunks = scored.filter((s: any) => s.similarity > 0).slice(0, 8);
+        topSimilarity = matchedChunks[0]?.similarity || 0;
+      }
     }
 
     // If no relevant chunks found, skip AI
-    if (!matchedChunks || matchedChunks.length === 0) {
-      // Still log the query
+    if (matchedChunks.length === 0) {
       await supabaseAdmin.from("queries").insert({
         user_id: userId,
         question,
@@ -161,7 +179,6 @@ serve(async (req) => {
         subscription_tier_at_time: tier,
       });
 
-      // Increment query count
       if (tier === "free") {
         await supabaseAdmin
           .from("profiles")
