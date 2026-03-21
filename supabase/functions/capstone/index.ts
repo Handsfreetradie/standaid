@@ -7,6 +7,72 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+type StandardChunk = {
+  content: string;
+  clause_number: string | null;
+  clause_title: string | null;
+};
+
+async function fetchStandardChunks(
+  supabase: ReturnType<typeof createClient>,
+  standardId: string,
+  limit: number,
+): Promise<StandardChunk[]> {
+  let { data: chunks, error: indexedError } = await supabase
+    .from("standard_chunks")
+    .select("content, clause_number, clause_title")
+    .eq("standard_id", standardId)
+    .eq("is_indexed", true)
+    .order("chunk_index", { ascending: true })
+    .limit(limit);
+
+  if (indexedError) throw indexedError;
+
+  if (!chunks?.length) {
+    const { data: fallbackChunks, error: fallbackError } = await supabase
+      .from("standard_chunks")
+      .select("content, clause_number, clause_title")
+      .eq("standard_id", standardId)
+      .order("chunk_index", { ascending: true })
+      .limit(limit);
+
+    if (fallbackError) throw fallbackError;
+    chunks = fallbackChunks;
+  }
+
+  return chunks || [];
+}
+
+async function getChunksWithRecovery(
+  supabase: ReturnType<typeof createClient>,
+  standardId: string,
+  authHeader: string,
+  limit: number,
+): Promise<StandardChunk[]> {
+  let chunks = await fetchStandardChunks(supabase, standardId, limit);
+  if (chunks.length > 0) return chunks;
+
+  const processUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/process-standard`;
+  const processResponse = await fetch(processUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: authHeader,
+      apikey: Deno.env.get("SUPABASE_ANON_KEY") || "",
+    },
+    body: JSON.stringify({ standard_id: standardId }),
+  });
+
+  const processBody = await processResponse.text();
+  if (!processResponse.ok) {
+    console.error("process-standard recovery failed:", processResponse.status, processBody);
+    return chunks;
+  }
+
+  chunks = await fetchStandardChunks(supabase, standardId, limit);
+  return chunks;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -29,27 +95,7 @@ serve(async (req) => {
 
     // ── GENERATE QUIZ QUESTIONS ──
     if (action === "generate_questions") {
-      // Try indexed chunks first, fallback to any chunks
-      let { data: chunks, error: chunkErr } = await supabase
-        .from("standard_chunks")
-        .select("content, clause_number, clause_title")
-        .eq("standard_id", standardId)
-        .eq("is_indexed", true)
-        .limit(30);
-
-      if (chunkErr) throw chunkErr;
-      
-      // Fallback: if no indexed chunks, use unindexed ones
-      if (!chunks?.length) {
-        const { data: fallbackChunks, error: fbErr } = await supabase
-          .from("standard_chunks")
-          .select("content, clause_number, clause_title")
-          .eq("standard_id", standardId)
-          .order("chunk_index", { ascending: true })
-          .limit(30);
-        if (fbErr) throw fbErr;
-        chunks = fallbackChunks;
-      }
+      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 30);
 
       if (!chunks?.length) throw new Error("No content found for this standard");
 
@@ -129,22 +175,7 @@ serve(async (req) => {
     if (action === "analyze_photo") {
       if (!imageBase64) throw new Error("No image provided");
 
-      let { data: chunks } = await supabase
-        .from("standard_chunks")
-        .select("content, clause_number, clause_title")
-        .eq("standard_id", standardId)
-        .eq("is_indexed", true)
-        .limit(20);
-
-      if (!chunks?.length) {
-        const { data: fb } = await supabase
-          .from("standard_chunks")
-          .select("content, clause_number, clause_title")
-          .eq("standard_id", standardId)
-          .order("chunk_index", { ascending: true })
-          .limit(20);
-        chunks = fb;
-      }
+      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 20);
 
       if (!chunks?.length) throw new Error("No content found for this standard");
 
@@ -335,15 +366,7 @@ Rules:
 
     // ── GENERATE STUDY GUIDE ──
     if (action === "generate_study_guide") {
-      let { data: chunks } = await supabase
-        .from("standard_chunks").select("content, clause_number, clause_title")
-        .eq("standard_id", standardId).eq("is_indexed", true).limit(40);
-      if (!chunks?.length) {
-        const { data: fb } = await supabase
-          .from("standard_chunks").select("content, clause_number, clause_title")
-          .eq("standard_id", standardId).order("chunk_index", { ascending: true }).limit(40);
-        chunks = fb;
-      }
+      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 40);
       if (!chunks?.length) throw new Error("No content found");
 
       const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
