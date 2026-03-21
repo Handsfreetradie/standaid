@@ -29,7 +29,8 @@ serve(async (req) => {
 
     // ── GENERATE QUIZ QUESTIONS ──
     if (action === "generate_questions") {
-      const { data: chunks, error: chunkErr } = await supabase
+      // Try indexed chunks first, fallback to any chunks
+      let { data: chunks, error: chunkErr } = await supabase
         .from("standard_chunks")
         .select("content, clause_number, clause_title")
         .eq("standard_id", standardId)
@@ -37,7 +38,20 @@ serve(async (req) => {
         .limit(30);
 
       if (chunkErr) throw chunkErr;
-      if (!chunks?.length) throw new Error("No indexed content found for this standard");
+      
+      // Fallback: if no indexed chunks, use unindexed ones
+      if (!chunks?.length) {
+        const { data: fallbackChunks, error: fbErr } = await supabase
+          .from("standard_chunks")
+          .select("content, clause_number, clause_title")
+          .eq("standard_id", standardId)
+          .order("chunk_index", { ascending: true })
+          .limit(30);
+        if (fbErr) throw fbErr;
+        chunks = fallbackChunks;
+      }
+
+      if (!chunks?.length) throw new Error("No content found for this standard");
 
       const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
 
