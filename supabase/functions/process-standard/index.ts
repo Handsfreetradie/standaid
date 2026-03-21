@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getDocument } from "npm:pdfjs-dist@4.10.38/legacy/build/pdf.mjs";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -175,15 +176,72 @@ function normalizeExtractedLines(lines: string[]): string[] {
 
     const alphaNumCount = (normalized.match(/[A-Za-z0-9]/g) || []).length;
     const ratio = alphaNumCount / Math.max(normalized.length, 1);
+    const highByteCount = (normalized.match(/[^\x20-\x7E]/g) || []).length;
+    const highByteRatio = highByteCount / Math.max(normalized.length, 1);
 
     if (normalized.length > 20 && ratio < 0.25) continue;
+    if (normalized.length > 20 && highByteRatio > 0.08) continue;
     cleaned.push(normalized);
   }
 
   return cleaned;
 }
 
+function hasAcceptableReadableRatio(lines: string[]): boolean {
+  const text = lines.join("\n");
+  if (!text.trim()) return false;
+  const readableChars = (text.match(/[A-Za-z0-9\s.,:;()\[\]{}%\-\/+'"]/g) || []).length;
+  const ratio = readableChars / Math.max(text.length, 1);
+  return ratio >= 0.72;
+}
+
+async function extractTextWithPdfJs(fileBytes: Uint8Array): Promise<string> {
+  const loadingTask = getDocument({
+    data: fileBytes,
+    useWorkerFetch: false,
+    disableFontFace: true,
+    isEvalSupported: false,
+  });
+
+  const pdf = await loadingTask.promise;
+  const lines: string[] = [];
+
+  for (let pageNo = 1; pageNo <= pdf.numPages; pageNo++) {
+    const page = await pdf.getPage(pageNo);
+    const textContent = await page.getTextContent();
+    const items = textContent.items as Array<{ str?: string; hasEOL?: boolean }>;
+
+    let currentLine: string[] = [];
+    for (const item of items) {
+      const value = item.str?.trim();
+      if (value) currentLine.push(value);
+      if (item.hasEOL && currentLine.length) {
+        lines.push(currentLine.join(" "));
+        currentLine = [];
+      }
+    }
+
+    if (currentLine.length) lines.push(currentLine.join(" "));
+  }
+
+  await pdf.destroy();
+
+  const normalizedLines = normalizeExtractedLines(lines);
+  if (!normalizedLines.length || !hasAcceptableReadableRatio(normalizedLines)) {
+    throw new Error("pdf.js extraction returned low-quality text");
+  }
+
+  return normalizedLines.join("\n");
+}
+
 async function extractText(fileBytes: Uint8Array): Promise<string> {
+  try {
+    const fromPdfJs = await extractTextWithPdfJs(fileBytes);
+    if (fromPdfJs.length > 200) return fromPdfJs;
+  } catch (e) {
+    console.warn("pdf.js extraction failed, using stream parser fallback:", e);
+  }
+
   const raw = bytesToLatin1(fileBytes);
   const streamRegex = /stream[\r\n]+([\s\S]*?)endstream/g;
   const collectedLines: string[] = [];
@@ -220,7 +278,7 @@ async function extractText(fileBytes: Uint8Array): Promise<string> {
   }
 
   const normalizedLines = normalizeExtractedLines(collectedLines);
-  if (!normalizedLines.length) {
+  if (!normalizedLines.length || !hasAcceptableReadableRatio(normalizedLines)) {
     throw new Error("Could not extract readable text from this PDF.");
   }
 
