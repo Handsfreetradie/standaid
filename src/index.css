@@ -6,7 +6,7 @@
 
 @layer base {
   :root {
-    --background: 30 14% 96%;
+    --background: 0 0% 100%;
     --foreground: 0 0% 12%;
 
     --card: 0 0% 100%;
@@ -105,7 +105,7 @@
   body {
     @apply text-foreground antialiased;
     font-family: 'Inter', system-ui, sans-serif;
-    background: linear-gradient(to right, #FFFFFF, #FFF5F5);
+    background: linear-gradient(to right, #FFFFFF, #FFE8E8);
     min-height: 100vh;
     -webkit-tap-highlight-color: transparent;
     -webkit-font-smoothing: antialiased;
