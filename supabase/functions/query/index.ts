@@ -78,27 +78,8 @@ serve(async (req) => {
 
     const tier = profile?.subscription_tier || "free";
 
-    // Check daily query limit for free tier
-    if (tier === "free") {
-      const resetAt = new Date(profile?.daily_query_reset_at || 0);
-      const now = new Date();
-      
-      // Reset counter if it's a new day
-      if (now.toDateString() !== resetAt.toDateString()) {
-        await supabaseAdmin
-          .from("profiles")
-          .update({ daily_query_count: 0, daily_query_reset_at: now.toISOString() })
-          .eq("user_id", userId);
-      } else if ((profile?.daily_query_count || 0) >= 5) {
-        return new Response(JSON.stringify({ 
-          error: "Daily query limit reached",
-          upgrade_required: true,
-          message: "You've used all 5 free queries today. Upgrade to Pro for unlimited queries.",
-          queries_used: 5,
-          queries_limit: 5,
-        }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-    }
+    // BETA MODE: All limits disabled for testing
+    // TODO: Re-enable tier limits before production launch
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
