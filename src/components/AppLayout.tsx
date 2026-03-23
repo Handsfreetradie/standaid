@@ -14,7 +14,7 @@ const AppLayout = () => {
   }, []);
 
   return (
-    <div className="min-h-screen relative">
+    <div className="min-h-screen relative" style={{ background: 'linear-gradient(to right, #FFFFFF, #FFE8E8)' }}>
       {/* SVG Noise texture overlay */}
       <svg className="noise-overlay" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
         <filter id="noise">
