@@ -24,7 +24,7 @@ const BottomNav = () => {
               key={path}
               onClick={() => navigate(path)}
               className={cn(
-                "flex flex-col items-center gap-0.5 px-4 py-1.5 text-xs font-medium transition-colors min-w-[64px] min-h-[44px] justify-center",
+                "flex flex-col items-center gap-0.5 px-3 py-1.5 text-xs font-medium transition-colors min-w-[56px] min-h-[44px] justify-center flex-1",
                 isActive
                   ? "text-primary"
                   : "text-muted-foreground hover:text-foreground"
