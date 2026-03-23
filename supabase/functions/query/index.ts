@@ -1,10 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+const ALLOWED_ORIGINS = (Deno.env.get("ALLOWED_ORIGIN") || "http://localhost:8080")
+  .split(",").map((o: string) => o.trim());
 
 const SYSTEM_PROMPT = `You are a trade compliance assistant for the StandardsAI app.
 You answer questions using ONLY the clause text provided below.
@@ -37,6 +35,11 @@ STRICT RULES:
 6. Always respond with valid JSON only. No markdown, no extra text.`;
 
 serve(async (req) => {
+  const origin = req.headers.get("Origin") || "";
+  const corsHeaders = {
+    "Access-Control-Allow-Origin": ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  };
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
@@ -51,27 +54,26 @@ serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } }
     );
 
-    const supabaseAdmin = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
-
-    const token = authHeader.replace("Bearer ", "");
-    const { data: claimsData, error: claimsError } = await supabase.auth.getClaims(token);
-    if (claimsError || !claimsData?.claims) {
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
     }
-    const userId = claimsData.claims.sub as string;
+    const userId = user.id;
 
     const { question } = await req.json();
     if (!question || typeof question !== "string" || question.trim().length === 0) {
-      return new Response(JSON.stringify({ error: "Question is required" }), { 
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } 
+      return new Response(JSON.stringify({ error: "Question is required" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
+    if (question.length > 2000) {
+      return new Response(JSON.stringify({ error: "Question must be 2,000 characters or less" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     // Get user profile for tier and query limits
-    const { data: profile } = await supabaseAdmin
+    const { data: profile } = await supabase
       .from("profiles")
       .select("*")
       .eq("user_id", userId)
@@ -86,7 +88,7 @@ serve(async (req) => {
       
       // Reset counter if it's a new day
       if (now.toDateString() !== resetAt.toDateString()) {
-        await supabaseAdmin
+        await supabase
           .from("profiles")
           .update({ daily_query_count: 0, daily_query_reset_at: now.toISOString() })
           .eq("user_id", userId);
@@ -103,8 +105,8 @@ serve(async (req) => {
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
-      return new Response(JSON.stringify({ error: "API key not configured" }), { 
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } 
+      return new Response(JSON.stringify({ error: "Service unavailable" }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
@@ -134,7 +136,7 @@ serve(async (req) => {
     const queryEmbedding = embData.data[0].embedding;
 
     // Vector similarity search
-    const { data: matchedChunks, error: matchError } = await supabaseAdmin
+    const { data: matchedChunks, error: matchError } = await supabase
       .rpc("match_chunks", {
         query_embedding: JSON.stringify(queryEmbedding),
         match_user_id: userId,
@@ -152,7 +154,7 @@ serve(async (req) => {
     // If no relevant chunks found, skip AI
     if (!matchedChunks || matchedChunks.length === 0) {
       // Still log the query
-      await supabaseAdmin.from("queries").insert({
+      await supabase.from("queries").insert({
         user_id: userId,
         question,
         response: "I couldn't find relevant information in your uploaded standards for this question. Please check your standards library or consult the relevant standard directly.",
@@ -163,7 +165,7 @@ serve(async (req) => {
 
       // Increment query count
       if (tier === "free") {
-        await supabaseAdmin
+        await supabase
           .from("profiles")
           .update({ daily_query_count: (profile?.daily_query_count || 0) + 1 })
           .eq("user_id", userId);
@@ -181,7 +183,7 @@ serve(async (req) => {
 
     // Get standard details for context
     const standardIds = [...new Set(matchedChunks.map((c: any) => c.standard_id))];
-    const { data: standards } = await supabaseAdmin
+    const { data: standards } = await supabase
       .from("standards")
       .select("id, standard_code, version, title")
       .in("id", standardIds);
@@ -271,7 +273,7 @@ ${chunk.content}`;
     }
 
     // Store query and citations
-    const { data: queryRecord } = await supabaseAdmin
+    const { data: queryRecord } = await supabase
       .from("queries")
       .insert({
         user_id: userId,
@@ -303,12 +305,12 @@ ${chunk.content}`;
         };
       });
 
-      await supabaseAdmin.from("citations").insert(citationRecords);
+      await supabase.from("citations").insert(citationRecords);
     }
 
     // Increment query count for free tier
     if (tier === "free") {
-      await supabaseAdmin
+      await supabase
         .from("profiles")
         .update({ daily_query_count: (profile?.daily_query_count || 0) + 1 })
         .eq("user_id", userId);

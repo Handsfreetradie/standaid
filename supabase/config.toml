@@ -1,19 +1,19 @@
-project_id = "lzvvnmhbyyxsukywjhin"
+project_id = "wyxeqkgpwkcckyntqcns"
 
 [functions.process-standard]
-verify_jwt = false
+verify_jwt = true
 
 [functions.query]
-verify_jwt = false
+verify_jwt = true
 
 [functions.upload-standard]
-verify_jwt = false
+verify_jwt = true
 
 [functions.capstone]
-verify_jwt = false
+verify_jwt = true
 
 [functions.chunk-test]
-verify_jwt = false
+verify_jwt = true
 
 [functions.query-test]
-verify_jwt = false
+verify_jwt = true

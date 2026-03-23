@@ -31,6 +31,16 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) return null;
   if (!user) return <Navigate to="/auth" replace />;
+  if (!user.email_confirmed_at) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center px-5 bg-background text-center">
+        <h2 className="font-display text-xl font-bold text-foreground mb-2">Confirm your email</h2>
+        <p className="text-sm text-muted-foreground max-w-xs">
+          We sent a confirmation link to <strong>{user.email}</strong>. Check your inbox and click the link to activate your account.
+        </p>
+      </div>
+    );
+  }
   return <>{children}</>;
 }
 

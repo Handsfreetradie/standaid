@@ -1,10 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+const ALLOWED_ORIGINS = (Deno.env.get("ALLOWED_ORIGIN") || "http://localhost:8080")
+  .split(",").map((o: string) => o.trim());
 
 interface Section {
   heading: string | null;
@@ -272,10 +270,11 @@ async function extractTextFromPdf(fileBytes: Uint8Array, apiKey: string): Promis
     const alphaRatio = cleaned.length > 0 ? alphaCount / cleaned.length : 0;
     console.log(`Cleaned text: ${cleaned.length} chars, alpha ratio: ${alphaRatio.toFixed(2)}`);
 
-    if (alphaRatio > 0.3 && cleaned.length > 200) {
+    if (alphaRatio > 0.8 && cleaned.length > 500 && /section|clause|standard|rule/i.test(cleaned)) {
       console.log("Basic extraction quality sufficient, skipping AI OCR");
       return { text: cleaned, pages: [cleaned] };
     }
+    console.log(`Basic extraction quality insufficient (ratio: ${alphaRatio.toFixed(2)}, length: ${cleaned.length}), falling back to AI OCR`);
   }
 
   // Only use AI for small PDFs (< 3MB) to avoid OOM
@@ -301,6 +300,11 @@ async function extractTextFromPdf(fileBytes: Uint8Array, apiKey: string): Promis
 }
 
 serve(async (req) => {
+  const origin = req.headers.get("Origin") || "";
+  const corsHeaders = {
+    "Access-Control-Allow-Origin": ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  };
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
@@ -309,41 +313,39 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
     }
 
-    const supabaseAdmin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const supabaseUser = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
       global: { headers: { Authorization: authHeader } },
     });
 
-    const token = authHeader.replace("Bearer ", "");
-    const { data: claimsData, error: claimsError } = await supabaseUser.auth.getClaims(token);
-    if (claimsError || !claimsData?.claims) {
+    const { data: { user }, error: userError } = await supabaseUser.auth.getUser();
+    if (userError || !user) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
     }
-    const userId = claimsData.claims.sub as string;
+    const userId = user.id;
 
     const { standard_id } = await req.json();
     if (!standard_id) {
       return new Response(JSON.stringify({ error: "standard_id is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const { data: standard, error: standardError } = await supabaseAdmin
+    const { data: standard, error: standardError } = await supabaseUser
       .from("standards").select("*").eq("id", standard_id).eq("user_id", userId).single();
     if (standardError || !standard) {
       return new Response(JSON.stringify({ error: "Standard not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    await supabaseAdmin.from("standards").update({ extraction_status: "processing" }).eq("id", standard_id);
+    await supabaseUser.from("standards").update({ extraction_status: "processing" }).eq("id", standard_id);
 
-    const { data: fileData, error: downloadError } = await supabaseAdmin.storage.from("standards").download(standard.file_path!);
+    const { data: fileData, error: downloadError } = await supabaseUser.storage.from("standards").download(standard.file_path!);
     if (downloadError || !fileData) {
-      await supabaseAdmin.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
+      await supabaseUser.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
       return new Response(JSON.stringify({ error: "Failed to download file" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
-      await supabaseAdmin.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
-      return new Response(JSON.stringify({ error: "API key not configured" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      await supabaseUser.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
+      return new Response(JSON.stringify({ error: "Service unavailable" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     const fileBytes = new Uint8Array(await fileData.arrayBuffer());
@@ -352,14 +354,14 @@ serve(async (req) => {
       extracted = await extractTextFromPdf(fileBytes, LOVABLE_API_KEY);
     } catch (e) {
       console.error("Text extraction failed:", e);
-      await supabaseAdmin.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
+      await supabaseUser.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
       return new Response(JSON.stringify({ error: "We had trouble reading this PDF. Try a higher quality scan or a digital version." }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const qualityScore = extracted.text.length > 500 ? 85 : extracted.text.length > 100 ? 50 : 10;
-    if (qualityScore < 30) {
-      await supabaseAdmin.from("standards").update({ extraction_status: "failed", extraction_quality_score: qualityScore }).eq("id", standard_id);
-      return new Response(JSON.stringify({ error: "Text quality too low. Try a higher quality scan." }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const qualityScore = extracted.text.length > 2000 ? 95 : extracted.text.length > 500 ? 80 : 50;
+    if (qualityScore < 40 && extracted.text.length < 100) {
+      await supabaseUser.from("standards").update({ extraction_status: "failed", extraction_quality_score: qualityScore }).eq("id", standard_id);
+      return new Response(JSON.stringify({ error: "Text quality too low. Try a digital PDF instead of a scan." }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // Step 1: Sort into sections by headings
@@ -368,10 +370,10 @@ serve(async (req) => {
     const allChunks = chunkSections(sections);
     const totalChunks = allChunks.length;
 
-    const { data: profile } = await supabaseAdmin.from("profiles").select("subscription_tier").eq("user_id", userId).single();
+    const { data: profile } = await supabaseUser.from("profiles").select("subscription_tier").eq("user_id", userId).single();
     const tier = profile?.subscription_tier || "free";
     const isPartial = tier === "free";
-    const indexLimit = isPartial ? Math.ceil(totalChunks * 0.25) : totalChunks;
+    const indexLimit = isPartial ? Math.max(1, Math.ceil(totalChunks * 0.25)) : totalChunks;
 
 
 
@@ -412,11 +414,11 @@ serve(async (req) => {
         };
       });
 
-      const { error: chunkError } = await supabaseAdmin.from("standard_chunks").insert(chunkRecords);
+      const { error: chunkError } = await supabaseUser.from("standard_chunks").insert(chunkRecords);
       if (chunkError) console.error("Chunk insert error:", chunkError);
     }
 
-    await supabaseAdmin.from("standards").update({
+    await supabaseUser.from("standards").update({
       extraction_status: "complete",
       extraction_quality_score: qualityScore,
       is_partial: isPartial,

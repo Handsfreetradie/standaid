@@ -48,9 +48,8 @@ const StandardsUpload = () => {
     const selected = e.target.files?.[0];
     if (!selected) return;
 
-    const validTypes = ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
-    if (!validTypes.includes(selected.type)) {
-      toast.error("Only PDF and DOCX files are supported");
+    if (selected.type !== "application/pdf") {
+      toast.error("Only PDF files are supported");
       return;
     }
     if (selected.size > 50 * 1024 * 1024) {
@@ -60,7 +59,7 @@ const StandardsUpload = () => {
 
     setFile(selected);
     // Pre-fill name from filename
-    const name = selected.name.replace(/\.(pdf|docx)$/i, "").replace(/[_-]/g, " ");
+    const name = selected.name.replace(/\.pdf$/i, "").replace(/[_-]/g, " ");
     setDocName(name);
     setStep("naming");
   };
@@ -206,7 +205,7 @@ const StandardsUpload = () => {
 
         <Button className="w-full h-12 font-bold rounded-xl gap-2" onClick={() => setStep("upload")}>
           <Upload className="h-4 w-4" />
-          Upload PDF or DOCX
+          Upload PDF
         </Button>
       </div>
     );
@@ -224,12 +223,12 @@ const StandardsUpload = () => {
         </button>
 
         <h2 className="font-display text-xl font-extrabold text-foreground mb-2">Select your document</h2>
-        <p className="text-sm text-muted-foreground mb-6">PDF or DOCX, up to 50MB.</p>
+        <p className="text-sm text-muted-foreground mb-6">PDF only, up to 50MB.</p>
 
         <input
           ref={fileRef}
           type="file"
-          accept=".pdf,.docx"
+          accept=".pdf"
           className="hidden"
           onChange={handleFileSelect}
         />
@@ -240,7 +239,7 @@ const StandardsUpload = () => {
         >
           <FileText className="h-10 w-10 text-muted-foreground/40 mb-3" />
           <p className="text-sm font-semibold text-foreground mb-1">Tap to select a file</p>
-          <p className="text-xs text-muted-foreground">PDF or DOCX</p>
+          <p className="text-xs text-muted-foreground">PDF only</p>
         </Card>
       </div>
     );
