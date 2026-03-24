@@ -29,6 +29,23 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
+    // ── RATE LIMIT: 20 AI calls per hour per user (applies to AI actions only) ──
+    const AI_ACTIONS = ["generate_questions", "analyze_photo", "explain_chunk", "generate_study_guide"];
+    if (AI_ACTIONS.includes(action)) {
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const { count: usageCount } = await supabase
+        .from("capstone_usage")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .gte("created_at", oneHourAgo);
+
+      if ((usageCount || 0) >= 20) {
+        return new Response(JSON.stringify({
+          error: "Hourly limit reached. You can make 20 AI requests per hour. Please try again later.",
+        }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
+
     // ── GENERATE QUIZ QUESTIONS ──
     if (action === "generate_questions") {
       const { data: chunks, error: chunkErr } = await supabase
@@ -110,6 +127,7 @@ serve(async (req) => {
       const { data: saved, error: saveErr } = await supabase.from("capstone_questions").insert(inserts).select();
       if (saveErr) throw saveErr;
 
+      await supabase.from("capstone_usage").insert({ user_id: user.id }).catch(() => {});
       return new Response(JSON.stringify({ questions: saved }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -173,6 +191,7 @@ Rules:
       const analysis = aiData.choices?.[0]?.message?.content;
       if (!analysis) throw new Error("No analysis generated");
 
+      await supabase.from("capstone_usage").insert({ user_id: user.id }).catch(() => {});
       return new Response(JSON.stringify({ analysis }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -246,6 +265,7 @@ Rules:
         safety_flagged: false,
       }).catch(() => {});
 
+      await supabase.from("capstone_usage").insert({ user_id: user.id }).catch(() => {});
       return new Response(JSON.stringify({ explanation, cached: false }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -349,6 +369,7 @@ Rules:
       }).select().single();
       if (guideErr) throw guideErr;
 
+      await supabase.from("capstone_usage").insert({ user_id: user.id }).catch(() => {});
       return new Response(JSON.stringify({ guide }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 

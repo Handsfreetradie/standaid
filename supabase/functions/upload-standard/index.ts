@@ -67,10 +67,18 @@ serve(async (req) => {
       });
     }
 
-    // Validate PDF
+    // Validate PDF — check MIME type first, then verify magic bytes (%PDF)
     if (file.type !== "application/pdf") {
-      return new Response(JSON.stringify({ error: "Only PDF files are accepted" }), { 
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } 
+      return new Response(JSON.stringify({ error: "Only PDF files are accepted" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
+
+    const fileBuffer = await file.arrayBuffer();
+    const magic = new Uint8Array(fileBuffer.slice(0, 4));
+    if (magic[0] !== 0x25 || magic[1] !== 0x50 || magic[2] !== 0x44 || magic[3] !== 0x46) {
+      return new Response(JSON.stringify({ error: "Invalid file format. Only PDF files are accepted." }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
@@ -106,7 +114,7 @@ serve(async (req) => {
     const filePath = `${userId}/${standard.id}.pdf`;
     const { error: uploadError } = await supabase.storage
       .from("standards")
-      .upload(filePath, file, { contentType: "application/pdf" });
+      .upload(filePath, fileBuffer, { contentType: "application/pdf" });
 
     if (uploadError) {
       console.error("Upload error:", uploadError);

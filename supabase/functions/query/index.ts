@@ -81,24 +81,60 @@ serve(async (req) => {
 
     const tier = profile?.subscription_tier || "free";
 
-    // Check daily query limit for free tier
+    // Check query limits by tier
+    let todayCount = 0;
     if (tier === "free") {
-      const resetAt = new Date(profile?.daily_query_reset_at || 0);
-      const now = new Date();
-      
-      // Reset counter if it's a new day
-      if (now.toDateString() !== resetAt.toDateString()) {
-        await supabase
-          .from("profiles")
-          .update({ daily_query_count: 0, daily_query_reset_at: now.toISOString() })
-          .eq("user_id", userId);
-      } else if ((profile?.daily_query_count || 0) >= 5) {
-        return new Response(JSON.stringify({ 
+      // Free tier: 5 queries per UTC day (atomic count — no race condition)
+      const todayUtc = new Date();
+      todayUtc.setUTCHours(0, 0, 0, 0);
+      const { count } = await supabase
+        .from("queries")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .gte("created_at", todayUtc.toISOString());
+
+      todayCount = count || 0;
+      if (todayCount >= 5) {
+        return new Response(JSON.stringify({
           error: "Daily query limit reached",
           upgrade_required: true,
           message: "You've used all 5 free queries today. Upgrade to Pro for unlimited queries.",
-          queries_used: 5,
+          queries_used: todayCount,
           queries_limit: 5,
+        }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
+
+    if (tier === "pro") {
+      // Pro tier: 30 queries per minute
+      const oneMinAgo = new Date(Date.now() - 60 * 1000).toISOString();
+      const { count: minuteCount } = await supabase
+        .from("queries")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .gte("created_at", oneMinAgo);
+
+      if ((minuteCount || 0) >= 30) {
+        return new Response(JSON.stringify({
+          error: "Too many requests. You can make 30 queries per minute.",
+        }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      // Pro tier: 1000 queries per calendar month (UTC)
+      const monthStart = new Date();
+      monthStart.setUTCDate(1);
+      monthStart.setUTCHours(0, 0, 0, 0);
+      const { count: monthCount } = await supabase
+        .from("queries")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .gte("created_at", monthStart.toISOString());
+
+      if ((monthCount || 0) >= 1000) {
+        return new Response(JSON.stringify({
+          error: "Monthly query limit reached. You've used 1,000 queries this month.",
+          queries_used: monthCount,
+          queries_limit: 1000,
         }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
     }
@@ -163,21 +199,13 @@ serve(async (req) => {
         subscription_tier_at_time: tier,
       });
 
-      // Increment query count
-      if (tier === "free") {
-        await supabase
-          .from("profiles")
-          .update({ daily_query_count: (profile?.daily_query_count || 0) + 1 })
-          .eq("user_id", userId);
-      }
-
       return new Response(JSON.stringify({
         answer: "I couldn't find relevant information in your uploaded standards for this question. Please check your standards library or consult the relevant standard directly.",
         citations: [],
         safety_critical: false,
         confidence: "low",
         answer_found: false,
-        queries_remaining: tier === "free" ? 5 - (profile?.daily_query_count || 0) - 1 : null,
+        queries_remaining: tier === "free" ? 5 - todayCount - 1 : null,
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -308,20 +336,12 @@ ${chunk.content}`;
       await supabase.from("citations").insert(citationRecords);
     }
 
-    // Increment query count for free tier
-    if (tier === "free") {
-      await supabase
-        .from("profiles")
-        .update({ daily_query_count: (profile?.daily_query_count || 0) + 1 })
-        .eq("user_id", userId);
-    }
-
     return new Response(JSON.stringify({
       ...parsedResponse,
       query_id: queryRecord?.id,
       low_confidence: isLowConfidence,
-      queries_remaining: tier === "free" ? 5 - (profile?.daily_query_count || 0) - 1 : null,
-    }), { 
+      queries_remaining: tier === "free" ? 5 - todayCount - 1 : null,
+    }), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } 
     });
   } catch (e) {
