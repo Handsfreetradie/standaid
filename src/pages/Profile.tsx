@@ -13,7 +13,7 @@ const Profile = () => {
           <User className="h-7 w-7 text-primary" />
         </div>
         <div>
-          <h1 className="font-display text-xl font-bold text-foreground">
+          <h1 className="font-sans text-xl font-bold text-foreground">
             Jake Mitchell
           </h1>
           <p className="text-sm text-muted-foreground">Licensed Electrician</p>
@@ -52,7 +52,7 @@ const Profile = () => {
       </Card>
 
       {/* Plan Comparison */}
-      <h2 className="font-display text-lg font-bold text-foreground mb-3">
+      <h2 className="font-sans text-lg font-bold text-foreground mb-3">
         Compare Plans
       </h2>
       <div className="grid grid-cols-3 gap-2 mb-6">

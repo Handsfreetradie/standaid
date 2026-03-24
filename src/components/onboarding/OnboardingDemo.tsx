@@ -36,7 +36,7 @@ const OnboardingDemo = ({ onNext, onSkip }: Props) => {
       </div>
 
       <div className="text-center mb-8">
-        <h2 className="font-display text-2xl font-extrabold text-foreground">
+        <h2 className="font-sans text-2xl font-extrabold text-foreground">
           See it in action
         </h2>
         <p className="text-muted-foreground text-sm mt-2 leading-relaxed">

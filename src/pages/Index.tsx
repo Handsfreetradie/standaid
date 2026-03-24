@@ -16,12 +16,6 @@ const Index = () => {
     <div className="px-5 py-6">
       {/* Header */}
       <div className="mb-8">
-        <div className="flex items-center gap-2 mb-1">
-          <Shield className="h-7 w-7 text-primary" />
-          <h1 className="font-display text-2xl font-extrabold tracking-tight text-foreground">
-            StandardsAI
-          </h1>
-        </div>
         <p className="text-sm text-muted-foreground">
           Your AI compliance assistant
         </p>
@@ -57,7 +51,7 @@ const Index = () => {
 
       {/* Recent Activity */}
       <div className="mb-6">
-        <h2 className="font-display text-lg font-bold text-foreground mb-3">
+        <h2 className="font-sans text-lg font-bold text-foreground mb-3">
           Recent Activity
         </h2>
         <div className="space-y-3">

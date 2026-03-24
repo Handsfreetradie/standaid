@@ -81,63 +81,10 @@ serve(async (req) => {
 
     const tier = profile?.subscription_tier || "free";
 
-    // Check query limits by tier
+    // BETA MODE: All limits disabled for testing
+    // TODO: Re-enable tier limits before production launch
     let todayCount = 0;
-    if (tier === "free") {
-      // Free tier: 5 queries per UTC day (atomic count — no race condition)
-      const todayUtc = new Date();
-      todayUtc.setUTCHours(0, 0, 0, 0);
-      const { count } = await supabase
-        .from("queries")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", userId)
-        .gte("created_at", todayUtc.toISOString());
 
-      todayCount = count || 0;
-      if (todayCount >= 5) {
-        return new Response(JSON.stringify({
-          error: "Daily query limit reached",
-          upgrade_required: true,
-          message: "You've used all 5 free queries today. Upgrade to Pro for unlimited queries.",
-          queries_used: todayCount,
-          queries_limit: 5,
-        }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-    }
-
-    if (tier === "pro") {
-      // Pro tier: 30 queries per minute
-      const oneMinAgo = new Date(Date.now() - 60 * 1000).toISOString();
-      const { count: minuteCount } = await supabase
-        .from("queries")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", userId)
-        .gte("created_at", oneMinAgo);
-
-      if ((minuteCount || 0) >= 30) {
-        return new Response(JSON.stringify({
-          error: "Too many requests. You can make 30 queries per minute.",
-        }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-
-      // Pro tier: 1000 queries per calendar month (UTC)
-      const monthStart = new Date();
-      monthStart.setUTCDate(1);
-      monthStart.setUTCHours(0, 0, 0, 0);
-      const { count: monthCount } = await supabase
-        .from("queries")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", userId)
-        .gte("created_at", monthStart.toISOString());
-
-      if ((monthCount || 0) >= 1000) {
-        return new Response(JSON.stringify({
-          error: "Monthly query limit reached. You've used 1,000 queries this month.",
-          queries_used: monthCount,
-          queries_limit: 1000,
-        }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-    }
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
@@ -145,6 +92,11 @@ serve(async (req) => {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    // Try vector search first, fallback to keyword matching
+    let matchedChunks: any[] = [];
+    let topSimilarity = 0;
+    let usedFallback = false;
 
     // Generate query embedding
     const embResponse = await fetch("https://ai.gateway.lovable.dev/v1/embeddings", {
@@ -159,37 +111,50 @@ serve(async (req) => {
       }),
     });
 
-    if (!embResponse.ok) {
-      if (embResponse.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded, please try again later." }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    if (embResponse.ok) {
+      const embData = await embResponse.json();
+      const queryEmbedding = embData.data[0].embedding;
+
+      const { data: vectorChunks, error: matchError } = await supabase
+        .rpc("match_chunks", {
+          query_embedding: JSON.stringify(queryEmbedding),
+          match_user_id: userId,
+          match_threshold: 0.72,
+          match_count: 8,
         });
+
+      if (!matchError && vectorChunks?.length) {
+        matchedChunks = vectorChunks;
+        topSimilarity = matchedChunks[0]?.similarity || 0;
       }
-      throw new Error(`Embedding API error: ${embResponse.status}`);
     }
 
-    const embData = await embResponse.json();
-    const queryEmbedding = embData.data[0].embedding;
+    // Fallback: keyword-based search on unindexed chunks
+    if (matchedChunks.length === 0) {
+      usedFallback = true;
+      const keywords = question.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
+      
+      // Get all chunks for this user
+      const { data: allChunks } = await supabase
+        .from("standard_chunks")
+        .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
+        .eq("user_id", userId)
+        .limit(1000);
 
-    // Vector similarity search
-    const { data: matchedChunks, error: matchError } = await supabase
-      .rpc("match_chunks", {
-        query_embedding: JSON.stringify(queryEmbedding),
-        match_user_id: userId,
-        match_threshold: 0.72,
-        match_count: 8,
-      });
-
-    if (matchError) {
-      console.error("Vector search error:", matchError);
-      return new Response(JSON.stringify({ error: "Search failed" }), { 
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } 
-      });
+      if (allChunks?.length) {
+        const scored = allChunks.map((chunk: any) => {
+          const lower = chunk.content.toLowerCase();
+          const score = keywords.reduce((acc: number, kw: string) => acc + (lower.includes(kw) ? 1 : 0), 0);
+          return { ...chunk, similarity: score / keywords.length };
+        });
+        scored.sort((a: any, b: any) => b.similarity - a.similarity);
+        matchedChunks = scored.filter((s: any) => s.similarity > 0).slice(0, 8);
+        topSimilarity = matchedChunks[0]?.similarity || 0;
+      }
     }
 
     // If no relevant chunks found, skip AI
-    if (!matchedChunks || matchedChunks.length === 0) {
-      // Still log the query
+    if (matchedChunks.length === 0) {
       await supabase.from("queries").insert({
         user_id: userId,
         question,
@@ -226,7 +191,6 @@ ${chunk.content}`;
     }).join("\n\n---\n\n");
 
     // Confidence assessment
-    const topSimilarity = matchedChunks[0]?.similarity || 0;
     const isLowConfidence = topSimilarity < 0.80;
 
     // Call AI for response generation

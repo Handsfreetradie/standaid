@@ -22,7 +22,7 @@ const OnboardingSplash = ({ onNext }: Props) => {
           logoVisible ? "opacity-100 scale-100" : "opacity-0 scale-[0.95]"
         }`}
       >
-        <h1 className="font-display text-[48px] font-extrabold tracking-tight leading-tight">
+        <h1 className="font-sans text-[48px] font-extrabold tracking-tight leading-tight">
           <span className="text-foreground">Stand</span>
           <span className="text-primary">Ai</span><span className="text-foreground">d</span>
         </h1>

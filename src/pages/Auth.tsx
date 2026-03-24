@@ -132,13 +132,13 @@ const Auth = () => {
     <div className="min-h-screen flex flex-col items-center justify-center px-5 bg-background">
       <div className="flex items-center gap-2 mb-8">
         <Shield className="h-8 w-8 text-primary" />
-        <h1 className="font-display text-3xl font-extrabold tracking-tight text-foreground">
+        <h1 className="font-sans text-3xl font-extrabold tracking-tight text-foreground">
           StandardsAI
         </h1>
       </div>
 
       <Card className="w-full max-w-sm p-6">
-        <h2 className="font-display text-xl font-bold text-foreground mb-1">
+        <h2 className="font-sans text-xl font-bold text-foreground mb-1">
           {isSignUp ? "Create account" : "Welcome back"}
         </h2>
         <p className="text-sm text-muted-foreground mb-6">

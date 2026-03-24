@@ -4,6 +4,72 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const ALLOWED_ORIGINS = (Deno.env.get("ALLOWED_ORIGIN") || "http://localhost:8080")
   .split(",").map((o: string) => o.trim());
 
+type StandardChunk = {
+  content: string;
+  clause_number: string | null;
+  clause_title: string | null;
+};
+
+async function fetchStandardChunks(
+  supabase: any,
+  standardId: string,
+  limit: number,
+): Promise<StandardChunk[]> {
+  let { data: chunks, error: indexedError } = await supabase
+    .from("standard_chunks")
+    .select("content, clause_number, clause_title")
+    .eq("standard_id", standardId)
+    .eq("is_indexed", true)
+    .order("chunk_index", { ascending: true })
+    .limit(limit);
+
+  if (indexedError) throw indexedError;
+
+  if (!chunks?.length) {
+    const { data: fallbackChunks, error: fallbackError } = await supabase
+      .from("standard_chunks")
+      .select("content, clause_number, clause_title")
+      .eq("standard_id", standardId)
+      .order("chunk_index", { ascending: true })
+      .limit(limit);
+
+    if (fallbackError) throw fallbackError;
+    chunks = fallbackChunks;
+  }
+
+  return chunks || [];
+}
+
+async function getChunksWithRecovery(
+  supabase: any,
+  standardId: string,
+  authHeader: string,
+  limit: number,
+): Promise<StandardChunk[]> {
+  let chunks = await fetchStandardChunks(supabase, standardId, limit);
+  if (chunks.length > 0) return chunks;
+
+  const processUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/process-standard`;
+  const processResponse = await fetch(processUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: authHeader,
+      apikey: Deno.env.get("SUPABASE_ANON_KEY") || "",
+    },
+    body: JSON.stringify({ standard_id: standardId }),
+  });
+
+  const processBody = await processResponse.text();
+  if (!processResponse.ok) {
+    console.error("process-standard recovery failed:", processResponse.status, processBody);
+    return chunks;
+  }
+
+  chunks = await fetchStandardChunks(supabase, standardId, limit);
+  return chunks;
+}
+
 serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
   const corsHeaders = {
@@ -25,7 +91,7 @@ serve(async (req) => {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) throw new Error("Unauthorized");
 
-    const { action, standardId, topic, difficulty, questionCount, examId, questionId, userAnswer, imageBase64, chunkId } = await req.json();
+    const { action, standardId, topic, difficulty, questionCount, examId, questionId, userAnswer, imageBase64, chunkId, examTopics, examPdfText } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
@@ -48,15 +114,9 @@ serve(async (req) => {
 
     // ── GENERATE QUIZ QUESTIONS ──
     if (action === "generate_questions") {
-      const { data: chunks, error: chunkErr } = await supabase
-        .from("standard_chunks")
-        .select("content, clause_number, clause_title")
-        .eq("standard_id", standardId)
-        .eq("is_indexed", true)
-        .limit(30);
+      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 30);
 
-      if (chunkErr) throw chunkErr;
-      if (!chunks?.length) throw new Error("No indexed content found for this standard");
+      if (!chunks?.length) throw new Error("No content found for this standard");
 
       const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
 
@@ -135,14 +195,9 @@ serve(async (req) => {
     if (action === "analyze_photo") {
       if (!imageBase64) throw new Error("No image provided");
 
-      const { data: chunks } = await supabase
-        .from("standard_chunks")
-        .select("content, clause_number, clause_title")
-        .eq("standard_id", standardId)
-        .eq("is_indexed", true)
-        .limit(20);
+      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 20);
 
-      if (!chunks?.length) throw new Error("No indexed content found for this standard");
+      if (!chunks?.length) throw new Error("No content found for this standard");
 
       const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
 
@@ -257,13 +312,16 @@ Rules:
       if (!explanation) throw new Error("No explanation generated");
 
       // Cache the result
-      await supabase.from("queries").insert({
+      const { error: cacheInsertError } = await supabase.from("queries").insert({
         user_id: user.id,
         question: cacheKey,
         response: explanation,
         confidence_score: 1.0,
         safety_flagged: false,
-      }).catch(() => {});
+      });
+      if (cacheInsertError) {
+        console.warn("Failed to cache explanation:", cacheInsertError.message);
+      }
 
       await supabase.from("capstone_usage").insert({ user_id: user.id }).catch(() => {});
       return new Response(JSON.stringify({ explanation, cached: false }), {
@@ -333,10 +391,8 @@ Rules:
 
     // ── GENERATE STUDY GUIDE ──
     if (action === "generate_study_guide") {
-      const { data: chunks } = await supabase
-        .from("standard_chunks").select("content, clause_number, clause_title")
-        .eq("standard_id", standardId).eq("is_indexed", true).limit(40);
-      if (!chunks?.length) throw new Error("No indexed content found");
+      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 40);
+      if (!chunks?.length) throw new Error("No content found");
 
       const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
 
@@ -371,6 +427,124 @@ Rules:
 
       await supabase.from("capstone_usage").insert({ user_id: user.id }).catch(() => {});
       return new Response(JSON.stringify({ guide }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // ── EXAM PREP: Generate from uploaded exam or listed topics ──
+    if (action === "exam_prep") {
+      let contextParts: string[] = [];
+
+      if (examPdfText && examPdfText.trim().length > 0) {
+        contextParts.push(`PREVIOUS EXAM CONTENT:\n${examPdfText.slice(0, 15000)}`);
+      }
+
+      if (examTopics && examTopics.trim().length > 0) {
+        contextParts.push(`EXAM TOPICS/AREAS IDENTIFIED BY THE STUDENT:\n${examTopics}`);
+      }
+
+      if (!contextParts.length) throw new Error("Please provide exam content or topics");
+
+      let standardContext = "";
+      let standardTitle = "General Trade Knowledge";
+      if (standardId) {
+        const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 40);
+        if (chunks.length > 0) {
+          standardContext = `\n\nRELEVANT STANDARD CONTENT:\n${chunks.map((c) => `[${c.clause_number || ""}${c.clause_title ? " - " + c.clause_title : ""}] ${c.content}`).join("\n\n")}`;
+        }
+        const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
+        if (standard) standardTitle = standard.standard_code || standard.title;
+      }
+
+      const fullContext = contextParts.join("\n\n") + standardContext;
+
+      const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "google/gemini-3-flash-preview",
+          messages: [
+            {
+              role: "system",
+              content: `You are an expert trade educator helping an apprentice prepare for an exam on "${standardTitle}". 
+The student has provided either a previous exam paper, a list of expected exam topics, or both.
+Your job:
+1. Analyze the exam content/topics to identify the key areas being tested
+2. Generate a focused study guide covering those areas
+3. Generate 10 practice questions in the style of the exam
+
+Rules:
+- If a previous exam is provided, match the question style and difficulty
+- Ground all content in the standard where possible, referencing clause numbers
+- Be apprentice-friendly: clear language, practical examples
+- Focus ONLY on the topics/areas identified`,
+            },
+            {
+              role: "user",
+              content: `Help me prepare for my upcoming exam. Here's what I know about it:\n\n${fullContext}`,
+            },
+          ],
+          tools: [{
+            type: "function",
+            function: {
+              name: "return_exam_prep",
+              description: "Return exam prep materials",
+              parameters: {
+                type: "object",
+                properties: {
+                  identified_topics: { type: "array", items: { type: "string" }, description: "Key topics identified" },
+                  study_guide: { type: "string", description: "Markdown study guide" },
+                  questions: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        question: { type: "string" },
+                        options: { type: "array", items: { type: "string" }, minItems: 4, maxItems: 4 },
+                        correct_answer: { type: "string" },
+                        explanation: { type: "string" },
+                        clause_reference: { type: "string" },
+                        topic: { type: "string" },
+                      },
+                      required: ["question", "options", "correct_answer", "explanation", "clause_reference", "topic"],
+                    },
+                  },
+                },
+                required: ["identified_topics", "study_guide", "questions"],
+                additionalProperties: false,
+              },
+            },
+          }],
+          tool_choice: { type: "function", function: { name: "return_exam_prep" } },
+        }),
+      });
+
+      if (!aiResponse.ok) {
+        const status = aiResponse.status;
+        if (status === 429) return new Response(JSON.stringify({ error: "Rate limited." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        if (status === 402) return new Response(JSON.stringify({ error: "AI credits exhausted." }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        throw new Error("AI generation failed");
+      }
+
+      const aiData = await aiResponse.json();
+      const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
+      if (!toolCall) throw new Error("No exam prep generated");
+      const result = JSON.parse(toolCall.function.arguments);
+
+      const { data: guide } = await supabase.from("capstone_study_guides").insert({
+        user_id: user.id, standard_id: standardId || null,
+        title: `Exam Prep — ${result.identified_topics.slice(0, 3).join(", ")}`,
+        content: result.study_guide, topics: result.identified_topics,
+      }).select().single();
+
+      const qInserts = result.questions.map((q: any) => ({
+        user_id: user.id, standard_id: standardId || null, question: q.question, options: q.options,
+        correct_answer: q.correct_answer, explanation: q.explanation, clause_reference: q.clause_reference,
+        difficulty: "medium", topic: q.topic || null,
+      }));
+      const { data: savedQuestions } = await supabase.from("capstone_questions").insert(qInserts).select();
+
+      return new Response(JSON.stringify({ topics: result.identified_topics, guide, questions: savedQuestions }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     throw new Error(`Unknown action: ${action}`);
