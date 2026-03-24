@@ -67,7 +67,13 @@ serve(async (req) => {
       });
     }
 
-    // Validate PDF — check MIME type first, then verify magic bytes (%PDF)
+    // Validate PDF — size, MIME type, then magic bytes (%PDF)
+    if (file.size > 50 * 1024 * 1024) {
+      return new Response(JSON.stringify({ error: "File must be under 50MB" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
+
     if (file.type !== "application/pdf") {
       return new Response(JSON.stringify({ error: "Only PDF files are accepted" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
@@ -79,12 +85,6 @@ serve(async (req) => {
     if (magic[0] !== 0x25 || magic[1] !== 0x50 || magic[2] !== 0x44 || magic[3] !== 0x46) {
       return new Response(JSON.stringify({ error: "Invalid file format. Only PDF files are accepted." }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    if (file.size > 50 * 1024 * 1024) {
-      return new Response(JSON.stringify({ error: "File must be under 50MB" }), { 
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } 
       });
     }
 
