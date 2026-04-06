@@ -84,8 +84,9 @@ const StandardsUpload = () => {
       formData.append("title", docName.trim());
       if (standardCode.trim()) formData.append("standard_code", standardCode.trim());
 
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://wyxeqkgpwkcckyntqcns.supabase.co";
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/upload-standard`,
+        `${supabaseUrl}/functions/v1/upload-standard`,
         {
           method: "POST",
           headers: { Authorization: `Bearer ${session.access_token}` },
@@ -93,7 +94,8 @@ const StandardsUpload = () => {
         }
       );
 
-      const data = await response.json();
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : {};
 
       if (!response.ok) {
         toast.error(data.error || "Upload failed");

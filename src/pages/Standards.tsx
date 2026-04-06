@@ -68,8 +68,9 @@ const Standards = () => {
         formData.append("file", file);
         formData.append("title", title);
 
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://wyxeqkgpwkcckyntqcns.supabase.co";
         const response = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/upload-standard`,
+          `${supabaseUrl}/functions/v1/upload-standard`,
           {
             method: "POST",
             headers: {
@@ -79,7 +80,8 @@ const Standards = () => {
           }
         );
 
-        const data = await response.json();
+        const text = await response.text();
+        const data = text ? JSON.parse(text) : {};
 
         if (!response.ok) {
           if (data.upgrade_required) {
