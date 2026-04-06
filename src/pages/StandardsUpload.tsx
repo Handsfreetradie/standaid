@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
 import {
   Upload, FileText, CheckCircle2, Loader2, ArrowLeft, ArrowRight,
   BookOpen, Zap, Search, Shield, Sparkles,
@@ -123,7 +124,6 @@ const StandardsUpload = () => {
     standardId: string,
     onProgress: (fraction: number) => void
   ): Promise<{ totalChunks: number; indexedChunks: number; quality: number }> => {
-    const { supabase } = await import("@/integrations/supabase/client");
     const maxAttempts = 100; // 5 min max
 
     for (let i = 0; i < maxAttempts; i++) {
