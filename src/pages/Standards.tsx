@@ -6,7 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/useAuth";
-import { useStandards, useProfile } from "@/hooks/useData";
+import { useStandards, useProfile, useProcessingJobs } from "@/hooks/useData";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -24,6 +24,7 @@ const Standards = () => {
   const { user, session } = useAuth();
   const { data: standards = [], isLoading } = useStandards();
   const { data: profile } = useProfile();
+  const { data: processingJobs = [] } = useProcessingJobs();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
@@ -214,16 +215,28 @@ const Standards = () => {
                 </div>
 
                 {/* Progress section */}
-                {(s.extraction_status === "pending" || s.extraction_status === "processing") && (
-                  <div className="mt-3 space-y-1.5">
-                    <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
-                      <div className="h-full rounded-full bg-primary animate-pulse" style={{ width: s.extraction_status === "pending" ? "15%" : "60%" }} />
+                {(s.extraction_status === "pending" || s.extraction_status === "processing") && (() => {
+                  const job = processingJobs.find(j => j.standard_id === s.id);
+                  const queuePosition = processingJobs.filter(j => j.status === "pending").findIndex(j => j.standard_id === s.id);
+                  const isProcessing = s.extraction_status === "processing" || job?.status === "processing";
+                  const statusText = isProcessing
+                    ? "Extracting & indexing content…"
+                    : queuePosition >= 0
+                    ? `Queued — position ${queuePosition + 1} in queue`
+                    : "Queued — waiting to start…";
+
+                  return (
+                    <div className="mt-3 space-y-1.5">
+                      <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-primary animate-pulse"
+                          style={{ width: isProcessing ? "60%" : "15%" }}
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">{statusText}</p>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      {s.extraction_status === "pending" ? "Queued — waiting to start…" : "Extracting & indexing content…"}
-                    </p>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {s.extraction_status === "failed" && (
                   <div className="mt-3">

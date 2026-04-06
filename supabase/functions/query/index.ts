@@ -176,8 +176,8 @@ serve(async (req) => {
       .rpc("match_chunks", {
         query_embedding: JSON.stringify(queryEmbedding),
         match_user_id: userId,
-        match_threshold: 0.72,
-        match_count: 8,
+        match_threshold: 0.78,
+        match_count: 12,
       });
 
     if (matchError) {

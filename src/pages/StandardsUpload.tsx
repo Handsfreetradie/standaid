@@ -128,6 +128,20 @@ const StandardsUpload = () => {
 
     for (let i = 0; i < maxAttempts; i++) {
       await delay(3000);
+
+      // Check job status for accurate stage label
+      const { data: job } = await supabase
+        .from("processing_jobs")
+        .select("status")
+        .eq("standard_id", standardId)
+        .single();
+
+      if (job?.status === "pending") {
+        setProgress(prev => ({ ...prev, stage: "extracting", message: "Queued — waiting to start…" }));
+      } else if (job?.status === "processing") {
+        setProgress(prev => ({ ...prev, stage: "storing", message: STAGE_LABELS.storing }));
+      }
+
       const { data } = await supabase
         .from("standards")
         .select("extraction_status, total_chunks, indexed_chunks, extraction_quality_score")
@@ -149,7 +163,7 @@ const StandardsUpload = () => {
         throw new Error("Processing failed. Try a different file.");
       }
 
-      // Estimate progress from chunks
+      // Estimate progress from indexed chunks
       if (data.total_chunks && data.total_chunks > 0) {
         onProgress((data.indexed_chunks || 0) / data.total_chunks);
       } else {

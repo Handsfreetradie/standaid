@@ -130,7 +130,15 @@ serve(async (req) => {
       .update({ file_path: filePath })
       .eq("id", standard.id);
 
-    // Trigger processing via the process-standard function
+    // Insert processing job (replaces fire-and-forget fetch)
+    await supabase.from("processing_jobs").insert({
+      standard_id: standard.id,
+      user_id: userId,
+      status: "pending",
+    });
+
+    // Still trigger processing immediately for responsiveness (fire-and-forget)
+    // but now we have a job record for status tracking
     const processUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/process-standard`;
     fetch(processUrl, {
       method: "POST",
