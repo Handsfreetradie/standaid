@@ -31,10 +31,5 @@ CREATE POLICY "Users can update their own processing jobs"
   ON processing_jobs FOR UPDATE
   USING (auth.uid() = user_id);
 
--- Replace IVFFlat index with HNSW for better performance at scale
-DROP INDEX IF EXISTS standard_chunks_embedding_idx;
-
-CREATE INDEX IF NOT EXISTS standard_chunks_embedding_hnsw_idx
-  ON standard_chunks
-  USING hnsw (embedding vector_cosine_ops)
-  WITH (m = 16, ef_construction = 64);
+-- Note: HNSW index upgrade deferred — requires pgvector >= 0.5.0
+-- Will add as a separate migration once pgvector version is confirmed
