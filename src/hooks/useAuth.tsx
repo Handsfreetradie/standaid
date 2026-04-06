@@ -38,10 +38,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   const signUp = async (email: string, password: string) => {
+    const redirectTo = window.location.origin.includes("localhost")
+      ? "https://preview--standaid.lovable.app"
+      : window.location.origin;
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: window.location.origin },
+      options: { emailRedirectTo: redirectTo },
     });
     return { error };
   };
@@ -56,8 +59,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const resetPassword = async (email: string) => {
+    const origin = window.location.origin.includes("localhost")
+      ? "https://preview--standaid.lovable.app"
+      : window.location.origin;
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth`,
+      redirectTo: `${origin}/auth`,
     });
     return { error };
   };
