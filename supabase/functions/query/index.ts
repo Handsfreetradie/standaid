@@ -119,8 +119,8 @@ serve(async (req) => {
         .rpc("match_chunks", {
           query_embedding: JSON.stringify(queryEmbedding),
           match_user_id: userId,
-          match_threshold: 0.72,
-          match_count: 8,
+          match_threshold: 0.78,
+          match_count: 12,
         });
 
       if (!matchError && vectorChunks?.length) {
@@ -133,7 +133,7 @@ serve(async (req) => {
     if (matchedChunks.length === 0) {
       usedFallback = true;
       const keywords = question.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
-      
+
       // Get all chunks for this user
       const { data: allChunks } = await supabase
         .from("standard_chunks")
@@ -148,7 +148,7 @@ serve(async (req) => {
           return { ...chunk, similarity: score / keywords.length };
         });
         scored.sort((a: any, b: any) => b.similarity - a.similarity);
-        matchedChunks = scored.filter((s: any) => s.similarity > 0).slice(0, 8);
+        matchedChunks = scored.filter((s: any) => s.similarity > 0).slice(0, 12);
         topSimilarity = matchedChunks[0]?.similarity || 0;
       }
     }
