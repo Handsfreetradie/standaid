@@ -123,15 +123,15 @@ const StandardsUpload = () => {
       await delay(3000);
 
       // Check job status for accurate stage label
-      const { data: job } = await supabase
+      const { data: job } = await (supabase as any)
         .from("processing_jobs")
         .select("status")
         .eq("standard_id", standardId)
         .single();
 
-      if (job?.status === "pending") {
+      if ((job as any)?.status === "pending") {
         setProgress(prev => ({ ...prev, stage: "extracting", message: "Queued — waiting to start…" }));
-      } else if (job?.status === "processing") {
+      } else if ((job as any)?.status === "processing") {
         setProgress(prev => ({ ...prev, stage: "storing", message: STAGE_LABELS.storing }));
       }
 
