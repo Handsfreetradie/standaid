@@ -68,28 +68,16 @@ const Standards = () => {
         formData.append("file", file);
         formData.append("title", title);
 
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://wyxeqkgpwkcckyntqcns.supabase.co";
-        const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind5eGVxa2dwd2tjY2t5bnRxY25zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzc4NzUsImV4cCI6MjA4OTgxMzg3NX0.vA_ZhRkgmrOgTIwT4_C-tEEQ81Mf4AvuyTD9Yety2Ao";
-        const response = await fetch(
-          `${supabaseUrl}/functions/v1/upload-standard`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-              apikey: anonKey,
-            },
-            body: formData,
-          }
-        );
+        const { data, error } = await supabase.functions.invoke("upload-standard", {
+          body: formData,
+        });
 
-        const text = await response.text();
-        const data = text ? JSON.parse(text) : {};
-
-        if (!response.ok) {
-          if (data.upgrade_required) {
-            toast.error(data.error);
+        if (error) {
+          const msg = (error as any)?.context?.error || error.message || "Upload failed";
+          if ((error as any)?.context?.upgrade_required) {
+            toast.error(msg);
           } else {
-            toast.error(data.error || "Upload failed");
+            toast.error(msg);
           }
           return;
         }
