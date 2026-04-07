@@ -351,7 +351,7 @@ async function generateEmbeddingsBatch(texts: string[], apiKey: string): Promise
   const MAX_RETRIES = 3;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const response = await fetch("https://ai.gateway.lovable.dev/v1/embeddings", {
+      const response = await fetch("https://api.openai.com/v1/embeddings", {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
