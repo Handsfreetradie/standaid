@@ -69,12 +69,14 @@ const Standards = () => {
         formData.append("title", title);
 
         const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://wyxeqkgpwkcckyntqcns.supabase.co";
+        const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind5eGVxa2dwd2tjY2t5bnRxY25zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzc4NzUsImV4cCI6MjA4OTgxMzg3NX0.vA_ZhRkgmrOgTIwT4_C-tEEQ81Mf4AvuyTD9Yety2Ao";
         const response = await fetch(
           `${supabaseUrl}/functions/v1/upload-standard`,
           {
             method: "POST",
             headers: {
               Authorization: `Bearer ${session.access_token}`,
+              apikey: anonKey,
             },
             body: formData,
           }
