@@ -397,6 +397,7 @@ serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
   const corsHeaders = {
     "Access-Control-Allow-Origin": getAllowedOrigin(origin),
+    "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
   };
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
