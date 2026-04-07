@@ -5,12 +5,6 @@ import { extractText } from "https://esm.sh/unpdf@0.12.0";
 const ALLOWED_ORIGINS = (Deno.env.get("ALLOWED_ORIGIN") || "http://localhost:8080")
   .split(",").map((o: string) => o.trim());
 
-function getAllowedOrigin(origin: string): string {
-  if (ALLOWED_ORIGINS.includes(origin)) return origin;
-  if (origin.endsWith(".lovable.app") || origin.startsWith("http://localhost")) return origin;
-  return ALLOWED_ORIGINS[0];
-}
-
 interface Section {
   heading: string | null;
   clauseNumber: string | null;
@@ -58,7 +52,7 @@ function computeQualityScore(text: string, totalPages: number, pagesWithContent:
 
 // ── PDF extraction ───────────────────────────────────────────────────────────
 
-async function extractTextWithAI(fileBytes: Uint8Array, apiKey: string): Promise<string> {
+async function extractTextWithAI(fileBytes: Uint8Array, geminiApiKey: string): Promise<string> {
   if (fileBytes.length > AI_EXTRACTION_SIZE_LIMIT) {
     throw new Error("PDF too large for AI extraction (limit: 10MB)");
   }
@@ -66,35 +60,26 @@ async function extractTextWithAI(fileBytes: Uint8Array, apiKey: string): Promise
   const binaryStr = Array.from(fileBytes).map(b => String.fromCharCode(b)).join("");
   const base64 = btoa(binaryStr);
 
-  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "google/gemini-2.5-flash",
-      messages: [
-        {
-          role: "system",
-          content: `You are a precise document text extractor. Extract ALL text from this PDF document EXACTLY as written.
+      contents: [{
+        parts: [
+          { text: `You are a precise document text extractor. Extract ALL text from this PDF document EXACTLY as written.
 Rules:
 - Preserve ALL section headings, clause numbers (e.g., 1.1, 1.1.1), and structure
 - Keep paragraph breaks as double newlines
 - Keep tables as readable text
 - Do NOT summarize, paraphrase, or add any content
 - Extract text VERBATIM
-- Include page markers like [PAGE 2], [PAGE 3] etc. between pages`,
-        },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: "Extract ALL text from this PDF document verbatim." },
-            { type: "image_url", image_url: { url: `data:application/pdf;base64,${base64}` } },
-          ],
-        },
-      ],
-      max_tokens: 16000,
+- Include page markers like [PAGE 2], [PAGE 3] etc. between pages
+
+Extract ALL text from this PDF document verbatim.` },
+          { inline_data: { mime_type: "application/pdf", data: base64 } },
+        ],
+      }],
+      generationConfig: { maxOutputTokens: 16000 },
     }),
   });
 
@@ -105,7 +90,7 @@ Rules:
   }
 
   const data = await response.json();
-  const extractedText = data.choices?.[0]?.message?.content;
+  const extractedText = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!extractedText || extractedText.length < 50) {
     throw new Error("AI extraction returned insufficient text");
   }
@@ -396,8 +381,7 @@ async function generateEmbeddingsBatch(texts: string[], apiKey: string): Promise
 serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
   const corsHeaders = {
-    "Access-Control-Allow-Origin": getAllowedOrigin(origin),
-    "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+    "Access-Control-Allow-Origin": ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
   };
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -446,8 +430,9 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Failed to download file" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+    if (!GEMINI_API_KEY || !OPENAI_API_KEY) {
       await supabaseUser.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
       await supabaseUser.from("processing_jobs")
         .update({ status: "failed", error_message: "Service unavailable", completed_at: new Date().toISOString() })
@@ -458,7 +443,7 @@ serve(async (req) => {
     const fileBytes = new Uint8Array(await fileData.arrayBuffer());
     let extracted: { text: string; pages: string[]; totalPages: number; pagesWithContent: number };
     try {
-      extracted = await extractTextFromPdf(fileBytes, LOVABLE_API_KEY);
+      extracted = await extractTextFromPdf(fileBytes, GEMINI_API_KEY);
     } catch (e) {
       console.error("Text extraction failed:", e);
       await supabaseUser.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
@@ -501,7 +486,7 @@ serve(async (req) => {
     const chunksToEmbed = allChunks.filter(c => c.chunk_index < indexLimit);
     for (let i = 0; i < chunksToEmbed.length; i += EMBED_BATCH_SIZE) {
       const batch = chunksToEmbed.slice(i, i + EMBED_BATCH_SIZE);
-      const embeddings = await generateEmbeddingsBatch(batch.map(c => c.content), LOVABLE_API_KEY);
+      const embeddings = await generateEmbeddingsBatch(batch.map(c => c.content), OPENAI_API_KEY);
       batch.forEach((chunk, idx) => {
         embeddingMap.set(chunk.chunk_index, embeddings[idx]);
       });
