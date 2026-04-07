@@ -81,7 +81,7 @@ export function useProcessingJobs() {
     queryKey: ["processing-jobs", user?.id],
     queryFn: async () => {
       if (!user) return [];
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from("processing_jobs")
         .select("id, standard_id, status, attempts, error_message, created_at, started_at")
         .eq("user_id", user.id)

@@ -208,9 +208,9 @@ const Standards = () => {
 
                 {/* Progress section */}
                 {(s.extraction_status === "pending" || s.extraction_status === "processing") && (() => {
-                  const job = processingJobs.find(j => j.standard_id === s.id);
-                  const queuePosition = processingJobs.filter(j => j.status === "pending").findIndex(j => j.standard_id === s.id);
-                  const isProcessing = s.extraction_status === "processing" || job?.status === "processing";
+                  const job = processingJobs.find((j: any) => j.standard_id === s.id);
+                  const queuePosition = processingJobs.filter((j: any) => j.status === "pending").findIndex((j: any) => j.standard_id === s.id);
+                  const isProcessing = s.extraction_status === "processing" || (job as any)?.status === "processing";
                   const statusText = isProcessing
                     ? "Extracting & indexing content…"
                     : queuePosition >= 0
