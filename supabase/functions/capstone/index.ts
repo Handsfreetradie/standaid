@@ -187,7 +187,7 @@ serve(async (req) => {
       const { data: saved, error: saveErr } = await supabase.from("capstone_questions").insert(inserts).select();
       if (saveErr) throw saveErr;
 
-      await supabase.from("capstone_usage").insert({ user_id: user.id }).catch(() => {});
+      try { await supabase.from("capstone_usage").insert({ user_id: user.id }); } catch (_) {}
       return new Response(JSON.stringify({ questions: saved }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -246,7 +246,7 @@ Rules:
       const analysis = aiData.choices?.[0]?.message?.content;
       if (!analysis) throw new Error("No analysis generated");
 
-      await supabase.from("capstone_usage").insert({ user_id: user.id }).catch(() => {});
+      try { await supabase.from("capstone_usage").insert({ user_id: user.id }); } catch (_) {}
       return new Response(JSON.stringify({ analysis }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -323,7 +323,7 @@ Rules:
         console.warn("Failed to cache explanation:", cacheInsertError.message);
       }
 
-      await supabase.from("capstone_usage").insert({ user_id: user.id }).catch(() => {});
+      try { await supabase.from("capstone_usage").insert({ user_id: user.id }); } catch (_) {}
       return new Response(JSON.stringify({ explanation, cached: false }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -425,7 +425,7 @@ Rules:
       }).select().single();
       if (guideErr) throw guideErr;
 
-      await supabase.from("capstone_usage").insert({ user_id: user.id }).catch(() => {});
+      try { await supabase.from("capstone_usage").insert({ user_id: user.id }); } catch (_) {}
       return new Response(JSON.stringify({ guide }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
