@@ -3,8 +3,18 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { useAuth } from "@/hooks/useAuth";
+import { useNavigate } from "react-router-dom";
 
 const Profile = () => {
+  const { signOut } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate("/auth");
+  };
+
   return (
     <div className="px-5 py-6">
       {/* User Info */}
@@ -85,13 +95,14 @@ const Profile = () => {
       {/* Menu Items */}
       <div className="space-y-1">
         {[
-          { icon: CreditCard, label: "Subscription & Billing" },
-          { icon: Settings, label: "Settings" },
-          { icon: HelpCircle, label: "Help & Support" },
-          { icon: LogOut, label: "Sign Out" },
-        ].map(({ icon: Icon, label }) => (
+          { icon: CreditCard, label: "Subscription & Billing", onClick: undefined },
+          { icon: Settings, label: "Settings", onClick: undefined },
+          { icon: HelpCircle, label: "Help & Support", onClick: undefined },
+          { icon: LogOut, label: "Sign Out", onClick: handleSignOut },
+        ].map(({ icon: Icon, label, onClick }) => (
           <button
             key={label}
+            onClick={onClick}
             className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-foreground hover:bg-secondary transition-colors min-h-[44px]"
           >
             <Icon className="h-5 w-5 text-muted-foreground" />

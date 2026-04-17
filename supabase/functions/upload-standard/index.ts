@@ -1,6 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+declare const EdgeRuntime: { waitUntil: (p: Promise<unknown>) => void } | undefined;
+
 const ALLOWED_ORIGINS = (Deno.env.get("ALLOWED_ORIGIN") || "http://localhost:8080")
   .split(",").map((o: string) => o.trim());
 
@@ -144,17 +146,27 @@ serve(async (req) => {
       status: "pending",
     });
 
-    // Still trigger processing immediately for responsiveness (fire-and-forget)
-    // but now we have a job record for status tracking
+    // Trigger processing using service role key so the inter-function call
+    // doesn't depend on the user's JWT (which may be rejected for internal calls).
     const processUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/process-standard`;
-    fetch(processUrl, {
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const processPromise = fetch(processUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: authHeader,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        "x-user-auth": authHeader,
       },
-      body: JSON.stringify({ standard_id: standard.id }),
+      body: JSON.stringify({ standard_id: standard.id, user_id: userId }),
+    }).then(r => {
+      if (!r.ok) r.text().then(t => console.error("process-standard trigger failed:", r.status, t));
     }).catch(err => console.error("Failed to trigger processing:", err));
+
+    if (typeof EdgeRuntime !== "undefined") {
+      EdgeRuntime.waitUntil(processPromise);
+    } else {
+      await processPromise;
+    }
 
     return new Response(JSON.stringify({ 
       standard_id: standard.id, 
