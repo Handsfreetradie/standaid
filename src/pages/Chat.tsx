@@ -57,15 +57,11 @@ const Chat = () => {
   const typingRef = useRef<{ full: string; pos: number; id: string } | null>(null);
 
   useEffect(() => {
-    if (!typingId) return;
-    const msg = messages.find((m) => m.id === typingId);
-    if (!msg) return;
-    typingRef.current = { full: msg.content, pos: 0, id: typingId };
-    setTypingText("");
+    if (!typingId || !typingRef.current) return;
 
     const tick = setInterval(() => {
       if (!typingRef.current) return;
-      const { full, pos, id } = typingRef.current;
+      const { full, pos } = typingRef.current;
       const next = Math.min(pos + 6, full.length);
       typingRef.current.pos = next;
       setTypingText(full.slice(0, next));
@@ -150,6 +146,8 @@ const Chat = () => {
     try {
       const aiMessage = await runQuery(question);
       if (aiMessage) {
+        typingRef.current = { full: aiMessage.content, pos: 0, id: aiMessage.id };
+        setTypingText("");
         setMessages((prev) => [...prev, aiMessage]);
         setTypingId(aiMessage.id);
       }

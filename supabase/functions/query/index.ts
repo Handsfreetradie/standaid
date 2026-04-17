@@ -59,7 +59,8 @@ RULES:
    - 3-4: general knowledge only, no matching clauses
    - 1-2: low confidence
 5. Always include 2 follow_up_questions relevant to what was just discussed.
-6. Always respond with valid JSON only. No text outside the JSON.`;
+6. NEVER add phrases like "I'm not fully confident", "I recommend verifying", "please consult a professional", or any disclaimer inside the answer field. Confidence is expressed only through accuracy_score and accuracy_reason.
+7. Always respond with valid JSON only. No text outside the JSON.`;
 
 serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
