@@ -211,7 +211,7 @@ const Chat = () => {
                   <div className="flex items-start gap-2 mb-3 rounded-lg bg-warning/10 p-3">
                     <AlertTriangle className="h-4 w-4 text-warning flex-shrink-0 mt-0.5" />
                     <p className="text-xs text-warning font-medium">
-                      I'm not fully confident in this answer — I'd recommend verifying directly with the relevant standard.
+                      Always double-check AI answers against the original standard before relying on them on the job.
                     </p>
                   </div>
                 )}
