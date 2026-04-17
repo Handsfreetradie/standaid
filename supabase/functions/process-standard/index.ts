@@ -7,7 +7,7 @@ const ALLOWED_ORIGINS = (Deno.env.get("ALLOWED_ORIGIN") || "http://localhost:808
 
 function getAllowedOrigin(origin: string): string {
   if (ALLOWED_ORIGINS.includes(origin)) return origin;
-  if (origin.endsWith(".lovable.app") || origin.startsWith("http://localhost")) return origin;
+  if (origin.endsWith(".lovable.app") || origin.endsWith(".lovableproject.com") || origin.startsWith("http://localhost")) return origin;
   return ALLOWED_ORIGINS[0];
 }
 
@@ -36,8 +36,8 @@ const CLAUSE_PATTERN = /^(\d{1,2}(?:\.\d{1,2}){0,4})\t+([A-Z][A-Za-z].*)|^(\d{1,
 
 const TARGET_CHUNK_CHARS = 2000;
 const MAX_CHUNK_CHARS = 2500;
-const SCANNED_PAGE_THRESHOLD = 50;
-const SCANNED_DOC_RATIO = 0.60;
+const SCANNED_PAGE_THRESHOLD = 15;
+const SCANNED_DOC_RATIO = 0.85;
 const AI_EXTRACTION_SIZE_LIMIT = 10 * 1024 * 1024;
 
 // Mark jobs as failed if processing exceeds this — must be under Supabase's 150s limit.
@@ -58,6 +58,29 @@ function computeQualityScore(text: string, totalPages: number, pagesWithContent:
     (Math.min(alphaRatio * 1.2, 1) * 30)
   );
   return Math.min(score, 100);
+}
+
+// ── Client-provided text parsing ─────────────────────────────────────────────
+
+function parseExtractedText(rawText: string): { text: string; pages: string[]; totalPages: number; pagesWithContent: number } {
+  // Split on [PAGE N] markers inserted by client-side PDF.js extraction
+  const pageRegex = /\[PAGE \d+\]\n?([\s\S]*?)(?=\n?\[PAGE \d+\]|$)/g;
+  const pages: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = pageRegex.exec(rawText)) !== null) {
+    pages.push(match[1] || "");
+  }
+
+  const finalPages = pages.length > 0 ? pages : [rawText];
+  const cleanText = rawText.replace(/\[PAGE \d+\]/g, "").trim();
+  const pagesWithContent = finalPages.filter(p => p.trim().length >= SCANNED_PAGE_THRESHOLD).length;
+
+  return {
+    text: cleanText,
+    pages: finalPages,
+    totalPages: finalPages.length,
+    pagesWithContent,
+  };
 }
 
 // ── PDF extraction ───────────────────────────────────────────────────────────
@@ -90,15 +113,14 @@ async function extractTextWithAI(fileBytes: Uint8Array, openaiApiKey: string): P
 
   try {
     // Step 2: Call Chat Completions with the file_id reference
-    const extractionPrompt = `Extract ALL text from this PDF document EXACTLY as written.
-Rules:
-- Preserve ALL section headings, clause numbers (e.g., 1.1, 1.1.1), and structure
-- Keep paragraph breaks as double newlines
-- Keep tables as readable text
-- Do NOT summarize, paraphrase, or add any content
-- Extract text VERBATIM
-- Include page markers like [PAGE 2], [PAGE 3] etc. between pages
-- Format clause headings as: "1.1 Title" (clause number, single space, then title starting with capital letter)`;
+    const extractionPrompt = `This is a technical standards document that has been uploaded by a licensed tradesperson for compliance reference purposes. Transcribe all technical content from this document including:
+- All clause numbers and headings (e.g. 1.1, 1.1.1, 2.3.4)
+- All technical requirements, specifications, and values
+- All tables as readable text
+- All notes and informative sections
+- Insert page markers like [PAGE 2], [PAGE 3] between pages
+- Format clause headings as: "1.1 Title" (number, space, title)
+Transcribe completely and accurately. Do not summarise or skip any technical content.`;
 
     const completionResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -120,7 +142,7 @@ Rules:
             ],
           },
         ],
-        max_tokens: 16000,
+        max_tokens: 64000,
       }),
     });
 
@@ -457,6 +479,7 @@ serve(async (req) => {
 
     const body = await req.json();
     standard_id = body.standard_id;
+    const clientExtractedText: string | null = body.extracted_text || null;
     if (!standard_id) {
       return new Response(JSON.stringify({ error: "standard_id is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -476,10 +499,8 @@ serve(async (req) => {
       userId = body.user_id;
     } else {
       // Direct user call — verify JWT
-      const supabaseUser = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
-        global: { headers: { Authorization: authHeader } },
-      });
-      const { data: { user }, error: userError } = await supabaseUser.auth.getUser();
+      const token = authHeader.replace("Bearer ", "");
+      const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
       if (userError || !user) {
         return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
       }
@@ -513,17 +534,6 @@ serve(async (req) => {
     await supabaseAdmin.from("standards").update({ extraction_status: "processing" }).eq("id", standard_id);
 
     const t0 = Date.now();
-    console.log(`[${standard_id}] Starting download`);
-    const { data: fileData, error: downloadError } = await supabaseAdmin.storage.from("standards").download(standard.file_path!);
-    if (downloadError || !fileData) {
-      clearTimeout(timeoutHandle);
-      await supabaseAdmin.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
-      await supabaseAdmin.from("processing_jobs")
-        .update({ status: "failed", error_message: "Failed to download file", completed_at: new Date().toISOString() })
-        .eq("standard_id", standard_id);
-      return new Response(JSON.stringify({ error: "Failed to download file" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-    console.log(`[${standard_id}] Download done: ${Date.now() - t0}ms`);
 
     const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
     if (!OPENAI_API_KEY) {
@@ -535,19 +545,40 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Service unavailable" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const fileBytes = new Uint8Array(await fileData.arrayBuffer());
-    console.log(`[${standard_id}] File size: ${fileBytes.length} bytes, starting extraction`);
     let extracted: { text: string; pages: string[]; totalPages: number; pagesWithContent: number };
-    try {
-      extracted = await extractTextFromPdf(fileBytes, OPENAI_API_KEY);
-    } catch (e) {
-      console.error("Text extraction failed:", e);
-      clearTimeout(timeoutHandle);
-      await supabaseAdmin.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
-      await supabaseAdmin.from("processing_jobs")
-        .update({ status: "failed", error_message: String(e), completed_at: new Date().toISOString() })
-        .eq("standard_id", standard_id);
-      return new Response(JSON.stringify({ error: "We had trouble reading this PDF. Try a higher quality scan or a digital version." }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+    if (clientExtractedText && clientExtractedText.length > 100) {
+      // Use pre-extracted text from the browser — bypasses server-side DRM decryption issues
+      console.log(`[${standard_id}] Using client-extracted text: ${clientExtractedText.length} chars`);
+      extracted = parseExtractedText(clientExtractedText);
+      console.log(`[${standard_id}] Parsed: ${extracted.totalPages} pages, ${extracted.pagesWithContent} with content`);
+    } else {
+      // Fall back to server-side extraction (unpdf → AI OCR)
+      console.log(`[${standard_id}] Starting download (no client text provided)`);
+      const { data: fileData, error: downloadError } = await supabaseAdmin.storage.from("standards").download(standard.file_path!);
+      if (downloadError || !fileData) {
+        clearTimeout(timeoutHandle);
+        await supabaseAdmin.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
+        await supabaseAdmin.from("processing_jobs")
+          .update({ status: "failed", error_message: "Failed to download file", completed_at: new Date().toISOString() })
+          .eq("standard_id", standard_id);
+        return new Response(JSON.stringify({ error: "Failed to download file" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      console.log(`[${standard_id}] Download done: ${Date.now() - t0}ms`);
+
+      const fileBytes = new Uint8Array(await fileData.arrayBuffer());
+      console.log(`[${standard_id}] File size: ${fileBytes.length} bytes, starting extraction`);
+      try {
+        extracted = await extractTextFromPdf(fileBytes, OPENAI_API_KEY);
+      } catch (e) {
+        console.error("Text extraction failed:", e);
+        clearTimeout(timeoutHandle);
+        await supabaseAdmin.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
+        await supabaseAdmin.from("processing_jobs")
+          .update({ status: "failed", error_message: String(e), completed_at: new Date().toISOString() })
+          .eq("standard_id", standard_id);
+        return new Response(JSON.stringify({ error: "We had trouble reading this PDF. Try a higher quality scan or a digital version." }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
     }
     console.log(`[${standard_id}] Extraction done: ${Date.now() - t0}ms, ${extracted.text.length} chars`);
 

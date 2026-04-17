@@ -6,7 +6,7 @@ const ALLOWED_ORIGINS = (Deno.env.get("ALLOWED_ORIGIN") || "http://localhost:808
 
 function getAllowedOrigin(origin: string): string {
   if (ALLOWED_ORIGINS.includes(origin)) return origin;
-  if (origin.endsWith(".lovable.app") || origin.startsWith("http://localhost")) return origin;
+  if (origin.endsWith(".lovable.app") || origin.endsWith(".lovableproject.com") || origin.startsWith("http://localhost")) return origin;
   return ALLOWED_ORIGINS[0];
 }
 
@@ -57,11 +57,11 @@ serve(async (req) => {
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
     if (userError || !user) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
     }
@@ -88,13 +88,26 @@ serve(async (req) => {
 
     const tier = profile?.subscription_tier || "free";
 
-    // BETA MODE: All limits disabled for testing
-    // TODO: Re-enable tier limits before production launch
-    let todayCount = 0;
+    // Count today's queries for this user (UTC)
+    const startOfToday = new Date();
+    startOfToday.setUTCHours(0, 0, 0, 0);
+
+    const { count } = await supabase
+      .from("queries")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .gte("created_at", startOfToday.toISOString());
+
+    const todayCount = count ?? 0;
+
+    if (tier === "free" && todayCount >= 5) {
+      return new Response(JSON.stringify({ error: "You've reached your daily limit of 5 queries. Upgrade to Pro for unlimited queries." }), {
+        status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
 
     const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
-    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
     if (!OPENAI_API_KEY) {
       return new Response(JSON.stringify({ error: "Service unavailable" }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -125,9 +138,9 @@ serve(async (req) => {
 
       const { data: vectorChunks, error: matchError } = await supabase
         .rpc("match_chunks", {
-          query_embedding: JSON.stringify(queryEmbedding),
+          query_embedding: queryEmbedding,
           match_user_id: userId,
-          match_threshold: 0.78,
+          match_threshold: 0.70,
           match_count: 12,
         });
 
@@ -201,15 +214,21 @@ ${chunk.content}`;
     // Confidence assessment
     const isLowConfidence = topSimilarity < 0.80;
 
-    // Call Gemini directly for response generation
-    const aiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
+    // Call OpenAI for response generation
+    const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
-        contents: [{
-          parts: [{ text: `${SYSTEM_PROMPT}\n\nSOURCE CLAUSES:\n${sourceContext}\n\nUSER QUESTION:\n${question}` }]
-        }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 4000 },
+        model: "gpt-4o-mini",
+        temperature: 0.1,
+        max_tokens: 4000,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: `SOURCE CLAUSES:\n${sourceContext}\n\nUSER QUESTION:\n${question}` },
+        ],
       }),
     });
 
@@ -223,7 +242,7 @@ ${chunk.content}`;
     }
 
     const aiData = await aiResponse.json();
-    const rawContent = aiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const rawContent = aiData.choices?.[0]?.message?.content || "";
 
     // Parse AI response as JSON
     let parsedResponse: any;

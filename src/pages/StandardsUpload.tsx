@@ -1,6 +1,7 @@
 import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import * as pdfjsLib from "pdfjs-dist";
 import {
   Upload, FileText, CheckCircle2, Loader2, ArrowLeft, ArrowRight,
   BookOpen, Zap, Search, Shield, Sparkles,
@@ -14,21 +15,62 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/build/pdf.worker.min.mjs",
+  import.meta.url,
+).href;
+
 type Step = "intro" | "upload" | "naming" | "processing" | "success";
 
 interface ProcessingProgress {
-  stage: "extracting" | "sorting" | "chunking" | "storing" | "done";
+  stage: "reading" | "extracting" | "sorting" | "chunking" | "storing" | "done";
   percent: number;
   message: string;
 }
 
 const STAGE_LABELS: Record<string, string> = {
+  reading: "Reading your PDF…",
   extracting: "Extracting text from document…",
   sorting: "Sorting content into sections…",
   chunking: "AI is chunking sections…",
   storing: "Storing chunks & generating embeddings…",
   done: "Processing complete!",
 };
+
+async function extractPdfText(
+  file: File,
+  onProgress: (pct: number) => void,
+): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  const numPages = pdf.numPages;
+  const pageTexts: string[] = [];
+
+  for (let p = 1; p <= numPages; p++) {
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+
+    // Group text items by quantised Y coordinate to reconstruct lines
+    const lineMap = new Map<number, string[]>();
+    for (const item of content.items) {
+      if (!("str" in item) || !item.str) continue;
+      // PDF Y-axis origin is bottom-left; quantise to 3pt buckets for line grouping
+      const y = Math.round((item as any).transform[5] / 3) * 3;
+      if (!lineMap.has(y)) lineMap.set(y, []);
+      lineMap.get(y)!.push(item.str);
+    }
+
+    // Sort descending (top of page first) and join each line
+    const sortedLines = [...lineMap.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([, words]) => words.join(""));
+
+    pageTexts.push(sortedLines.join("\n"));
+    onProgress(p / numPages);
+  }
+
+  return pageTexts.map((text, i) => `\n[PAGE ${i + 1}]\n${text}`).join("");
+}
 
 const StandardsUpload = () => {
   const [step, setStep] = useState<Step>("intro");
@@ -69,20 +111,36 @@ const StandardsUpload = () => {
     if (!file || !session || !docName.trim()) return;
 
     setStep("processing");
-    setProgress({ stage: "extracting", percent: 10, message: STAGE_LABELS.extracting });
+    setProgress({ stage: "reading", percent: 5, message: STAGE_LABELS.reading });
+
+    // Client-side PDF extraction — bypasses server-side DRM decryption issues
+    let extractedText = "";
+    try {
+      extractedText = await extractPdfText(file, (pct) => {
+        setProgress({
+          stage: "reading",
+          percent: Math.round(5 + pct * 30),
+          message: `Reading your PDF… (${Math.round(pct * 100)}%)`,
+        });
+      });
+      console.log(`Client extraction complete: ${extractedText.length} chars`);
+    } catch (e) {
+      console.warn("Client-side PDF extraction failed, server will handle it:", e);
+      extractedText = "";
+    }
+
+    setProgress({ stage: "extracting", percent: 38, message: STAGE_LABELS.extracting });
+    await delay(300);
+    setProgress({ stage: "sorting", percent: 42, message: STAGE_LABELS.sorting });
+    await delay(300);
+    setProgress({ stage: "chunking", percent: 45, message: STAGE_LABELS.chunking });
 
     try {
-      // Simulate local extraction stage feedback
-      await delay(600);
-      setProgress({ stage: "sorting", percent: 25, message: STAGE_LABELS.sorting });
-      await delay(400);
-      setProgress({ stage: "chunking", percent: 40, message: STAGE_LABELS.chunking });
-
-      // Actually upload and process via edge function
       const formData = new FormData();
       formData.append("file", file);
       formData.append("title", docName.trim());
       if (standardCode.trim()) formData.append("standard_code", standardCode.trim());
+      if (extractedText) formData.append("extracted_text", extractedText);
 
       const { data, error } = await supabase.functions.invoke("upload-standard", {
         body: formData,
@@ -313,7 +371,7 @@ const StandardsUpload = () => {
 
   // ── PROCESSING ──
   if (step === "processing") {
-    const stages = ["extracting", "sorting", "chunking", "storing", "done"];
+    const stages = ["reading", "extracting", "sorting", "chunking", "storing", "done"];
     const currentIdx = stages.indexOf(progress.stage);
 
     return (

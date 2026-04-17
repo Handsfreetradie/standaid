@@ -8,7 +8,7 @@ const ALLOWED_ORIGINS = (Deno.env.get("ALLOWED_ORIGIN") || "http://localhost:808
 
 function getAllowedOrigin(origin: string): string {
   if (ALLOWED_ORIGINS.includes(origin)) return origin;
-  if (origin.endsWith(".lovable.app") || origin.startsWith("http://localhost")) return origin;
+  if (origin.endsWith(".lovable.app") || origin.endsWith(".lovableproject.com") || origin.startsWith("http://localhost")) return origin;
   return ALLOWED_ORIGINS[0];
 }
 
@@ -27,20 +27,20 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
     }
 
-    const supabase = createClient(
+    const supabaseAdmin = createClient(
       Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
     if (userError || !user) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
     }
     const userId = user.id;
 
     // Check free tier standard limit
-    const { data: profile } = await supabase
+    const { data: profile } = await supabaseAdmin
       .from("profiles")
       .select("subscription_tier")
       .eq("user_id", userId)
@@ -49,7 +49,7 @@ serve(async (req) => {
     const tier = profile?.subscription_tier || "free";
 
     if (tier === "free") {
-      const { count } = await supabase
+      const { count } = await supabaseAdmin
         .from("standards")
         .select("*", { count: "exact", head: true })
         .eq("user_id", userId);
@@ -69,6 +69,7 @@ serve(async (req) => {
     const standardCode = formData.get("standard_code") as string;
     const version = formData.get("version") as string;
     const tradeCategory = formData.get("trade_category") as string;
+    const extractedText = (formData.get("extracted_text") as string | null) || null;
 
     if (!file || !title) {
       return new Response(JSON.stringify({ error: "File and title are required" }), { 
@@ -98,7 +99,7 @@ serve(async (req) => {
     }
 
     // Create standard record
-    const { data: standard, error: insertError } = await supabase
+    const { data: standard, error: insertError } = await supabaseAdmin
       .from("standards")
       .insert({
         user_id: userId,
@@ -121,26 +122,26 @@ serve(async (req) => {
 
     // Upload file to storage
     const filePath = `${userId}/${standard.id}.pdf`;
-    const { error: uploadError } = await supabase.storage
+    const { error: uploadError } = await supabaseAdmin.storage
       .from("standards")
       .upload(filePath, fileBuffer, { contentType: "application/pdf" });
 
     if (uploadError) {
       console.error("Upload error:", uploadError);
-      await supabase.from("standards").delete().eq("id", standard.id);
+      await supabaseAdmin.from("standards").delete().eq("id", standard.id);
       return new Response(JSON.stringify({ error: "Failed to upload file" }), { 
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } 
       });
     }
 
     // Update standard with file path
-    await supabase
+    await supabaseAdmin
       .from("standards")
       .update({ file_path: filePath })
       .eq("id", standard.id);
 
     // Insert processing job (replaces fire-and-forget fetch)
-    await supabase.from("processing_jobs").insert({
+    await supabaseAdmin.from("processing_jobs").insert({
       standard_id: standard.id,
       user_id: userId,
       status: "pending",
@@ -157,7 +158,7 @@ serve(async (req) => {
         Authorization: `Bearer ${serviceRoleKey}`,
         "x-user-auth": authHeader,
       },
-      body: JSON.stringify({ standard_id: standard.id, user_id: userId }),
+      body: JSON.stringify({ standard_id: standard.id, user_id: userId, extracted_text: extractedText }),
     }).then(r => {
       if (!r.ok) r.text().then(t => console.error("process-standard trigger failed:", r.status, t));
     }).catch(err => console.error("Failed to trigger processing:", err));
