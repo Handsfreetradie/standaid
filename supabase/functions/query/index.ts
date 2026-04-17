@@ -195,42 +195,24 @@ serve(async (req) => {
       }
     }
 
-    // If no relevant chunks found, skip AI
-    if (matchedChunks.length === 0) {
-      await supabase.from("queries").insert({
-        user_id: userId,
-        question,
-        response: "I couldn't find relevant information in your uploaded standards for this question. Please check your standards library or consult the relevant standard directly.",
-        confidence_score: 0,
-        safety_flagged: false,
-        subscription_tier_at_time: tier,
-      });
-
-      return new Response(JSON.stringify({
-        answer: "I couldn't find relevant information in your uploaded standards for this question. Please check your standards library or consult the relevant standard directly.",
-        citations: [],
-        safety_critical: false,
-        confidence: "low",
-        answer_found: false,
-        queries_remaining: tier === "free" ? 5 - todayCount - 1 : null,
-      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
+    // Always proceed to AI — it handles both compliance questions and casual conversation
 
     // Get standard details for context
     const standardIds = [...new Set(matchedChunks.map((c: any) => c.standard_id))];
-    const { data: standards } = await supabase
-      .from("standards")
-      .select("id, standard_code, version, title")
-      .in("id", standardIds);
+    const standards = standardIds.length > 0
+      ? (await supabase.from("standards").select("id, standard_code, version, title").in("id", standardIds)).data
+      : [];
 
     const standardMap = new Map(standards?.map((s: any) => [s.id, s]) || []);
 
     // Build source clauses context
-    const sourceContext = matchedChunks.map((chunk: any) => {
-      const std = standardMap.get(chunk.standard_id);
-      return `[${std?.standard_code || "Unknown"} ${std?.version || ""} - Clause ${chunk.clause_number || "N/A"} (Page ${chunk.page_number || "N/A"}, Similarity: ${chunk.similarity?.toFixed(3)})]
+    const sourceContext = matchedChunks.length > 0
+      ? matchedChunks.map((chunk: any) => {
+          const std = standardMap.get(chunk.standard_id);
+          return `[${std?.standard_code || "Unknown"} ${std?.version || ""} - Clause ${chunk.clause_number || "N/A"} (Page ${chunk.page_number || "N/A"}, Similarity: ${chunk.similarity?.toFixed(3)})]
 ${chunk.content}`;
-    }).join("\n\n---\n\n");
+        }).join("\n\n---\n\n")
+      : "No relevant clauses found in uploaded standards.";
 
     // Confidence assessment
     const isLowConfidence = topSimilarity < 0.80;
