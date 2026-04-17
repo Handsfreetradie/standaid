@@ -67,7 +67,7 @@ async function extractTextWithAI(fileBytes: Uint8Array, openaiApiKey: string): P
 
   // Step 1: Upload the PDF to the OpenAI Files API
   const formData = new FormData();
-  formData.append("file", new Blob([fileBytes], { type: "application/pdf" }), "document.pdf");
+  formData.append("file", new Blob([fileBytes as BlobPart], { type: "application/pdf" }), "document.pdf");
   formData.append("purpose", "user_data");
 
   const uploadResponse = await fetch("https://api.openai.com/v1/files", {
