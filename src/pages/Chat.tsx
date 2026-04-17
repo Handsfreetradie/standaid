@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Loader2, Mic } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 import VoiceMode from "@/components/VoiceMode";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -31,7 +32,15 @@ interface Message {
   gated_message?: string;
   low_confidence?: boolean;
   answer_found?: boolean;
+  follow_up_questions?: string[];
 }
+
+const STARTER_QUESTIONS = [
+  "What are the minimum cable burial depths?",
+  "What protection is required for RCDs?",
+  "What are the earthing requirements for a subboard?",
+  "When is a safety switch required?",
+];
 
 const Chat = () => {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -46,17 +55,61 @@ const Chat = () => {
     ? 5 - (profile.daily_query_count || 0)
     : 5;
 
-  const sendQuery = async () => {
-    if (!input.trim() || isLoading) return;
+  const scrollToBottom = () => {
+    setTimeout(() => {
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    }, 100);
+  };
+
+  const runQuery = async (question: string): Promise<Message | undefined> => {
     if (!session) {
       toast.error("Please sign in to use the chat");
       return;
     }
 
+    const { data, error } = await supabase.functions.invoke("query", {
+      body: { question },
+    });
+
+    if (error) throw new Error(error.message || "Query failed");
+
+    if (data?.error) {
+      if (data.upgrade_required) {
+        return {
+          id: crypto.randomUUID(),
+          role: "ai",
+          content: data.message || data.error,
+          gated: true,
+          gated_message: data.message,
+        };
+      }
+      throw new Error(data.error);
+    }
+
+    return {
+      id: crypto.randomUUID(),
+      role: "ai",
+      content: data.answer || "No response generated.",
+      citations: data.citations || [],
+      safety_critical: data.safety_critical || false,
+      safety_message: data.safety_message,
+      confidence: data.confidence,
+      gated: data.gated || false,
+      gated_message: data.gated_message,
+      low_confidence: data.low_confidence || false,
+      answer_found: data.answer_found,
+      follow_up_questions: data.follow_up_questions || [],
+    };
+  };
+
+  const sendQuery = async (overrideText?: string) => {
+    const question = (overrideText ?? input).trim();
+    if (!question || isLoading) return;
+
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
-      content: input.trim(),
+      content: question,
     };
 
     setMessages((prev) => [...prev, userMessage]);
@@ -64,53 +117,14 @@ const Chat = () => {
     setIsLoading(true);
 
     try {
-      const { data, error } = await supabase.functions.invoke("query", {
-        body: { question: userMessage.content },
-      });
-
-      if (error) {
-        throw new Error(error.message || "Query failed");
-      }
-
-      if (data?.error) {
-        if (data.upgrade_required) {
-          const aiMessage: Message = {
-            id: crypto.randomUUID(),
-            role: "ai",
-            content: data.message || data.error,
-            gated: true,
-            gated_message: data.message,
-          };
-          setMessages((prev) => [...prev, aiMessage]);
-        } else {
-          toast.error(data.error);
-        }
-        return;
-      }
-
-      const aiMessage: Message = {
-        id: crypto.randomUUID(),
-        role: "ai",
-        content: data.answer || "No response generated.",
-        citations: data.citations || [],
-        safety_critical: data.safety_critical || false,
-        safety_message: data.safety_message,
-        confidence: data.confidence,
-        gated: data.gated || false,
-        gated_message: data.gated_message,
-        low_confidence: data.low_confidence || false,
-        answer_found: data.answer_found,
-      };
-
-      setMessages((prev) => [...prev, aiMessage]);
+      const aiMessage = await runQuery(question);
+      if (aiMessage) setMessages((prev) => [...prev, aiMessage]);
     } catch (e: any) {
       console.error("Query error:", e);
       toast.error(e.message || "Failed to send query");
     } finally {
       setIsLoading(false);
-      setTimeout(() => {
-        scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-      }, 100);
+      scrollToBottom();
     }
   };
 
@@ -133,26 +147,11 @@ const Chat = () => {
     setIsLoading(true);
 
     try {
-      const { data, error } = await supabase.functions.invoke("query", {
-        body: { question: text.trim() },
-      });
-
-      if (error) throw new Error(error.message || "Query failed");
-
-      const answer = data?.answer || data?.message || data?.error || "No response.";
-      const aiMessage: Message = {
-        id: crypto.randomUUID(),
-        role: "ai",
-        content: answer,
-        citations: data?.citations || [],
-        safety_critical: data?.safety_critical || false,
-        safety_message: data?.safety_message,
-        confidence: data?.confidence,
-        low_confidence: data?.low_confidence || false,
-        answer_found: data?.answer_found,
-      };
-      setMessages((prev) => [...prev, aiMessage]);
-      return answer;
+      const aiMessage = await runQuery(text.trim());
+      if (aiMessage) {
+        setMessages((prev) => [...prev, aiMessage]);
+        return aiMessage.content;
+      }
     } catch (e: any) {
       console.error("Voice query error:", e);
       return "Sorry, I couldn't process that. Please try again.";
@@ -183,15 +182,27 @@ const Chat = () => {
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-center px-8">
-            <Shield className="h-12 w-12 text-primary/30 mb-4" />
-            <p className="text-sm font-semibold text-foreground mb-1">
-              Ask a compliance question
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Upload a standard first, then ask questions about it. The AI will
-              reference specific clauses from your uploaded documents.
-            </p>
+          <div className="flex flex-col items-center justify-center h-full text-center px-4 gap-5">
+            <div>
+              <Shield className="h-12 w-12 text-primary/30 mb-3 mx-auto" />
+              <p className="text-sm font-semibold text-foreground mb-1">
+                What do you need to know?
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Ask anything about your uploaded standards. I'll find the exact clause.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-2 w-full max-w-sm">
+              {STARTER_QUESTIONS.map((q) => (
+                <button
+                  key={q}
+                  onClick={() => sendQuery(q)}
+                  className="text-left text-xs text-primary bg-primary/8 hover:bg-primary/15 rounded-xl px-4 py-3 transition-colors font-medium"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -205,71 +216,89 @@ const Chat = () => {
                 <p className="text-sm text-primary-foreground">{msg.content}</p>
               </div>
             ) : (
-              <Card className="max-w-[90%] p-4 shadow-sm">
-                {/* Low confidence warning */}
-                {msg.low_confidence && (
-                  <div className="flex items-start gap-2 mb-3 rounded-lg bg-warning/10 p-3">
-                    <AlertTriangle className="h-4 w-4 text-warning flex-shrink-0 mt-0.5" />
-                    <p className="text-xs text-warning font-medium">
-                      Always double-check AI answers against the original standard before relying on them on the job.
-                    </p>
+              <div className="max-w-[90%] space-y-2">
+                <Card className="p-4 shadow-sm">
+                  {/* Low confidence notice */}
+                  {msg.low_confidence && (
+                    <div className="flex items-start gap-2 mb-3 rounded-lg bg-warning/10 p-3">
+                      <AlertTriangle className="h-4 w-4 text-warning flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-warning font-medium">
+                        Always double-check AI answers against the original standard before relying on them on the job.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Answer with markdown */}
+                  <div className="text-sm text-card-foreground leading-relaxed prose prose-sm max-w-none prose-headings:text-foreground prose-p:text-card-foreground prose-strong:text-foreground prose-li:text-card-foreground">
+                    <ReactMarkdown>{msg.content}</ReactMarkdown>
                   </div>
-                )}
 
-                <p className="text-sm text-card-foreground leading-relaxed">
-                  {msg.content}
-                </p>
+                  {/* Clause badges */}
+                  {msg.citations && msg.citations.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-3">
+                      {msg.citations.map((citation, idx) => (
+                        <Badge
+                          key={idx}
+                          className={`border-0 text-xs font-semibold ${
+                            citation.gated
+                              ? "bg-muted text-muted-foreground"
+                              : "bg-primary/10 text-primary"
+                          }`}
+                        >
+                          {citation.gated ? "🔒 " : ""}
+                          {citation.clause_number}
+                          {citation.standard_code ? ` (${citation.standard_code})` : ""}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
 
-                {/* Clause badges */}
-                {msg.citations && msg.citations.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-3">
-                    {msg.citations.map((citation, idx) => (
-                      <Badge
+                  {/* Safety warning */}
+                  {msg.safety_critical && (
+                    <div className="flex items-start gap-2 mt-3 rounded-lg bg-destructive/10 p-3">
+                      <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-destructive font-medium">
+                        {msg.safety_message ||
+                          "Safety-critical work must be assessed and signed off by a licensed professional on-site."}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Gated content */}
+                  {msg.gated && (
+                    <div className="mt-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
+                      <div className="flex items-start gap-2">
+                        <Lock className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-xs font-semibold text-foreground">
+                            {msg.gated_message ||
+                              "You're on the right track — upgrade to Pro to get the full clause and complete guidance."}
+                          </p>
+                          <Button size="sm" className="mt-2 h-7 text-xs font-semibold gap-1">
+                            <Zap className="h-3 w-3" />
+                            Upgrade to Pro
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </Card>
+
+                {/* Follow-up question chips */}
+                {msg.follow_up_questions && msg.follow_up_questions.length > 0 && (
+                  <div className="flex flex-wrap gap-2 px-1">
+                    {msg.follow_up_questions.map((q, idx) => (
+                      <button
                         key={idx}
-                        className={`border-0 text-xs font-semibold ${
-                          citation.gated
-                            ? "bg-muted text-muted-foreground"
-                            : "bg-primary/10 text-primary"
-                        }`}
+                        onClick={() => sendQuery(q)}
+                        className="text-xs text-primary bg-primary/8 hover:bg-primary/15 rounded-full px-3 py-1.5 transition-colors font-medium"
                       >
-                        {citation.gated ? "🔒 " : ""}
-                        {citation.clause_number}
-                        {citation.standard_code ? ` (${citation.standard_code})` : ""}
-                      </Badge>
+                        {q}
+                      </button>
                     ))}
                   </div>
                 )}
-
-                {/* Safety warning */}
-                {msg.safety_critical && (
-                  <div className="flex items-start gap-2 mt-3 rounded-lg bg-destructive/10 p-3">
-                    <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0 mt-0.5" />
-                    <p className="text-xs text-destructive font-medium">
-                      {msg.safety_message ||
-                        "Safety-critical work must be assessed and signed off by a licensed professional on-site."}
-                    </p>
-                  </div>
-                )}
-
-                {/* Gated content */}
-                {msg.gated && (
-                  <div className="mt-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
-                    <div className="flex items-start gap-2">
-                      <Lock className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="text-xs font-semibold text-foreground">
-                          {msg.gated_message ||
-                            "You're on the right track — upgrade to Pro to get the full clause and complete guidance."}
-                        </p>
-                        <Button size="sm" className="mt-2 h-7 text-xs font-semibold gap-1">
-                          <Zap className="h-3 w-3" />
-                          Upgrade to Pro
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </Card>
+              </div>
             )}
           </div>
         ))}
@@ -278,7 +307,11 @@ const Chat = () => {
           <div className="flex justify-start">
             <Card className="p-4 shadow-sm">
               <div className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                <div className="flex gap-1">
+                  <span className="h-2 w-2 rounded-full bg-primary animate-bounce [animation-delay:0ms]" />
+                  <span className="h-2 w-2 rounded-full bg-primary animate-bounce [animation-delay:150ms]" />
+                  <span className="h-2 w-2 rounded-full bg-primary animate-bounce [animation-delay:300ms]" />
+                </div>
                 <p className="text-sm text-muted-foreground">Searching your standards...</p>
               </div>
             </Card>
@@ -300,7 +333,7 @@ const Chat = () => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask about compliance..."
+            placeholder="Ask about your standards..."
             className="min-h-[40px] max-h-[120px] resize-none text-sm"
             rows={1}
           />
@@ -316,7 +349,7 @@ const Chat = () => {
             size="icon"
             className="h-10 w-10 flex-shrink-0"
             disabled={!input.trim() || isLoading}
-            onClick={sendQuery}
+            onClick={() => sendQuery()}
           >
             <Send className="h-4 w-4" />
           </Button>
