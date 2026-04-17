@@ -33,6 +33,8 @@ interface Message {
   low_confidence?: boolean;
   answer_found?: boolean;
   follow_up_questions?: string[];
+  accuracy_score?: number;
+  accuracy_reason?: string;
 }
 
 const STARTER_QUESTIONS = [
@@ -99,6 +101,8 @@ const Chat = () => {
       low_confidence: data.low_confidence || false,
       answer_found: data.answer_found,
       follow_up_questions: data.follow_up_questions || [],
+      accuracy_score: data.accuracy_score ?? null,
+      accuracy_reason: data.accuracy_reason ?? null,
     };
   };
 
@@ -218,13 +222,35 @@ const Chat = () => {
             ) : (
               <div className="max-w-[90%] space-y-2">
                 <Card className="p-4 shadow-sm">
-                  {/* Low confidence notice */}
-                  {msg.low_confidence && (
-                    <div className="flex items-start gap-2 mb-3 rounded-lg bg-warning/10 p-3">
-                      <AlertTriangle className="h-4 w-4 text-warning flex-shrink-0 mt-0.5" />
-                      <p className="text-xs text-warning font-medium">
-                        Always double-check AI answers against the original standard before relying on them on the job.
-                      </p>
+                  {/* Accuracy score */}
+                  {msg.accuracy_score != null && (
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="flex items-center gap-1.5">
+                        <div className="flex gap-0.5">
+                          {Array.from({ length: 10 }).map((_, i) => (
+                            <div
+                              key={i}
+                              className={`h-1.5 w-3 rounded-full transition-colors ${
+                                i < msg.accuracy_score!
+                                  ? msg.accuracy_score! >= 8
+                                    ? "bg-green-500"
+                                    : msg.accuracy_score! >= 5
+                                    ? "bg-yellow-500"
+                                    : "bg-red-400"
+                                  : "bg-muted"
+                              }`}
+                            />
+                          ))}
+                        </div>
+                        <span className={`text-xs font-bold ${
+                          msg.accuracy_score >= 8 ? "text-green-600" : msg.accuracy_score >= 5 ? "text-yellow-600" : "text-red-500"
+                        }`}>
+                          {msg.accuracy_score}/10
+                        </span>
+                      </div>
+                      {msg.accuracy_reason && (
+                        <p className="text-xs text-muted-foreground">{msg.accuracy_reason}</p>
+                      )}
                     </div>
                   )}
 
