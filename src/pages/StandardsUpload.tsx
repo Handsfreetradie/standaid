@@ -184,12 +184,6 @@ const StandardsUpload = () => {
         .eq("standard_id", standardId)
         .single();
 
-      if ((job as any)?.status === "pending") {
-        setProgress(prev => ({ ...prev, stage: "extracting", message: "Queued — waiting to start…" }));
-      } else if ((job as any)?.status === "processing") {
-        setProgress(prev => ({ ...prev, stage: "storing", message: STAGE_LABELS.storing }));
-      }
-
       const { data } = await supabase
         .from("standards")
         .select("extraction_status, total_chunks, indexed_chunks, extraction_quality_score")
@@ -197,6 +191,15 @@ const StandardsUpload = () => {
         .single();
 
       if (!data) continue;
+
+      // Show appropriate stage label based on where processing is up to
+      if ((job as any)?.status === "pending") {
+        setProgress(prev => ({ ...prev, stage: "extracting", message: "Queued — waiting to start…" }));
+      } else if (data.extraction_status === "processing" && (data.total_chunks ?? 0) > 0) {
+        setProgress(prev => ({ ...prev, stage: "storing", message: "Indexing content…" }));
+      } else if ((job as any)?.status === "processing") {
+        setProgress(prev => ({ ...prev, stage: "storing", message: STAGE_LABELS.storing }));
+      }
 
       if (data.extraction_status === "complete") {
         onProgress(1);
@@ -211,11 +214,13 @@ const StandardsUpload = () => {
         throw new Error("Processing failed. Try a different file.");
       }
 
-      // Estimate progress from indexed chunks
+      // Estimate progress — once total_chunks is set, track indexed_chunks ratio
       if (data.total_chunks && data.total_chunks > 0) {
-        onProgress((data.indexed_chunks || 0) / data.total_chunks);
+        const indexedRatio = (data.indexed_chunks || 0) / data.total_chunks;
+        // Map to 0.5–1.0 range (first 50% is extraction/chunking phase)
+        onProgress(0.5 + indexedRatio * 0.5);
       } else {
-        onProgress(Math.min(i / 20, 0.8));
+        onProgress(Math.min(i / 20, 0.45));
       }
     }
 

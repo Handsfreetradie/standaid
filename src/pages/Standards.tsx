@@ -211,18 +211,22 @@ const Standards = () => {
                   const job = processingJobs.find((j: any) => j.standard_id === s.id);
                   const queuePosition = processingJobs.filter((j: any) => j.status === "pending").findIndex((j: any) => j.standard_id === s.id);
                   const isProcessing = s.extraction_status === "processing" || (job as any)?.status === "processing";
-                  const statusText = isProcessing
-                    ? "Extracting & indexing content…"
+                  const isIndexing = isProcessing && (s.total_chunks ?? 0) > 0;
+                  const statusText = isIndexing
+                    ? "Indexing content…"
+                    : isProcessing
+                    ? "Extracting content…"
                     : queuePosition >= 0
                     ? `Queued — position ${queuePosition + 1} in queue`
                     : "Queued — waiting to start…";
+                  const barWidth = isIndexing ? "80%" : isProcessing ? "40%" : "15%";
 
                   return (
                     <div className="mt-3 space-y-1.5">
                       <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
                         <div
                           className="h-full rounded-full bg-primary animate-pulse"
-                          style={{ width: isProcessing ? "60%" : "15%" }}
+                          style={{ width: barWidth }}
                         />
                       </div>
                       <p className="text-xs text-muted-foreground">{statusText}</p>

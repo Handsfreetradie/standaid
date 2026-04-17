@@ -12,6 +12,9 @@ verify_jwt = false
 [functions.capstone]
 verify_jwt = false
 
+[functions.embed-chunks]
+verify_jwt = false
+
 [functions.chunk-test]
 verify_jwt = false
 
