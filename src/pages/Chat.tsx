@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback, useEffect } from "react";
-import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Loader2, Mic } from "lucide-react";
+import { useState, useRef, useCallback } from "react";
+import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Mic } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import VoiceMode from "@/components/VoiceMode";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ interface Message {
   id: string;
   role: "user" | "ai";
   content: string;
+  isTyping?: boolean;
   citations?: Citation[];
   safety_critical?: boolean;
   safety_message?: string;
@@ -49,32 +50,9 @@ const Chat = () => {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
-  const [typingId, setTypingId] = useState<string | null>(null);
-  const [typingText, setTypingText] = useState("");
   const { session } = useAuth();
   const { data: profile } = useProfile();
   const scrollRef = useRef<HTMLDivElement>(null);
-  const typingRef = useRef<{ full: string; pos: number; id: string } | null>(null);
-
-  useEffect(() => {
-    if (!typingId || !typingRef.current) return;
-
-    const tick = setInterval(() => {
-      if (!typingRef.current) return;
-      const { full, pos } = typingRef.current;
-      const next = Math.min(pos + 6, full.length);
-      typingRef.current.pos = next;
-      setTypingText(full.slice(0, next));
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-      if (next >= full.length) {
-        clearInterval(tick);
-        setTypingId(null);
-        typingRef.current = null;
-      }
-    }, 16);
-
-    return () => clearInterval(tick);
-  }, [typingId]);
 
   const queriesRemaining = profile
     ? 5 - (profile.daily_query_count || 0)
@@ -83,13 +61,29 @@ const Chat = () => {
   const scrollToBottom = () => {
     setTimeout(() => {
       scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-    }, 100);
+    }, 50);
   };
 
-  const runQuery = async (question: string): Promise<Message | undefined> => {
+  const startTypewriter = (msgId: string, fullContent: string) => {
+    let pos = 0;
+    const tick = setInterval(() => {
+      pos = Math.min(pos + 5, fullContent.length);
+      const partial = fullContent.slice(0, pos);
+      const done = pos >= fullContent.length;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId ? { ...m, content: partial, isTyping: !done } : m
+        )
+      );
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+      if (done) clearInterval(tick);
+    }, 18);
+  };
+
+  const runQuery = async (question: string) => {
     if (!session) {
       toast.error("Please sign in to use the chat");
-      return;
+      return null;
     }
 
     const { data, error } = await supabase.functions.invoke("query", {
@@ -102,10 +96,11 @@ const Chat = () => {
       if (data.upgrade_required) {
         return {
           id: crypto.randomUUID(),
-          role: "ai",
+          role: "ai" as const,
           content: data.message || data.error,
           gated: true,
           gated_message: data.message,
+          isTyping: false,
         };
       }
       throw new Error(data.error);
@@ -113,8 +108,10 @@ const Chat = () => {
 
     return {
       id: crypto.randomUUID(),
-      role: "ai",
-      content: data.answer || "No response generated.",
+      role: "ai" as const,
+      content: "",
+      isTyping: true,
+      _full: data.answer || "No response generated.",
       citations: data.citations || [],
       safety_critical: data.safety_critical || false,
       safety_message: data.safety_message,
@@ -144,20 +141,23 @@ const Chat = () => {
     setIsLoading(true);
 
     try {
-      const aiMessage = await runQuery(question);
-      if (aiMessage) {
-        typingRef.current = { full: aiMessage.content, pos: 0, id: aiMessage.id };
-        setTypingText("");
+      const result = await runQuery(question);
+      if (result) {
+        const { _full, ...aiMessage } = result as any;
         setMessages((prev) => [...prev, aiMessage]);
-        setTypingId(aiMessage.id);
+        setIsLoading(false);
+        scrollToBottom();
+        if (_full) {
+          startTypewriter(aiMessage.id, _full);
+        }
+        return;
       }
     } catch (e: any) {
       console.error("Query error:", e);
       toast.error(e.message || "Failed to send query");
-    } finally {
-      setIsLoading(false);
-      scrollToBottom();
     }
+    setIsLoading(false);
+    scrollToBottom();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -179,17 +179,19 @@ const Chat = () => {
     setIsLoading(true);
 
     try {
-      const aiMessage = await runQuery(text.trim());
-      if (aiMessage) {
+      const result = await runQuery(text.trim());
+      if (result) {
+        const { _full, ...aiMessage } = result as any;
         setMessages((prev) => [...prev, aiMessage]);
-        return aiMessage.content;
+        setIsLoading(false);
+        if (_full) startTypewriter(aiMessage.id, _full);
+        return _full || aiMessage.content;
       }
     } catch (e: any) {
       console.error("Voice query error:", e);
       return "Sorry, I couldn't process that. Please try again.";
-    } finally {
-      setIsLoading(false);
     }
+    setIsLoading(false);
   }, [session]);
 
   return (
@@ -250,8 +252,8 @@ const Chat = () => {
             ) : (
               <div className="max-w-[90%] space-y-2">
                 <Card className="p-4 shadow-sm">
-                  {/* Accuracy score */}
-                  {msg.accuracy_score != null && (
+                  {/* Accuracy score — hide while typing */}
+                  {!msg.isTyping && msg.accuracy_score != null && (
                     <div className="flex items-center gap-3 mb-3">
                       <div className="flex items-center gap-1.5">
                         <div className="flex gap-0.5">
@@ -271,7 +273,7 @@ const Chat = () => {
                           ))}
                         </div>
                         <span className={`text-xs font-bold ${
-                          msg.accuracy_score >= 8 ? "text-green-600" : msg.accuracy_score >= 5 ? "text-yellow-600" : "text-red-500"
+                          msg.accuracy_score! >= 8 ? "text-green-600" : msg.accuracy_score! >= 5 ? "text-yellow-600" : "text-red-500"
                         }`}>
                           {msg.accuracy_score}/10
                         </span>
@@ -282,11 +284,11 @@ const Chat = () => {
                     </div>
                   )}
 
-                  {/* Answer with markdown + typewriter */}
+                  {/* Answer — plain text + cursor while typing, markdown when done */}
                   <div className="text-sm text-card-foreground leading-relaxed prose prose-sm max-w-none prose-headings:text-foreground prose-p:text-card-foreground prose-strong:text-foreground prose-li:text-card-foreground">
-                    {typingId === msg.id ? (
+                    {msg.isTyping ? (
                       <span>
-                        {typingText}
+                        {msg.content}
                         <span className="inline-block w-0.5 h-4 bg-primary ml-0.5 animate-pulse align-middle" />
                       </span>
                     ) : (
@@ -295,7 +297,7 @@ const Chat = () => {
                   </div>
 
                   {/* Clause badges */}
-                  {typingId !== msg.id && msg.citations && msg.citations.length > 0 && (
+                  {!msg.isTyping && msg.citations && msg.citations.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mt-3">
                       {msg.citations.map((citation, idx) => (
                         <Badge
@@ -315,7 +317,7 @@ const Chat = () => {
                   )}
 
                   {/* Safety warning */}
-                  {typingId !== msg.id && msg.safety_critical && (
+                  {!msg.isTyping && msg.safety_critical && (
                     <div className="flex items-start gap-2 mt-3 rounded-lg bg-destructive/10 p-3">
                       <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0 mt-0.5" />
                       <p className="text-xs text-destructive font-medium">
@@ -346,7 +348,7 @@ const Chat = () => {
                 </Card>
 
                 {/* Follow-up question chips */}
-                {typingId !== msg.id && msg.follow_up_questions && msg.follow_up_questions.length > 0 && (
+                {!msg.isTyping && msg.follow_up_questions && msg.follow_up_questions.length > 0 && (
                   <div className="flex flex-wrap gap-2 px-1">
                     {msg.follow_up_questions.map((q, idx) => (
                       <button
@@ -381,7 +383,7 @@ const Chat = () => {
       </div>
 
       {/* Input */}
-      <div className="border-t border-border px-4 py-3 pb-safe bg-card">
+      <div className="border-t border-border px-4 pt-3 pb-2 bg-card">
         <div className="flex items-end gap-2">
           <Button
             size="icon"
@@ -415,6 +417,9 @@ const Chat = () => {
             <Send className="h-4 w-4" />
           </Button>
         </div>
+        <p className="text-center text-[10px] text-muted-foreground mt-2 pb-safe">
+          Always verify AI answers against the original standard before relying on them on the job.
+        </p>
       </div>
 
       {/* Voice Mode Overlay */}
