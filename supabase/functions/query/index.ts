@@ -228,7 +228,7 @@ ${chunk.content}`;
       body: JSON.stringify({
         model: "gpt-4o-mini",
         temperature: 0.1,
-        max_tokens: 4000,
+        max_tokens: 1200,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: `SOURCE CLAUSES:\n${sourceContext}\n\nUSER QUESTION:\n${question}` },
@@ -285,49 +285,43 @@ ${chunk.content}`;
       parsedResponse.gated_message = "You're on the right track — upgrade to Pro to get the full clause and complete guidance.";
     }
 
-    // Store query and citations
-    const { data: queryRecord } = await supabase
-      .from("queries")
-      .insert({
-        user_id: userId,
-        question,
-        response: parsedResponse.answer,
-        citations: parsedResponse.citations,
-        confidence_score: topSimilarity,
-        safety_flagged: parsedResponse.safety_critical || false,
-        subscription_tier_at_time: tier,
-      })
-      .select()
-      .single();
-
-    // Store individual citations
-    if (queryRecord && parsedResponse.citations?.length > 0) {
-      const citationRecords = parsedResponse.citations.map((c: any) => {
-        const matchedStandard = standards?.find((s: any) => 
-          s.standard_code === c.standard_code
-        );
-        return {
-          query_id: queryRecord.id,
-          standard_id: matchedStandard?.id || standardIds[0],
-          clause_number: c.clause_number,
-          standard_code: c.standard_code,
-          version: c.standard_version,
-          page_number: c.page_number,
-          confidence_score: topSimilarity,
-          chunk_content: c.relevant_text,
-        };
-      });
-
-      await supabase.from("citations").insert(citationRecords);
-    }
-
-    return new Response(JSON.stringify({
+    // Build response immediately — don't wait for DB logging
+    const responsePayload = JSON.stringify({
       ...parsedResponse,
-      query_id: queryRecord?.id,
       low_confidence: isLowConfidence,
       queries_remaining: tier === "free" ? 5 - todayCount - 1 : null,
-    }), {
-      status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } 
+    });
+
+    // Log query + citations in background (non-blocking)
+    supabase.from("queries").insert({
+      user_id: userId,
+      question,
+      response: parsedResponse.answer,
+      citations: parsedResponse.citations,
+      confidence_score: topSimilarity,
+      safety_flagged: parsedResponse.safety_critical || false,
+      subscription_tier_at_time: tier,
+    }).select().single().then(({ data: queryRecord }) => {
+      if (queryRecord && parsedResponse.citations?.length > 0) {
+        const citationRecords = parsedResponse.citations.map((c: any) => {
+          const matchedStandard = standards?.find((s: any) => s.standard_code === c.standard_code);
+          return {
+            query_id: queryRecord.id,
+            standard_id: matchedStandard?.id || standardIds[0],
+            clause_number: c.clause_number,
+            standard_code: c.standard_code,
+            version: c.standard_version,
+            page_number: c.page_number,
+            confidence_score: topSimilarity,
+            chunk_content: c.relevant_text,
+          };
+        });
+        supabase.from("citations").insert(citationRecords).catch(console.error);
+      }
+    }).catch(console.error);
+
+    return new Response(responsePayload, {
+      status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
   } catch (e) {
     console.error("Query error:", e);
