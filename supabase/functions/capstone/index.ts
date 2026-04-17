@@ -70,6 +70,25 @@ async function getChunksWithRecovery(
   return chunks;
 }
 
+async function callAI(body: object, openAiKey: string, geminiKey?: string): Promise<Response> {
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${openAiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (res.ok) return res;
+
+  if (!geminiKey) return res;
+
+  console.log(`[capstone] OpenAI failed (${res.status}), falling back to Gemini`);
+  const geminiBody = { ...(body as any), model: "gemini-2.0-flash" };
+  return fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${geminiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify(geminiBody),
+  });
+}
+
 serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
   const corsHeaders = {
@@ -94,6 +113,7 @@ serve(async (req) => {
     const { action, standardId, topic, difficulty, questionCount, examId, questionId, userAnswer, imageBase64, chunkId, examTopics, examPdfText } = await req.json();
     const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
     if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY not configured");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 
     // ── RATE LIMIT: 20 AI calls per hour per user (applies to AI actions only) ──
     const AI_ACTIONS = ["generate_questions", "analyze_photo", "explain_chunk", "generate_study_guide"];
@@ -124,10 +144,7 @@ serve(async (req) => {
       const diff = difficulty || "medium";
       const topicFilter = topic ? `Focus on the topic: ${topic}.` : "";
 
-      const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const aiResponse = await callAI({
           model: "gpt-4o-mini",
           messages: [
             { role: "system", content: `You are an exam question generator for trade apprentices studying ${standard?.title || "industry standards"}. Generate multiple-choice questions ONLY from the provided standard content. Never invent facts. Each question must reference specific clauses.` },
@@ -163,8 +180,7 @@ serve(async (req) => {
             },
           }],
           tool_choice: { type: "function", function: { name: "return_questions" } },
-        }),
-      });
+      }, OPENAI_API_KEY, GEMINI_API_KEY);
 
       if (!aiResponse.ok) {
         const status = aiResponse.status;
@@ -201,10 +217,7 @@ serve(async (req) => {
 
       const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
 
-      const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const aiResponse = await callAI({
           model: "gpt-4o-mini",
           messages: [
             {
@@ -232,8 +245,7 @@ Rules:
               ],
             },
           ],
-        }),
-      });
+      }, OPENAI_API_KEY, GEMINI_API_KEY);
 
       if (!aiResponse.ok) {
         const status = aiResponse.status;
@@ -276,10 +288,7 @@ Rules:
         });
       }
 
-      const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const aiResponse = await callAI({
           model: "gpt-4o-mini",
           messages: [
             {
@@ -297,8 +306,7 @@ Rules:
               content: `Explain this standard clause in apprentice-friendly language:\n\n[${chunk.clause_number || ""}${chunk.clause_title ? " — " + chunk.clause_title : ""}]\n${chunk.content}`,
             },
           ],
-        }),
-      });
+      }, OPENAI_API_KEY, GEMINI_API_KEY);
 
       if (!aiResponse.ok) {
         const status = aiResponse.status;
@@ -396,17 +404,13 @@ Rules:
 
       const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
 
-      const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const aiResponse = await callAI({
           model: "gpt-4o-mini",
           messages: [
             { role: "system", content: "You are an expert trade educator. Create concise, apprentice-friendly study guides from standard content. Use clear headings, bullet points, and highlight key clause numbers. Only use information from the provided content." },
             { role: "user", content: `Create a comprehensive study guide for apprentices from this standard.${topic ? ` Focus on: ${topic}` : ""}\n\nStandard: ${standard?.standard_code || standard?.title}\n\nContent:\n${chunks.map((c) => `[${c.clause_number || ""}${c.clause_title ? " - " + c.clause_title : ""}] ${c.content}`).join("\n\n")}` },
           ],
-        }),
-      });
+      }, OPENAI_API_KEY, GEMINI_API_KEY);
 
       if (!aiResponse.ok) {
         if (aiResponse.status === 429) return new Response(JSON.stringify({ error: "Rate limited." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -456,10 +460,7 @@ Rules:
 
       const fullContext = contextParts.join("\n\n") + standardContext;
 
-      const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const aiResponse = await callAI({
           model: "gpt-4o-mini",
           messages: [
             {
@@ -514,8 +515,7 @@ Rules:
             },
           }],
           tool_choice: { type: "function", function: { name: "return_exam_prep" } },
-        }),
-      });
+      }, OPENAI_API_KEY, GEMINI_API_KEY);
 
       if (!aiResponse.ok) {
         const status = aiResponse.status;
