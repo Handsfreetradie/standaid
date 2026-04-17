@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Loader2, Mic } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import VoiceMode from "@/components/VoiceMode";
@@ -49,9 +49,36 @@ const Chat = () => {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
+  const [typingId, setTypingId] = useState<string | null>(null);
+  const [typingText, setTypingText] = useState("");
   const { session } = useAuth();
   const { data: profile } = useProfile();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const typingRef = useRef<{ full: string; pos: number; id: string } | null>(null);
+
+  useEffect(() => {
+    if (!typingId) return;
+    const msg = messages.find((m) => m.id === typingId);
+    if (!msg) return;
+    typingRef.current = { full: msg.content, pos: 0, id: typingId };
+    setTypingText("");
+
+    const tick = setInterval(() => {
+      if (!typingRef.current) return;
+      const { full, pos, id } = typingRef.current;
+      const next = Math.min(pos + 6, full.length);
+      typingRef.current.pos = next;
+      setTypingText(full.slice(0, next));
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+      if (next >= full.length) {
+        clearInterval(tick);
+        setTypingId(null);
+        typingRef.current = null;
+      }
+    }, 16);
+
+    return () => clearInterval(tick);
+  }, [typingId]);
 
   const queriesRemaining = profile
     ? 5 - (profile.daily_query_count || 0)
@@ -122,7 +149,10 @@ const Chat = () => {
 
     try {
       const aiMessage = await runQuery(question);
-      if (aiMessage) setMessages((prev) => [...prev, aiMessage]);
+      if (aiMessage) {
+        setMessages((prev) => [...prev, aiMessage]);
+        setTypingId(aiMessage.id);
+      }
     } catch (e: any) {
       console.error("Query error:", e);
       toast.error(e.message || "Failed to send query");
@@ -254,13 +284,20 @@ const Chat = () => {
                     </div>
                   )}
 
-                  {/* Answer with markdown */}
+                  {/* Answer with markdown + typewriter */}
                   <div className="text-sm text-card-foreground leading-relaxed prose prose-sm max-w-none prose-headings:text-foreground prose-p:text-card-foreground prose-strong:text-foreground prose-li:text-card-foreground">
-                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    {typingId === msg.id ? (
+                      <span>
+                        {typingText}
+                        <span className="inline-block w-0.5 h-4 bg-primary ml-0.5 animate-pulse align-middle" />
+                      </span>
+                    ) : (
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    )}
                   </div>
 
                   {/* Clause badges */}
-                  {msg.citations && msg.citations.length > 0 && (
+                  {typingId !== msg.id && msg.citations && msg.citations.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mt-3">
                       {msg.citations.map((citation, idx) => (
                         <Badge
@@ -280,7 +317,7 @@ const Chat = () => {
                   )}
 
                   {/* Safety warning */}
-                  {msg.safety_critical && (
+                  {typingId !== msg.id && msg.safety_critical && (
                     <div className="flex items-start gap-2 mt-3 rounded-lg bg-destructive/10 p-3">
                       <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0 mt-0.5" />
                       <p className="text-xs text-destructive font-medium">
@@ -311,7 +348,7 @@ const Chat = () => {
                 </Card>
 
                 {/* Follow-up question chips */}
-                {msg.follow_up_questions && msg.follow_up_questions.length > 0 && (
+                {typingId !== msg.id && msg.follow_up_questions && msg.follow_up_questions.length > 0 && (
                   <div className="flex flex-wrap gap-2 px-1">
                     {msg.follow_up_questions.map((q, idx) => (
                       <button
