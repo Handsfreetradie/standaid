@@ -142,7 +142,7 @@ Transcribe completely and accurately. Do not summarise or skip any technical con
             ],
           },
         ],
-        max_tokens: 64000,
+        max_tokens: 16000,
       }),
     });
 
@@ -480,6 +480,7 @@ serve(async (req) => {
     const body = await req.json();
     standard_id = body.standard_id;
     const clientExtractedText: string | null = body.extracted_text || null;
+    console.log(`[DIAG] standard_id=${standard_id} client_text_length=${clientExtractedText?.length ?? 0}`);
     if (!standard_id) {
       return new Response(JSON.stringify({ error: "standard_id is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
