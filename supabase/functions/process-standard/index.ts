@@ -432,9 +432,10 @@ serve(async (req) => {
 
   // Admin client bypasses RLS — used for all DB writes so they survive JWT expiry
   // and can always mark jobs as failed on timeout/error.
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabaseAdmin = createClient(
     Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    serviceRoleKey
   );
 
   let standard_id: string | null = null;
@@ -457,7 +458,6 @@ serve(async (req) => {
     // Support two call patterns:
     // 1. Internal call from upload-standard: uses service role key + passes user_id in body
     // 2. Direct user call: uses user JWT for auth
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const isInternalCall = authHeader === `Bearer ${serviceRoleKey}`;
 
     let userId: string;
@@ -610,7 +610,6 @@ serve(async (req) => {
 
     // Hand off embedding to embed-chunks (runs in its own 150s window)
     const embedUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/embed-chunks`;
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     fetch(embedUrl, {
       method: "POST",
       headers: {
