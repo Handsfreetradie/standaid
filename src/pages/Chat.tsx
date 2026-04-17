@@ -195,7 +195,7 @@ const Chat = () => {
   }, [session]);
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-3.5rem-5rem)]">
+    <div className="flex flex-col fixed top-14 bottom-20 left-0 right-0 bg-background" style={{ zIndex: 20 }}>
       {/* Header */}
       <div className="px-5 py-4 border-b border-border">
         <div className="flex items-center gap-2">
