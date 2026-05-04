@@ -3,15 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildSystemPrompt, type TradeType } from "./system-prompt.ts";
 import { detectTrade } from "./trade-detection.ts";
 import { validateResponse } from "./validation.ts";
-
-const ALLOWED_ORIGINS = (Deno.env.get("ALLOWED_ORIGIN") || "http://localhost:8080")
-  .split(",").map((o: string) => o.trim());
-
-function getAllowedOrigin(origin: string): string {
-  if (ALLOWED_ORIGINS.includes(origin)) return origin;
-  if (origin.endsWith(".lovable.app") || origin.endsWith(".lovableproject.com") || origin.startsWith("http://localhost")) return origin;
-  return ALLOWED_ORIGINS[0];
-}
+import { getAllowedOrigin } from "../_shared/cors.ts";
 
 serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
@@ -179,21 +171,8 @@ ${chunk.content}`;
     // Build dynamic system prompt
     const systemPrompt = buildSystemPrompt(trade, contextChunks);
 
-    // Log to query_log upfront so feedback can reference the queryId
-    const { data: queryLog } = await supabase
-      .from("query_log")
-      .insert({
-        user_id: userId,
-        query_text: question,
-        trade,
-        retrieved_chunk_ids: matchedChunks.map((c: any) => c.id).filter(Boolean),
-        retrieved_chunk_count: matchedChunks.length,
-        model_used: "gpt-4o-mini",
-      })
-      .select("id")
-      .single();
-
-    const queryId: string | null = queryLog?.id ?? null;
+    // Pre-generate the query log ID so feedback can reference it without a blocking DB write
+    const queryId = crypto.randomUUID();
 
     // Confidence assessment
     const isLowConfidence = topSimilarity < 0.80;
@@ -276,8 +255,22 @@ ${chunk.content}`;
       needs_review: validation.needsReview,
     });
 
-    // Log query + citations + validation metadata in background (non-blocking)
+    // All DB logging is non-blocking — runs after response is returned
     (async () => {
+      await supabase.from("query_log").insert({
+        id: queryId,
+        user_id: userId,
+        query_text: question,
+        trade,
+        retrieved_chunk_ids: matchedChunks.map((c: any) => c.id).filter(Boolean),
+        retrieved_chunk_count: matchedChunks.length,
+        model_used: "gpt-4o-mini",
+        response_text: parsedResponse.answer,
+        confidence_score: validation.confidenceScore,
+        validation_issues: validation.issues,
+        needs_review: validation.needsReview,
+      });
+
       const { data: queryRecord } = await supabase.from("queries").insert({
         user_id: userId,
         question,
@@ -305,18 +298,6 @@ ${chunk.content}`;
         await supabase.from("citations").insert(citationRecords);
       }
     })().catch(console.error);
-
-    // Update query_log with validation results in background (non-blocking)
-    if (queryId) {
-      (async () => {
-        await supabase.from("query_log").update({
-          response_text: parsedResponse.answer,
-          confidence_score: validation.confidenceScore,
-          validation_issues: validation.issues,
-          needs_review: validation.needsReview,
-        }).eq("id", queryId);
-      })().catch(console.error);
-    }
 
     return new Response(responsePayload, {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }

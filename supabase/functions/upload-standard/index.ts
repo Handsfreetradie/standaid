@@ -1,16 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getAllowedOrigin } from "../_shared/cors.ts";
 
 declare const EdgeRuntime: { waitUntil: (p: Promise<unknown>) => void } | undefined;
-
-const ALLOWED_ORIGINS = (Deno.env.get("ALLOWED_ORIGIN") || "http://localhost:8080")
-  .split(",").map((o: string) => o.trim());
-
-function getAllowedOrigin(origin: string): string {
-  if (ALLOWED_ORIGINS.includes(origin)) return origin;
-  if (origin.endsWith(".lovable.app") || origin.endsWith(".lovableproject.com") || origin.startsWith("http://localhost")) return origin;
-  return ALLOWED_ORIGINS[0];
-}
 
 serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
@@ -55,50 +47,31 @@ serve(async (req) => {
         .eq("user_id", userId);
 
       if ((count || 0) >= 1) {
-        return new Response(JSON.stringify({ 
+        return new Response(JSON.stringify({
           error: "Free tier limit reached. You can only upload 1 standard on the free plan. Upgrade to Pro for unlimited uploads.",
           upgrade_required: true
         }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
     }
 
-    // Parse multipart form data
-    const formData = await req.formData();
-    const file = formData.get("file") as File;
-    const title = formData.get("title") as string;
-    const standardCode = formData.get("standard_code") as string;
-    const version = formData.get("version") as string;
-    const tradeCategory = formData.get("trade_category") as string;
-    const extractedText = (formData.get("extracted_text") as string | null) || null;
+    // Parse JSON body — file was uploaded directly to storage by the browser
+    const body = await req.json();
+    const { title, standard_code: standardCode, version, trade_category: tradeCategory, file_path: filePath, extracted_text: extractedText } = body;
 
-    if (!file || !title) {
-      return new Response(JSON.stringify({ error: "File and title are required" }), { 
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } 
-      });
-    }
-
-    // Validate PDF — size, MIME type, then magic bytes (%PDF)
-    if (file.size > 50 * 1024 * 1024) {
-      return new Response(JSON.stringify({ error: "File must be under 50MB" }), {
+    if (!title || !filePath) {
+      return new Response(JSON.stringify({ error: "title and file_path are required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
     }
 
-    if (file.type !== "application/pdf") {
-      return new Response(JSON.stringify({ error: "Only PDF files are accepted" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
+    // Ensure the file_path belongs to this user
+    if (!filePath.startsWith(`${userId}/`)) {
+      return new Response(JSON.stringify({ error: "Unauthorised file path" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
     }
 
-    const fileBuffer = await file.arrayBuffer();
-    const magic = new Uint8Array(fileBuffer.slice(0, 4));
-    if (magic[0] !== 0x25 || magic[1] !== 0x50 || magic[2] !== 0x44 || magic[3] !== 0x46) {
-      return new Response(JSON.stringify({ error: "Invalid file format. Only PDF files are accepted." }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Create standard record
+    // Create standard record with the file_path already known
     const { data: standard, error: insertError } = await supabaseAdmin
       .from("standards")
       .insert({
@@ -107,6 +80,7 @@ serve(async (req) => {
         standard_code: standardCode || null,
         version: version || null,
         trade_category: tradeCategory || null,
+        file_path: filePath,
         extraction_status: "pending",
         is_partial: tier === "free",
       })
@@ -115,30 +89,10 @@ serve(async (req) => {
 
     if (insertError) {
       console.error("Insert error:", insertError);
-      return new Response(JSON.stringify({ error: "Failed to create standard record" }), { 
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } 
+      return new Response(JSON.stringify({ error: "Failed to create standard record" }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
     }
-
-    // Upload file to storage
-    const filePath = `${userId}/${standard.id}.pdf`;
-    const { error: uploadError } = await supabaseAdmin.storage
-      .from("standards")
-      .upload(filePath, fileBuffer, { contentType: "application/pdf" });
-
-    if (uploadError) {
-      console.error("Upload error:", uploadError);
-      await supabaseAdmin.from("standards").delete().eq("id", standard.id);
-      return new Response(JSON.stringify({ error: "Failed to upload file" }), { 
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } 
-      });
-    }
-
-    // Update standard with file path
-    await supabaseAdmin
-      .from("standards")
-      .update({ file_path: filePath })
-      .eq("id", standard.id);
 
     // Insert processing job (replaces fire-and-forget fetch)
     await supabaseAdmin.from("processing_jobs").insert({

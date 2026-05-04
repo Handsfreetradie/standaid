@@ -45,7 +45,11 @@ export function validateResponse(input: ValidationInput): ValidationResult {
     };
   }
 
-  const citationResult = validateCitations(input.response, input.chunks);
+  // Derive shared chunk data once — passed to both citation and grounding checks
+  const chunkClauseNumbers = buildChunkClauseSet(input.chunks);
+  const chunkWords = buildChunkWordSet(input.chunks);
+
+  const citationResult = validateCitations(input.response, input.chunks, chunkClauseNumbers);
   issues.push(...citationResult.issues);
   cleanedResponse = citationResult.cleaned;
 
@@ -55,7 +59,7 @@ export function validateResponse(input: ValidationInput): ValidationResult {
     cleanedResponse = safetyResult.updatedResponse;
   }
 
-  const groundingResult = checkGrounding(cleanedResponse, input.chunks);
+  const groundingResult = checkGrounding(cleanedResponse, input.chunks, chunkWords);
   issues.push(...groundingResult.issues);
 
   const confidenceScore = computeConfidence(issues);
@@ -71,16 +75,46 @@ export function validateResponse(input: ValidationInput): ValidationResult {
   };
 }
 
-const CLAUSE_REGEX =
-  /(?:AS|AS\/NZS)\s+\d+(?:\.\d+)*(?:\s+(?:Clause|Table|Section|Figure)\s+\d+(?:\.\d+)*)?|(?:Clause|Table|Section|Figure)\s+\d+(?:\.\d+)+/gi;
+// Matches "AS/NZS 3000 Clause 2.3.2" or "AS 3000 Clause 2.3.2"
+const STANDARD_CLAUSE_REGEX =
+  /(?:AS|AS\/NZS)\s+\d+(?:\.\d+)*(?:\s+(?:Clause|Table|Section|Figure)\s+\d+(?:\.\d+)*)?/gi;
+
+// Matches standalone "Clause 2.3.2" (must have at least one dot to avoid "Clause 2")
+const STANDALONE_CLAUSE_REGEX =
+  /(?:Clause|Table|Section|Figure)\s+\d+(?:\.\d+)+/gi;
+
+const CLAUSE_NUMBER_REGEX = /\d+(?:\.\d+)+/;
+
+function buildChunkClauseSet(chunks: Array<{ content: string }>): Set<string> {
+  const numbers = new Set<string>();
+  for (const chunk of chunks) {
+    for (const match of chunk.content.matchAll(/\d+(?:\.\d+)+/g)) {
+      numbers.add(match[0]);
+    }
+  }
+  return numbers;
+}
+
+function buildChunkWordSet(chunks: Array<{ content: string }>): Set<string> {
+  const words = new Set<string>();
+  for (const chunk of chunks) {
+    for (const word of chunk.content.toLowerCase().split(/\W+/)) {
+      if (word.length > 4) words.add(word);
+    }
+  }
+  return words;
+}
 
 function validateCitations(
   response: string,
-  chunks: Array<{ content: string }>
+  chunks: Array<{ content: string }>,
+  chunkClauseNumbers: Set<string>,
 ): { cleaned: string; issues: ValidationIssue[] } {
   const issues: ValidationIssue[] = [];
-  const citations = response.match(CLAUSE_REGEX) ?? [];
-  const chunkText = chunks.map((c) => c.content).join("\n").toLowerCase();
+  const citations = [
+    ...(response.match(STANDARD_CLAUSE_REGEX) ?? []),
+    ...(response.match(STANDALONE_CLAUSE_REGEX) ?? []),
+  ];
 
   if (citations.length === 0) {
     issues.push({
@@ -99,11 +133,10 @@ function validateCitations(
   let cleaned = response;
 
   for (const citation of citations) {
-    const numberMatch = citation.match(/\d+(?:\.\d+)+/);
+    const numberMatch = citation.match(CLAUSE_NUMBER_REGEX);
     if (!numberMatch) continue;
 
-    const clauseNumber = numberMatch[0];
-    if (!chunkText.includes(clauseNumber.toLowerCase())) {
+    if (!chunkClauseNumbers.has(numberMatch[0])) {
       issues.push({
         type: "hallucinated_citation",
         severity: "warning",
@@ -111,7 +144,7 @@ function validateCitations(
       });
       cleaned = cleaned.replace(
         citation,
-        "[citation unavailable — check the standard directly]"
+        "[citation unavailable — check the standard directly]",
       );
     }
   }
@@ -171,12 +204,13 @@ function checkSafetyWarnings(
 
 function checkGrounding(
   response: string,
-  chunks: Array<{ content: string }>
+  chunks: Array<{ content: string }>,
+  chunkWords: Set<string>,
 ): { issues: ValidationIssue[] } {
   const issues: ValidationIssue[] = [];
 
   if (chunks.length === 0) {
-    // Warning not critical — the AI handles casual chat with no chunks
+    // Downgrade to warning: casual questions legitimately have no chunks
     issues.push({
       type: "unverified_claim",
       severity: "warning",
@@ -184,14 +218,6 @@ function checkGrounding(
     });
     return { issues };
   }
-
-  const chunkWords = new Set(
-    chunks
-      .map((c) => c.content.toLowerCase())
-      .join(" ")
-      .split(/\W+/)
-      .filter((w) => w.length > 4)
-  );
 
   const responseWords = response
     .toLowerCase()

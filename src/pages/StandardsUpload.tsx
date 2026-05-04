@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
@@ -16,6 +17,9 @@ import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+
+// Supabase edge functions have a ~6MB body limit — drop extracted text above this
+const MAX_EXTRACTED_BYTES = 1_400_000;
 
 type Step = "intro" | "upload" | "naming" | "processing" | "success";
 
@@ -42,30 +46,31 @@ async function extractPdfText(
   const buffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
   const numPages = pdf.numPages;
-  const pageTexts: string[] = [];
+  let completed = 0;
 
-  for (let p = 1; p <= numPages; p++) {
-    const page = await pdf.getPage(p);
-    const content = await page.getTextContent();
+  const pageTexts = await Promise.all(
+    Array.from({ length: numPages }, async (_, i) => {
+      const page = await pdf.getPage(i + 1);
+      const content = await page.getTextContent();
 
-    // Group text items by quantised Y coordinate to reconstruct lines
-    const lineMap = new Map<number, string[]>();
-    for (const item of content.items) {
-      if (!("str" in item) || !item.str) continue;
-      // PDF Y-axis origin is bottom-left; quantise to 3pt buckets for line grouping
-      const y = Math.round((item as any).transform[5] / 3) * 3;
-      if (!lineMap.has(y)) lineMap.set(y, []);
-      lineMap.get(y)!.push(item.str);
-    }
+      // Group text items by quantised Y coordinate to reconstruct lines.
+      // PDF Y-axis origin is bottom-left; 3pt buckets keep items on the same visual line together.
+      const lineMap = new Map<number, string[]>();
+      for (const item of content.items) {
+        if (!("str" in item) || !item.str) continue;
+        const y = Math.round((item as any).transform[5] / 3) * 3;
+        if (!lineMap.has(y)) lineMap.set(y, []);
+        lineMap.get(y)!.push(item.str);
+      }
 
-    // Sort descending (top of page first) and join each line
-    const sortedLines = [...lineMap.entries()]
-      .sort((a, b) => b[0] - a[0])
-      .map(([, words]) => words.join(""));
+      const sortedLines = [...lineMap.entries()]
+        .sort((a, b) => b[0] - a[0])
+        .map(([, words]) => words.join(""));
 
-    pageTexts.push(sortedLines.join("\n"));
-    onProgress(p / numPages);
-  }
+      onProgress(++completed / numPages);
+      return sortedLines.join("\n");
+    }),
+  );
 
   return pageTexts.map((text, i) => `\n[PAGE ${i + 1}]\n${text}`).join("");
 }
@@ -140,15 +145,8 @@ const StandardsUpload = () => {
       return;
     }
 
-    setProgress({ stage: "extracting", percent: 48, message: STAGE_LABELS.extracting });
-    await delay(300);
-    setProgress({ stage: "sorting", percent: 52, message: STAGE_LABELS.sorting });
-    await delay(300);
-    setProgress({ stage: "chunking", percent: 55, message: STAGE_LABELS.chunking });
+    setProgress({ stage: "chunking", percent: 52, message: STAGE_LABELS.chunking });
 
-    // Supabase edge functions have a ~6MB body limit.
-    // If the extracted text is too large, drop it and let the server extract from storage.
-    const MAX_EXTRACTED_BYTES = 1_400_000; // 1.4MB safety margin
     const textToSend = extractedText && extractedText.length <= MAX_EXTRACTED_BYTES
       ? extractedText
       : undefined;
@@ -186,7 +184,6 @@ const StandardsUpload = () => {
       setProgress({ stage: "done", percent: 100, message: STAGE_LABELS.done });
       setResult(pollResult);
       queryClient.invalidateQueries({ queryKey: ["standards"] });
-      await delay(500);
       setStep("success");
     } catch (e: any) {
       toast.error(e.message || "Processing failed");
@@ -386,11 +383,10 @@ const StandardsUpload = () => {
         </div>
 
         <label className="flex items-start gap-3 mb-6 cursor-pointer">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={licenceConfirmed}
-            onChange={(e) => setLicenceConfirmed(e.target.checked)}
-            className="mt-0.5 h-4 w-4 accent-primary flex-shrink-0"
+            onCheckedChange={(v) => setLicenceConfirmed(v === true)}
+            className="mt-0.5 flex-shrink-0"
           />
           <span className="text-xs text-muted-foreground leading-relaxed">
             I confirm I hold a valid licence or subscription for this document and am authorised to upload it in accordance with the publisher's terms of use.
