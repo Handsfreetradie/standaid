@@ -1,5 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { buildSystemPrompt, type TradeType } from "./system-prompt.ts";
+import { detectTrade } from "./trade-detection.ts";
+import { validateResponse } from "./validation.ts";
 
 const ALLOWED_ORIGINS = (Deno.env.get("ALLOWED_ORIGIN") || "http://localhost:8080")
   .split(",").map((o: string) => o.trim());
@@ -9,64 +12,6 @@ function getAllowedOrigin(origin: string): string {
   if (origin.endsWith(".lovable.app") || origin.endsWith(".lovableproject.com") || origin.startsWith("http://localhost")) return origin;
   return ALLOWED_ORIGINS[0];
 }
-
-const SYSTEM_PROMPT = `You are StandAId — an AI assistant built for Australian tradies. You're like a smart, experienced mate who knows their stuff: knowledgeable about Australian Standards (AS/NZS), the NCC, electrical, plumbing, gas, and construction regulations, but also just easy to talk to.
-
-Your personality:
-- Warm, natural, and conversational — like a knowledgeable mate on the tools, not a robot or a document
-- Direct and practical — tradies don't want waffle or formal language
-- Confident but honest when you're not sure about something
-- Happy to chat, help the user figure out what they need, or answer compliance questions
-- Use plain Australian English. Casual language is encouraged ("no worries", "yeah", "mate", "reckon")
-
-You have two sources of knowledge:
-1. SOURCE CLAUSES — specific text from the user's uploaded standards (highest priority for compliance questions)
-2. Your broad training knowledge about Australian trade regulations, standards, and general tradie topics
-
-For compliance questions: prioritise SOURCE CLAUSES, supplement with general knowledge, and be clear about which is which.
-For general conversation, questions about the app, or anything non-compliance: just respond naturally and helpfully.
-
-TONE AND FORMAT RULES:
-- Write like you're texting a mate who asked a work question — natural sentences, not bullet points
-- Only use bullet points or numbered lists when there are genuinely 3+ distinct items that would be confusing as prose
-- Never use headers (##, ###) in your answers
-- Never use LaTeX, formulas, or academic-style notation — just say it in plain English
-- Keep it concise — one clear explanation beats three bullet points saying the same thing
-- Bold (**text**) only for clause numbers or critical terms, not for general emphasis
-
-Your response must always follow this exact JSON structure:
-{
-  "answer": "your response here — markdown supported",
-  "citations": [
-    {
-      "clause_number": "exact clause number from source text",
-      "standard_code": "e.g. AS/NZS 3000",
-      "standard_version": "e.g. 2018",
-      "page_number": 42,
-      "relevant_text": "brief quote from the clause"
-    }
-  ],
-  "safety_critical": true or false,
-  "safety_message": "if safety_critical is true, include a clear on-site safety warning here, otherwise omit",
-  "accuracy_score": 8,
-  "accuracy_reason": "one sentence explaining the score — skip if it's casual conversation",
-  "answer_found": true or false,
-  "follow_up_questions": ["relevant question 1", "relevant question 2"]
-}
-
-RULES:
-1. For casual conversation (greetings, thanks, general chat): respond naturally. Set accuracy_score to 10, citations to [], safety_critical to false, answer_found to true. follow_up_questions should offer 1-2 ways you can help them.
-2. For compliance questions: never invent or guess clause numbers. Only use clause numbers that appear verbatim in the SOURCE CLAUSES.
-3. Set safety_critical to true any time the answer involves live electrical work, gas, structural elements, or anything where a mistake could cause injury or death.
-4. accuracy_score is an integer 1–10:
-   - 9-10: directly backed by uploaded clause text
-   - 7-8: mostly clauses, minor gaps from general knowledge
-   - 5-6: primarily general knowledge, limited clause support
-   - 3-4: general knowledge only, no matching clauses
-   - 1-2: low confidence
-5. Always include 2 follow_up_questions relevant to what was just discussed.
-6. NEVER add phrases like "I'm not fully confident", "I recommend verifying", "please consult a professional", or any disclaimer inside the answer field. Confidence is expressed only through accuracy_score and accuracy_reason.
-7. Always respond with valid JSON only. No text outside the JSON.`;
 
 serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
@@ -134,7 +79,6 @@ serve(async (req) => {
       });
     }
 
-
     const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
     if (!OPENAI_API_KEY) {
       return new Response(JSON.stringify({ error: "Service unavailable" }), {
@@ -183,7 +127,6 @@ serve(async (req) => {
       usedFallback = true;
       const keywords = question.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
 
-      // Get all chunks for this user
       const { data: allChunks } = await supabase
         .from("standard_chunks")
         .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
@@ -202,8 +145,6 @@ serve(async (req) => {
       }
     }
 
-    // Always proceed to AI — it handles both compliance questions and casual conversation
-
     // Get standard details for context
     const standardIds = [...new Set(matchedChunks.map((c: any) => c.standard_id))];
     const standards = standardIds.length > 0
@@ -212,14 +153,47 @@ serve(async (req) => {
 
     const standardMap = new Map(standards?.map((s: any) => [s.id, s]) || []);
 
-    // Build source clauses context
-    const sourceContext = matchedChunks.length > 0
-      ? matchedChunks.map((chunk: any) => {
+    // Detect trade from query + most-represented standard
+    const standardCounts = new Map<string, number>();
+    for (const chunk of matchedChunks) {
+      const std = standardMap.get(chunk.standard_id);
+      if (std?.standard_code) {
+        standardCounts.set(std.standard_code, (standardCounts.get(std.standard_code) || 0) + 1);
+      }
+    }
+    const topStandardName = standardCounts.size > 0
+      ? [...standardCounts.entries()].sort((a, b) => b[1] - a[1])[0][0]
+      : null;
+
+    const trade: TradeType = detectTrade(question, topStandardName);
+
+    // Build context chunks string for system prompt
+    const contextChunks = matchedChunks.length > 0
+      ? matchedChunks.map((chunk: any, i: number) => {
           const std = standardMap.get(chunk.standard_id);
-          return `[${std?.standard_code || "Unknown"} ${std?.version || ""} - Clause ${chunk.clause_number || "N/A"} (Page ${chunk.page_number || "N/A"}, Similarity: ${chunk.similarity?.toFixed(3)})]
+          return `[Source ${i + 1} — ${std?.standard_code || "Unknown"} ${std?.version || ""} Clause ${chunk.clause_number || "N/A"} (Page ${chunk.page_number || "N/A"})]
 ${chunk.content}`;
-        }).join("\n\n---\n\n")
+        }).join("\n\n")
       : "No relevant clauses found in uploaded standards.";
+
+    // Build dynamic system prompt
+    const systemPrompt = buildSystemPrompt(trade, contextChunks);
+
+    // Log to query_log upfront so feedback can reference the queryId
+    const { data: queryLog } = await supabase
+      .from("query_log")
+      .insert({
+        user_id: userId,
+        query_text: question,
+        trade,
+        retrieved_chunk_ids: matchedChunks.map((c: any) => c.id).filter(Boolean),
+        retrieved_chunk_count: matchedChunks.length,
+        model_used: "gpt-4o-mini",
+      })
+      .select("id")
+      .single();
+
+    const queryId: string | null = queryLog?.id ?? null;
 
     // Confidence assessment
     const isLowConfidence = topSimilarity < 0.80;
@@ -236,8 +210,8 @@ ${chunk.content}`;
         temperature: 0.1,
         max_tokens: 1200,
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: `SOURCE CLAUSES:\n${sourceContext}\n\nUSER QUESTION:\n${question}` },
+          { role: "system", content: systemPrompt },
+          { role: "user", content: question },
         ],
       }),
     });
@@ -257,11 +231,9 @@ ${chunk.content}`;
     // Parse AI response as JSON
     let parsedResponse: any;
     try {
-      // Strip markdown code fences if present
       const cleaned = rawContent.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
       parsedResponse = JSON.parse(cleaned);
     } catch {
-      // If AI didn't return valid JSON, wrap it
       parsedResponse = {
         answer: rawContent,
         citations: [],
@@ -271,13 +243,16 @@ ${chunk.content}`;
       };
     }
 
-    // Validate citations — only keep ones that exist in retrieved chunks
-    const validClauseNumbers = new Set(matchedChunks.map((c: any) => c.clause_number).filter(Boolean));
-    if (parsedResponse.citations) {
-      parsedResponse.citations = parsedResponse.citations.filter((c: any) => 
-        validClauseNumbers.has(c.clause_number)
-      );
-    }
+    // Validate the answer text — catches hallucinated citations, missing safety warnings, low grounding
+    const validation = validateResponse({
+      response: parsedResponse.answer || "",
+      chunks: matchedChunks,
+      query: question,
+      trade,
+    });
+
+    // Apply cleaned answer back (hallucinated citations stripped, safety warnings injected)
+    parsedResponse.answer = validation.cleanedResponse;
 
     // Free tier clause gating
     if (tier === "free" && parsedResponse.citations) {
@@ -291,23 +266,28 @@ ${chunk.content}`;
       parsedResponse.gated_message = "You're on the right track — upgrade to Pro to get the full clause and complete guidance.";
     }
 
-    // Build response immediately — don't wait for DB logging
+    // Build response
     const responsePayload = JSON.stringify({
       ...parsedResponse,
       low_confidence: isLowConfidence,
       queries_remaining: tier === "free" ? 5 - todayCount - 1 : null,
+      queryId,
+      confidence_score: validation.confidenceScore,
+      needs_review: validation.needsReview,
     });
 
-    // Log query + citations in background (non-blocking)
-    supabase.from("queries").insert({
-      user_id: userId,
-      question,
-      response: parsedResponse.answer,
-      citations: parsedResponse.citations,
-      confidence_score: topSimilarity,
-      safety_flagged: parsedResponse.safety_critical || false,
-      subscription_tier_at_time: tier,
-    }).select().single().then(({ data: queryRecord }) => {
+    // Log query + citations + validation metadata in background (non-blocking)
+    (async () => {
+      const { data: queryRecord } = await supabase.from("queries").insert({
+        user_id: userId,
+        question,
+        response: parsedResponse.answer,
+        citations: parsedResponse.citations,
+        confidence_score: topSimilarity,
+        safety_flagged: parsedResponse.safety_critical || false,
+        subscription_tier_at_time: tier,
+      }).select().single();
+
       if (queryRecord && parsedResponse.citations?.length > 0) {
         const citationRecords = parsedResponse.citations.map((c: any) => {
           const matchedStandard = standards?.find((s: any) => s.standard_code === c.standard_code);
@@ -322,17 +302,29 @@ ${chunk.content}`;
             chunk_content: c.relevant_text,
           };
         });
-        supabase.from("citations").insert(citationRecords).catch(console.error);
+        await supabase.from("citations").insert(citationRecords);
       }
-    }).catch(console.error);
+    })().catch(console.error);
+
+    // Update query_log with validation results in background (non-blocking)
+    if (queryId) {
+      (async () => {
+        await supabase.from("query_log").update({
+          response_text: parsedResponse.answer,
+          confidence_score: validation.confidenceScore,
+          validation_issues: validation.issues,
+          needs_review: validation.needsReview,
+        }).eq("id", queryId);
+      })().catch(console.error);
+    }
 
     return new Response(responsePayload, {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
   } catch (e) {
     console.error("Query error:", e);
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), { 
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } 
+    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
   }
 });

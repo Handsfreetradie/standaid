@@ -20,13 +20,14 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dis
 type Step = "intro" | "upload" | "naming" | "processing" | "success";
 
 interface ProcessingProgress {
-  stage: "reading" | "extracting" | "sorting" | "chunking" | "storing" | "done";
+  stage: "reading" | "uploading" | "extracting" | "sorting" | "chunking" | "storing" | "done";
   percent: number;
   message: string;
 }
 
 const STAGE_LABELS: Record<string, string> = {
   reading: "Reading your PDF…",
+  uploading: "Uploading to secure storage…",
   extracting: "Extracting text from document…",
   sorting: "Sorting content into sections…",
   chunking: "AI is chunking sections…",
@@ -78,6 +79,7 @@ const StandardsUpload = () => {
     stage: "extracting", percent: 0, message: STAGE_LABELS.extracting,
   });
   const [result, setResult] = useState<{ totalChunks: number; indexedChunks: number; quality: number } | null>(null);
+  const [licenceConfirmed, setLicenceConfirmed] = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const { session } = useAuth();
@@ -105,12 +107,12 @@ const StandardsUpload = () => {
   };
 
   const startProcessing = async () => {
-    if (!file || !session || !docName.trim()) return;
+    if (!file || !session || !docName.trim() || !licenceConfirmed) return;
 
     setStep("processing");
     setProgress({ stage: "reading", percent: 5, message: STAGE_LABELS.reading });
 
-    // Client-side PDF extraction — bypasses server-side DRM decryption issues
+    // Client-side PDF text extraction
     let extractedText = "";
     try {
       extractedText = await extractPdfText(file, (pct) => {
@@ -120,30 +122,54 @@ const StandardsUpload = () => {
           message: `Reading your PDF… (${Math.round(pct * 100)}%)`,
         });
       });
-      console.log(`Client extraction complete: ${extractedText.length} chars`);
     } catch (e) {
       console.warn("Client-side PDF extraction failed, server will handle it:", e);
       extractedText = "";
     }
 
-    setProgress({ stage: "extracting", percent: 38, message: STAGE_LABELS.extracting });
+    // Upload PDF directly to storage (bypasses the edge function body size limit)
+    setProgress({ stage: "uploading", percent: 38, message: STAGE_LABELS.uploading });
+    const filePath = `${session.user.id}/${crypto.randomUUID()}.pdf`;
+    const { error: storageError } = await supabase.storage
+      .from("standards")
+      .upload(filePath, file, { contentType: "application/pdf" });
+
+    if (storageError) {
+      toast.error("Failed to upload file. Please try again.");
+      setStep("naming");
+      return;
+    }
+
+    setProgress({ stage: "extracting", percent: 48, message: STAGE_LABELS.extracting });
     await delay(300);
-    setProgress({ stage: "sorting", percent: 42, message: STAGE_LABELS.sorting });
+    setProgress({ stage: "sorting", percent: 52, message: STAGE_LABELS.sorting });
     await delay(300);
-    setProgress({ stage: "chunking", percent: 45, message: STAGE_LABELS.chunking });
+    setProgress({ stage: "chunking", percent: 55, message: STAGE_LABELS.chunking });
+
+    // Supabase edge functions have a ~6MB body limit.
+    // If the extracted text is too large, drop it and let the server extract from storage.
+    const MAX_EXTRACTED_BYTES = 1_400_000; // 1.4MB safety margin
+    const textToSend = extractedText && extractedText.length <= MAX_EXTRACTED_BYTES
+      ? extractedText
+      : undefined;
+
+    if (extractedText && !textToSend) {
+      console.warn(`Extracted text too large (${extractedText.length} chars) — server will re-extract from storage`);
+    }
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("title", docName.trim());
-      if (standardCode.trim()) formData.append("standard_code", standardCode.trim());
-      if (extractedText) formData.append("extracted_text", extractedText);
-
       const { data, error } = await supabase.functions.invoke("upload-standard", {
-        body: formData,
+        body: {
+          title: docName.trim(),
+          standard_code: standardCode.trim() || undefined,
+          file_path: filePath,
+          extracted_text: textToSend,
+        },
       });
 
       if (error) {
+        // Clean up orphaned storage file
+        await supabase.storage.from("standards").remove([filePath]);
         toast.error((error as any)?.context?.error || error.message || "Upload failed");
         setStep("naming");
         return;
@@ -338,7 +364,7 @@ const StandardsUpload = () => {
           </Card>
         )}
 
-        <div className="space-y-4 mb-8">
+        <div className="space-y-4 mb-6">
           <div>
             <Label className="text-sm">Document Name *</Label>
             <Input
@@ -359,9 +385,21 @@ const StandardsUpload = () => {
           </div>
         </div>
 
+        <label className="flex items-start gap-3 mb-6 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={licenceConfirmed}
+            onChange={(e) => setLicenceConfirmed(e.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-primary flex-shrink-0"
+          />
+          <span className="text-xs text-muted-foreground leading-relaxed">
+            I confirm I hold a valid licence or subscription for this document and am authorised to upload it in accordance with the publisher's terms of use.
+          </span>
+        </label>
+
         <Button
           className="w-full h-12 font-bold rounded-xl gap-2"
-          disabled={!docName.trim()}
+          disabled={!docName.trim() || !licenceConfirmed}
           onClick={startProcessing}
         >
           <Sparkles className="h-4 w-4" />
@@ -373,7 +411,7 @@ const StandardsUpload = () => {
 
   // ── PROCESSING ──
   if (step === "processing") {
-    const stages = ["reading", "extracting", "sorting", "chunking", "storing", "done"];
+    const stages = ["reading", "uploading", "extracting", "sorting", "chunking", "storing", "done"];
     const currentIdx = stages.indexOf(progress.stage);
 
     return (
