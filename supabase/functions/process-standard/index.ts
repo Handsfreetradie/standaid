@@ -412,6 +412,111 @@ function chunkSections(sections: Section[], standardCode: string, version: strin
   return chunks;
 }
 
+// ── Table extraction ─────────────────────────────────────────────────────────
+
+function extractTableChunks(text: string, standardCode: string, version: string): Chunk[] {
+  const chunks: Chunk[] = [];
+  const lines = text.split("\n");
+  const tablePattern = /TABLE\s+(\d+(?:\.\d+)*)(.*)?/i;
+
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(tablePattern);
+    if (!match) continue;
+
+    const tableNumber = match[1].trim();
+    const title = (match[2] || "").replace(/^[\s—\-:]+/, "").trim();
+
+    // Grab up to ~500 chars of surrounding content (next lines)
+    let surrounding = "";
+    let charCount = 0;
+    for (let j = i + 1; j < lines.length && charCount < 500; j++) {
+      surrounding += lines[j] + "\n";
+      charCount += lines[j].length + 1;
+    }
+
+    const label = `[${standardCode}${version ? ` ${version}` : ""}]`;
+    const content = `${label} Table ${tableNumber}${title ? `: ${title}` : ""}\n\n${surrounding.trim()}`;
+
+    chunks.push({
+      clause_number: `TABLE ${tableNumber}`,
+      clause_title: title || null,
+      content,
+      page_number: 1,
+      chunk_index: 0, // will be reassigned after merge
+    });
+  }
+
+  return chunks;
+}
+
+// ── Figure extraction ─────────────────────────────────────────────────────────
+
+function extractFigureChunks(text: string, standardCode: string, version: string): Chunk[] {
+  const chunks: Chunk[] = [];
+  const lines = text.split("\n");
+  const figurePattern = /FIGURE\s+(\d+(?:\.\d+)*)(.*)?/i;
+
+  // Build a rough page map so we can assign page numbers
+  const pageOffsets: number[] = [];
+  let offset = 0;
+  for (const line of lines) {
+    pageOffsets.push(offset);
+    offset += line.length + 1;
+  }
+
+  // Track character positions to infer page numbers from [PAGE N] markers in text
+  const pageMarkerRegex = /\[PAGE\s+(\d+)\]/gi;
+  const pageMap: { charPos: number; page: number }[] = [];
+  let pm: RegExpExecArray | null;
+  while ((pm = pageMarkerRegex.exec(text)) !== null) {
+    pageMap.push({ charPos: pm.index, page: parseInt(pm[1], 10) });
+  }
+
+  function getPageForLineIndex(lineIdx: number): number {
+    const charPos = pageOffsets[lineIdx] || 0;
+    let page = 1;
+    for (const entry of pageMap) {
+      if (entry.charPos <= charPos) page = entry.page;
+      else break;
+    }
+    return page;
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(figurePattern);
+    if (!match) continue;
+
+    const figureNumber = match[1].trim();
+    const caption = (match[2] || "").replace(/^[\s—\-:]+/, "").trim();
+    const pageNum = getPageForLineIndex(i);
+
+    // Grab up to ~300 chars of surrounding text (context before + after)
+    let surrounding = "";
+    let charCount = 0;
+    for (let j = i + 1; j < lines.length && charCount < 300; j++) {
+      surrounding += lines[j] + "\n";
+      charCount += lines[j].length + 1;
+    }
+
+    const label = `[${standardCode}${version ? ` ${version}` : ""}]`;
+    const content =
+      `${label} Figure ${figureNumber}${caption ? ` — ${caption}` : ""}\n\n` +
+      `This figure appears in the standard. A full description will be generated shortly.\n` +
+      `Refer to Figure ${figureNumber} in the standard for the visual diagram.\n\n` +
+      `Related context: ${surrounding.trim()}`;
+
+    chunks.push({
+      clause_number: `FIGURE ${figureNumber}`,
+      clause_title: caption || null,
+      content,
+      page_number: pageNum,
+      chunk_index: 0, // will be reassigned after merge
+    });
+  }
+
+  return chunks;
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 
 serve(async (req) => {
@@ -560,7 +665,16 @@ serve(async (req) => {
     const version = standard.version || "";
 
     const sections = sortIntoSections(extracted.text, extracted.pages);
-    const allChunks = chunkSections(sections, standardCode, version);
+    const clauseChunks = chunkSections(sections, standardCode, version);
+    const tableChunks = extractTableChunks(extracted.text, standardCode, version);
+    const figureChunks = extractFigureChunks(extracted.text, standardCode, version);
+    console.log(`[${standard_id}] Found ${tableChunks.length} table chunks, ${figureChunks.length} figure chunks`);
+
+    // Merge and re-assign chunk_index globally
+    const allChunks: Chunk[] = [...clauseChunks, ...tableChunks, ...figureChunks].map((chunk, idx) => ({
+      ...chunk,
+      chunk_index: idx,
+    }));
     const totalChunks = allChunks.length;
     console.log(`[${standard_id}] Chunking done: ${Date.now() - t0}ms, ${totalChunks} chunks`);
 
@@ -610,6 +724,16 @@ serve(async (req) => {
       },
       body: JSON.stringify({ standard_id, user_id: userId }),
     }).catch(e => console.error("Failed to trigger embed-chunks:", e));
+
+    // Fire-and-forget: describe-figures generates AI descriptions for figure chunks
+    if (figureChunks.length > 0) {
+      const describeUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/describe-figures`;
+      fetch(describeUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceRoleKey}` },
+        body: JSON.stringify({ standard_id, user_id: userId }),
+      }).catch(e => console.error("Failed to trigger describe-figures:", e));
+    }
 
     return new Response(JSON.stringify({ status: "processing", total_chunks: totalChunks, quality_score: qualityScore, is_partial: isPartial }), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },

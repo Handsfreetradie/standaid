@@ -71,6 +71,23 @@ serve(async (req) => {
       });
     }
 
+    // If the user already has this standard code, delete the old record and its chunks
+    // so the new upload replaces it cleanly (handles both same-version re-upload and new version)
+    if (standardCode) {
+      const { data: existing } = await supabaseAdmin
+        .from("standards")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("standard_code", standardCode)
+        .maybeSingle();
+
+      if (existing) {
+        await supabaseAdmin.from("standard_chunks").delete().eq("standard_id", existing.id);
+        await supabaseAdmin.from("processing_jobs").delete().eq("standard_id", existing.id);
+        await supabaseAdmin.from("standards").delete().eq("id", existing.id);
+      }
+    }
+
     // Create standard record with the file_path already known
     const { data: standard, error: insertError } = await supabaseAdmin
       .from("standards")
