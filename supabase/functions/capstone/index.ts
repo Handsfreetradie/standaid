@@ -68,23 +68,17 @@ async function getChunksWithRecovery(
   return chunks;
 }
 
-async function callAI(body: object, openAiKey: string, geminiKey?: string): Promise<Response> {
+async function callAI(body: object, openAiKey: string): Promise<Response> {
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${openAiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (res.ok) return res;
-
-  if (!geminiKey) return res;
-
-  console.log(`[capstone] OpenAI failed (${res.status}), falling back to Gemini`);
-  const geminiBody = { ...(body as any), model: "gemini-2.0-flash" };
-  return fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${geminiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify(geminiBody),
-  });
+  if (!res.ok) {
+    const errText = await res.clone().text();
+    console.error(`[capstone] OpenAI error (${res.status}): ${errText}`);
+  }
+  return res;
 }
 
 serve(async (req) => {
@@ -111,7 +105,15 @@ serve(async (req) => {
     const { action, standardId, topic, difficulty, questionCount, examId, questionId, userAnswer, imageBase64, chunkId, examTopics, examPdfText } = await req.json();
     const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
     if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY not configured");
-    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+
+    const aiError = async (res: Response): Promise<Response> => {
+      const body = await res.json().catch(() => null);
+      const msg = body?.error?.message || body?.error || `AI error (${res.status})`;
+      console.error(`[capstone] AI error ${res.status}: ${JSON.stringify(body)}`);
+      if (res.status === 429) return new Response(JSON.stringify({ error: `Rate limited: ${msg}` }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      if (res.status === 402) return new Response(JSON.stringify({ error: `AI credits exhausted: ${msg}` }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: `AI error: ${msg}` }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    };
 
     // ── RATE LIMIT: 20 AI calls per hour per user (applies to AI actions only) ──
     const AI_ACTIONS = ["generate_questions", "analyze_photo", "explain_chunk", "generate_study_guide"];
@@ -178,14 +180,9 @@ serve(async (req) => {
             },
           }],
           tool_choice: { type: "function", function: { name: "return_questions" } },
-      }, OPENAI_API_KEY, GEMINI_API_KEY);
+      }, OPENAI_API_KEY);
 
-      if (!aiResponse.ok) {
-        const status = aiResponse.status;
-        if (status === 429) return new Response(JSON.stringify({ error: "Rate limited. Please try again shortly." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        if (status === 402) return new Response(JSON.stringify({ error: "AI credits exhausted." }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        throw new Error("AI generation failed");
-      }
+      if (!aiResponse.ok) return await aiError(aiResponse);
 
       const aiData = await aiResponse.json();
       const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
@@ -243,14 +240,9 @@ Rules:
               ],
             },
           ],
-      }, OPENAI_API_KEY, GEMINI_API_KEY);
+      }, OPENAI_API_KEY);
 
-      if (!aiResponse.ok) {
-        const status = aiResponse.status;
-        if (status === 429) return new Response(JSON.stringify({ error: "Rate limited." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        if (status === 402) return new Response(JSON.stringify({ error: "AI credits exhausted." }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        throw new Error("AI analysis failed");
-      }
+      if (!aiResponse.ok) return await aiError(aiResponse);
 
       const aiData = await aiResponse.json();
       const analysis = aiData.choices?.[0]?.message?.content;
@@ -304,14 +296,9 @@ Rules:
               content: `Explain this standard clause in apprentice-friendly language:\n\n[${chunk.clause_number || ""}${chunk.clause_title ? " — " + chunk.clause_title : ""}]\n${chunk.content}`,
             },
           ],
-      }, OPENAI_API_KEY, GEMINI_API_KEY);
+      }, OPENAI_API_KEY);
 
-      if (!aiResponse.ok) {
-        const status = aiResponse.status;
-        if (status === 429) return new Response(JSON.stringify({ error: "Rate limited." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        if (status === 402) return new Response(JSON.stringify({ error: "AI credits exhausted." }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        throw new Error("AI explanation failed");
-      }
+      if (!aiResponse.ok) return await aiError(aiResponse);
 
       const aiData = await aiResponse.json();
       const explanation = aiData.choices?.[0]?.message?.content;
@@ -408,13 +395,9 @@ Rules:
             { role: "system", content: "You are an expert trade educator. Create concise, apprentice-friendly study guides from standard content. Use clear headings, bullet points, and highlight key clause numbers. Only use information from the provided content." },
             { role: "user", content: `Create a comprehensive study guide for apprentices from this standard.${topic ? ` Focus on: ${topic}` : ""}\n\nStandard: ${standard?.standard_code || standard?.title}\n\nContent:\n${chunks.map((c) => `[${c.clause_number || ""}${c.clause_title ? " - " + c.clause_title : ""}] ${c.content}`).join("\n\n")}` },
           ],
-      }, OPENAI_API_KEY, GEMINI_API_KEY);
+      }, OPENAI_API_KEY);
 
-      if (!aiResponse.ok) {
-        if (aiResponse.status === 429) return new Response(JSON.stringify({ error: "Rate limited." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        if (aiResponse.status === 402) return new Response(JSON.stringify({ error: "AI credits exhausted." }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        throw new Error("AI generation failed");
-      }
+      if (!aiResponse.ok) return await aiError(aiResponse);
 
       const aiData = await aiResponse.json();
       const content = aiData.choices?.[0]?.message?.content;
@@ -513,14 +496,9 @@ Rules:
             },
           }],
           tool_choice: { type: "function", function: { name: "return_exam_prep" } },
-      }, OPENAI_API_KEY, GEMINI_API_KEY);
+      }, OPENAI_API_KEY);
 
-      if (!aiResponse.ok) {
-        const status = aiResponse.status;
-        if (status === 429) return new Response(JSON.stringify({ error: "Rate limited." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        if (status === 402) return new Response(JSON.stringify({ error: "AI credits exhausted." }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        throw new Error("AI generation failed");
-      }
+      if (!aiResponse.ok) return await aiError(aiResponse);
 
       const aiData = await aiResponse.json();
       const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
