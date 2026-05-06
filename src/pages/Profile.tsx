@@ -11,7 +11,11 @@ const Profile = () => {
   const navigate = useNavigate();
 
   const handleSignOut = async () => {
-    await signOut();
+    try {
+      await signOut();
+    } catch {
+      // sign out locally even if server request fails
+    }
     navigate("/auth");
   };
 

@@ -22,6 +22,15 @@ interface Question {
   topic?: string;
 }
 
+async function extractFnError(error: any): Promise<Error> {
+  let msg = "Request failed";
+  try {
+    const body = await error?.context?.json();
+    msg = body?.error || error.message || msg;
+  } catch { msg = error.message || msg; }
+  return new Error(msg);
+}
+
 const Learn = () => {
   const { user } = useAuth();
   const [mode, setMode] = useState<Mode>("menu");
@@ -80,7 +89,7 @@ const Learn = () => {
       const { data, error } = await supabase.functions.invoke("capstone", {
         body: { action: "generate_questions", standardId: selectedStandard, questionCount: 5 },
       });
-      if (error) throw error;
+      if (error) throw await extractFnError(error);
       if (data?.error) throw new Error(data.error);
       setQuestions(data.questions);
       setCurrentQ(0);
@@ -128,7 +137,7 @@ const Learn = () => {
       const { data, error } = await supabase.functions.invoke("capstone", {
         body: { action: "start_exam", standardId: selectedStandard, questionCount: 10 },
       });
-      if (error) throw error;
+      if (error) throw await extractFnError(error);
       if (data?.error) throw new Error(data.error);
       setExamId(data.exam.id);
       setQuestions(data.questions);
@@ -168,7 +177,7 @@ const Learn = () => {
       const { data, error } = await supabase.functions.invoke("capstone", {
         body: { action: "generate_study_guide", standardId: selectedStandard },
       });
-      if (error) throw error;
+      if (error) throw await extractFnError(error);
       if (data?.error) throw new Error(data.error);
       setActiveGuide(data.guide);
       setMode("study-view");
@@ -209,7 +218,7 @@ const Learn = () => {
       const { data, error } = await supabase.functions.invoke("capstone", {
         body: { action: "analyze_photo", standardId: selectedStandard, imageBase64: base64 },
       });
-      if (error) throw error;
+      if (error) throw await extractFnError(error);
       if (data?.error) throw new Error(data.error);
       setPhotoAnalysis(data.analysis);
     } catch (e: any) {
@@ -285,7 +294,7 @@ const Learn = () => {
           const { data, error } = await supabase.functions.invoke("capstone", {
             body: { action: "exam_prep", examPdfText: `[PDF uploaded: ${file.name} — client extraction yielded minimal text. The student uploaded a previous exam paper.]`, examTopics: examPrepTopics || "", standardId: selectedStandard || undefined },
           });
-          if (error) throw error;
+          if (error) throw await extractFnError(error);
           if (data?.error) throw new Error(data.error);
           setExamPrepResult(data);
           setMode("exam-prep-result");
@@ -317,7 +326,7 @@ const Learn = () => {
           standardId: selectedStandard || undefined,
         },
       });
-      if (error) throw error;
+      if (error) throw await extractFnError(error);
       if (data?.error) throw new Error(data.error);
       setExamPrepResult(data);
       setMode("exam-prep-result");

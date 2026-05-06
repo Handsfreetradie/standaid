@@ -179,7 +179,14 @@ const Chat = () => {
       body: { question },
     });
 
-    if (error) throw new Error(error.message || "Query failed");
+    if (error) {
+      let msg = "Query failed";
+      try {
+        const body = await (error as any).context?.json();
+        msg = body?.error || error.message || msg;
+      } catch { msg = error.message || msg; }
+      throw new Error(msg);
+    }
 
     if (data?.error) {
       if (data.upgrade_required) {
