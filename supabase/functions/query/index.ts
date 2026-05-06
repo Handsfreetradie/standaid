@@ -196,12 +196,12 @@ ${chunk.content}`;
     });
 
     if (!aiResponse.ok) {
-      if (aiResponse.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded, please try again later." }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      throw new Error(`AI API error: ${aiResponse.status}`);
+      const errBody = await aiResponse.json().catch(() => null);
+      const errMsg = errBody?.error?.message || errBody?.error || `AI error ${aiResponse.status}`;
+      console.error(`[query] OpenAI error ${aiResponse.status}: ${JSON.stringify(errBody)}`);
+      return new Response(JSON.stringify({ error: errMsg }), {
+        status: aiResponse.status, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const aiData = await aiResponse.json();
