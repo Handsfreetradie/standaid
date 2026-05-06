@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "react";
-import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Mic } from "lucide-react";
+import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Mic, ThumbsUp, ThumbsDown, HelpCircle, Check } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import VoiceMode from "@/components/VoiceMode";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,8 @@ interface Citation {
   gated?: boolean;
 }
 
+type FeedbackRating = "helpful" | "wrong" | "unclear";
+
 interface Message {
   id: string;
   role: "user" | "ai";
@@ -36,6 +38,93 @@ interface Message {
   follow_up_questions?: string[];
   accuracy_score?: number;
   accuracy_reason?: string;
+  queryId?: string;
+}
+
+function FeedbackButtons({ queryId }: { queryId: string }) {
+  const [submitted, setSubmitted] = useState<FeedbackRating | null>(null);
+  const [showComment, setShowComment] = useState(false);
+  const [comment, setComment] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(rating: FeedbackRating, userComment?: string) {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      const { error } = await supabase.functions.invoke("feedback", {
+        body: { queryId, rating, userComment: userComment ?? undefined },
+      });
+      if (error) throw error;
+      setSubmitted(rating);
+    } catch (err) {
+      console.error("Feedback error:", err);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function handleQuick(rating: FeedbackRating) {
+    if (rating === "wrong" || rating === "unclear") {
+      setShowComment(true);
+    } else {
+      void submit(rating);
+    }
+  }
+
+  if (submitted) {
+    return (
+      <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+        <Check size={12} />
+        <span>Thanks — helps StandAid improve.</span>
+      </div>
+    );
+  }
+
+  if (showComment) {
+    return (
+      <div className="mt-2 space-y-2">
+        <p className="text-xs text-muted-foreground">What was wrong? (optional)</p>
+        <textarea
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          maxLength={2000}
+          placeholder="e.g. Wrong clause number..."
+          className="w-full bg-background border border-border rounded-md px-3 py-2 text-xs text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary resize-none"
+          rows={2}
+        />
+        <div className="flex gap-2">
+          <button
+            onClick={() => { void submit("wrong", comment.trim() || undefined); setShowComment(false); }}
+            disabled={submitting}
+            className="px-3 py-1 bg-destructive text-destructive-foreground text-xs rounded-md hover:opacity-90 disabled:opacity-50"
+          >
+            Submit
+          </button>
+          <button
+            onClick={() => { setShowComment(false); setComment(""); }}
+            className="px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-3 mt-2">
+      <span className="text-xs text-muted-foreground">Helpful?</span>
+      <button onClick={() => handleQuick("helpful")} disabled={submitting} className="text-muted-foreground hover:text-green-500 transition-colors disabled:opacity-50" aria-label="Helpful">
+        <ThumbsUp size={13} />
+      </button>
+      <button onClick={() => handleQuick("wrong")} disabled={submitting} className="text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50" aria-label="Wrong">
+        <ThumbsDown size={13} />
+      </button>
+      <button onClick={() => handleQuick("unclear")} disabled={submitting} className="text-muted-foreground hover:text-yellow-500 transition-colors disabled:opacity-50" aria-label="Unclear">
+        <HelpCircle size={13} />
+      </button>
+    </div>
+  );
 }
 
 const STARTER_QUESTIONS = [
@@ -123,6 +212,7 @@ const Chat = () => {
       follow_up_questions: data.follow_up_questions || [],
       accuracy_score: data.accuracy_score ?? null,
       accuracy_reason: data.accuracy_reason ?? null,
+      queryId: data.queryId ?? null,
     };
   };
 
@@ -195,7 +285,7 @@ const Chat = () => {
   }, [session]);
 
   return (
-    <div className="flex flex-col fixed top-14 bottom-20 left-0 right-0 bg-background" style={{ zIndex: 20 }}>
+    <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
       <div className="px-5 py-4 border-b border-border">
         <div className="flex items-center gap-2">
@@ -359,6 +449,13 @@ const Chat = () => {
                         {q}
                       </button>
                     ))}
+                  </div>
+                )}
+
+                {/* Feedback buttons */}
+                {!msg.isTyping && msg.queryId && (
+                  <div className="px-1">
+                    <FeedbackButtons queryId={msg.queryId} />
                   </div>
                 )}
               </div>

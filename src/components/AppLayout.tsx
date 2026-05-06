@@ -14,7 +14,7 @@ const AppLayout = () => {
   }, []);
 
   return (
-    <div className="min-h-screen relative" style={{ background: 'linear-gradient(to right, #FFFFFF, #FFE8E8)' }}>
+    <div className="h-dvh flex flex-col overflow-hidden relative" style={{ background: 'linear-gradient(to right, #FFFFFF, #FFE8E8)' }}>
       {/* SVG Noise texture overlay */}
       <svg className="noise-overlay" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
         <filter id="noise">
@@ -28,7 +28,7 @@ const AppLayout = () => {
 
       {/* Navbar */}
       <header
-        className={`fixed top-0 left-0 right-0 z-40 px-5 py-3 transition-all duration-300 ${
+        className={`flex-shrink-0 z-40 px-5 py-3 transition-all duration-300 ${
           mounted ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2"
         } ${
           scrolled
@@ -44,7 +44,7 @@ const AppLayout = () => {
         </h1>
       </header>
 
-      <main className="relative z-10 pt-14 pb-20">
+      <main className="relative z-10 flex-1 overflow-y-auto overflow-x-hidden">
         <Outlet />
       </main>
       <BottomNav />
