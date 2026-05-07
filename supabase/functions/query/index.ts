@@ -78,64 +78,59 @@ serve(async (req) => {
       });
     }
 
-    // Try vector search first, fallback to keyword matching
+    // Run vector search and keyword search in parallel for best coverage
     let matchedChunks: any[] = [];
     let topSimilarity = 0;
-    let usedFallback = false;
 
-    // Generate query embedding
-    const embResponse = await fetch("https://api.openai.com/v1/embeddings", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "text-embedding-3-small",
-        input: question,
+    const keywords = question.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
+
+    const [embResponse, allChunksResult] = await Promise.all([
+      fetch("https://api.openai.com/v1/embeddings", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ model: "text-embedding-3-small", input: question }),
       }),
-    });
-
-    if (embResponse.ok) {
-      const embData = await embResponse.json();
-      const queryEmbedding = embData.data[0].embedding;
-
-      const { data: vectorChunks, error: matchError } = await supabase
-        .rpc("match_chunks", {
-          query_embedding: queryEmbedding,
-          match_user_id: userId,
-          match_threshold: 0.30,
-          match_count: 20,
-        });
-
-      if (!matchError && vectorChunks?.length) {
-        matchedChunks = vectorChunks;
-        topSimilarity = matchedChunks[0]?.similarity || 0;
-      }
-    }
-
-    // Fallback: keyword-based search on unindexed chunks
-    if (matchedChunks.length === 0) {
-      usedFallback = true;
-      const keywords = question.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
-
-      const { data: allChunks } = await supabase
+      supabase
         .from("standard_chunks")
         .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
         .eq("user_id", userId)
-        .limit(1000);
+        .limit(1000),
+    ]);
 
-      if (allChunks?.length) {
-        const scored = allChunks.map((chunk: any) => {
-          const lower = chunk.content.toLowerCase();
-          const score = keywords.reduce((acc: number, kw: string) => acc + (lower.includes(kw) ? 1 : 0), 0);
-          return { ...chunk, similarity: score / keywords.length };
-        });
-        scored.sort((a: any, b: any) => b.similarity - a.similarity);
-        matchedChunks = scored.filter((s: any) => s.similarity > 0).slice(0, 12);
-        topSimilarity = matchedChunks[0]?.similarity || 0;
-      }
+    // Vector results
+    let vectorChunks: any[] = [];
+    if (embResponse.ok) {
+      const embData = await embResponse.json();
+      const queryEmbedding = embData.data[0].embedding;
+      const { data, error: matchError } = await supabase.rpc("match_chunks", {
+        query_embedding: queryEmbedding,
+        match_user_id: userId,
+        match_threshold: 0.20,
+        match_count: 30,
+      });
+      if (!matchError && data?.length) vectorChunks = data;
     }
+
+    // Keyword results — always run, not just as fallback
+    let keywordChunks: any[] = [];
+    if (allChunksResult.data?.length) {
+      const scored = allChunksResult.data.map((chunk: any) => {
+        const lower = chunk.content.toLowerCase();
+        const score = keywords.reduce((acc: number, kw: string) => acc + (lower.includes(kw) ? 1 : 0), 0);
+        return { ...chunk, similarity: score / keywords.length };
+      });
+      scored.sort((a: any, b: any) => b.similarity - a.similarity);
+      keywordChunks = scored.filter((s: any) => s.similarity > 0).slice(0, 10);
+    }
+
+    // Merge: vector results take priority, fill remaining slots with keyword-only hits
+    const seenIds = new Set(vectorChunks.map((c: any) => c.id));
+    const uniqueKeyword = keywordChunks.filter((c: any) => !seenIds.has(c.id));
+    matchedChunks = [...vectorChunks, ...uniqueKeyword].slice(0, 25);
+    topSimilarity = matchedChunks[0]?.similarity || 0;
 
     // Get standard details for context
     const standardIds = [...new Set(matchedChunks.map((c: any) => c.standard_id))];
