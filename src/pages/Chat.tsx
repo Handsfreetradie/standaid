@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Mic, ThumbsUp, ThumbsDown, HelpCircle, Check } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import VoiceMode from "@/components/VoiceMode";
@@ -142,16 +142,19 @@ const Chat = () => {
   const { session } = useAuth();
   const { data: profile } = useProfile();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   const queriesRemaining = profile
     ? 5 - (profile.daily_query_count || 0)
     : 5;
 
-  const scrollToBottom = () => {
-    setTimeout(() => {
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-    }, 50);
-  };
+  const scrollToBottom = useCallback(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages.length, isLoading, scrollToBottom]);
 
   const startTypewriter = (msgId: string, fullContent: string) => {
     let pos = 0;
@@ -164,7 +167,7 @@ const Chat = () => {
           m.id === msgId ? { ...m, content: partial, isTyping: !done } : m
         )
       );
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+      bottomRef.current?.scrollIntoView();
       if (done) clearInterval(tick);
     }, 18);
   };
@@ -292,7 +295,7 @@ const Chat = () => {
   }, [session]);
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col flex-1 overflow-hidden">
       {/* Header */}
       <div className="px-5 py-4 border-b border-border">
         <div className="flex items-center gap-2">
@@ -484,10 +487,11 @@ const Chat = () => {
             </Card>
           </div>
         )}
+        <div ref={bottomRef} />
       </div>
 
       {/* Input */}
-      <div className="border-t border-border px-4 pt-3 pb-2 bg-card">
+      <div className="flex-shrink-0 border-t border-border px-4 pt-3 pb-2 bg-card">
         <div className="flex items-end gap-2">
           <Button
             size="icon"

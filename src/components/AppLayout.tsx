@@ -44,7 +44,7 @@ const AppLayout = () => {
         </h1>
       </header>
 
-      <main className="relative z-10 flex-1 overflow-y-auto overflow-x-hidden">
+      <main className="relative z-10 flex-1 overflow-y-auto overflow-x-hidden flex flex-col">
         <Outlet />
       </main>
       <BottomNav />
