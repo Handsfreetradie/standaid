@@ -228,6 +228,19 @@ ${chunk.content}`;
     // Apply cleaned answer back (hallucinated citations stripped, safety warnings injected)
     parsedResponse.answer = validation.cleanedResponse;
 
+    // Strip citations whose relevant_text doesn't appear in any retrieved chunk
+    if (parsedResponse.citations?.length && matchedChunks.length > 0) {
+      const allChunkText = matchedChunks.map((c: any) => c.content.toLowerCase()).join(" ");
+      parsedResponse.citations = parsedResponse.citations.filter((c: any) => {
+        if (!c.relevant_text || c.relevant_text.trim().length < 10) return false;
+        // Check that at least 60% of the words in relevant_text appear in the chunks
+        const words = c.relevant_text.toLowerCase().split(/\W+/).filter((w: string) => w.length > 3);
+        if (words.length === 0) return false;
+        const matches = words.filter((w: string) => allChunkText.includes(w)).length;
+        return matches / words.length >= 0.6;
+      });
+    }
+
     // Free tier clause gating
     if (tier === "free" && parsedResponse.citations) {
       parsedResponse.citations = parsedResponse.citations.map((c: any) => ({
