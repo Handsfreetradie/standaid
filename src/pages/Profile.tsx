@@ -20,7 +20,7 @@ const Profile = () => {
   };
 
   return (
-    <div className="px-5 py-6">
+    <div className="h-full overflow-y-auto px-5 py-6">
       {/* User Info */}
       <div className="flex items-center gap-4 mb-6">
         <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">

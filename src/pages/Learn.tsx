@@ -340,7 +340,7 @@ const Learn = () => {
   // ── MENU ──
   if (mode === "menu") {
     return (
-      <div className="px-5 py-6 pb-24 max-w-md mx-auto">
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 max-w-md mx-auto">
         <div className="flex items-center gap-3 mb-6">
           <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
             <GraduationCap className="h-5 w-5 text-primary" />
@@ -486,7 +486,7 @@ const Learn = () => {
     if (!q) return null;
 
     return (
-      <div className="px-5 py-6 pb-24 max-w-md mx-auto">
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 max-w-md mx-auto">
         <div className="flex items-center justify-between mb-6">
           <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> Back
@@ -610,7 +610,7 @@ const Learn = () => {
   // ── STUDY GUIDE LIST ──
   if (mode === "study-guide") {
     return (
-      <div className="px-5 py-6 pb-24 max-w-md mx-auto">
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 max-w-md mx-auto">
         <div className="flex items-center gap-2 mb-6">
           <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> Back
@@ -646,7 +646,7 @@ const Learn = () => {
   // ── STUDY GUIDE VIEW ──
   if (mode === "study-view" && activeGuide) {
     return (
-      <div className="px-5 py-6 pb-24 max-w-md mx-auto">
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 max-w-md mx-auto">
         <div className="flex items-center gap-2 mb-6">
           <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> Back
@@ -665,7 +665,7 @@ const Learn = () => {
   // ── PHOTO ANALYSIS ──
   if (mode === "photo-analysis") {
     return (
-      <div className="px-5 py-6 pb-24 max-w-md mx-auto">
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 max-w-md mx-auto">
         <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
@@ -707,7 +707,7 @@ const Learn = () => {
   // ── EXAM PREP INPUT ──
   if (mode === "exam-prep") {
     return (
-      <div className="px-5 py-6 pb-24 max-w-md mx-auto">
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 max-w-md mx-auto">
         <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
@@ -785,7 +785,7 @@ const Learn = () => {
   // ── EXAM PREP RESULT ──
   if (mode === "exam-prep-result" && examPrepResult) {
     return (
-      <div className="px-5 py-6 pb-24 max-w-md mx-auto">
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 max-w-md mx-auto">
         <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>

@@ -78,13 +78,16 @@ serve(async (req) => {
       });
     }
 
-    // Run vector search and keyword search in parallel for best coverage
+    // Run vector search, keyword search, and clause-number lookup in parallel
     let matchedChunks: any[] = [];
     let topSimilarity = 0;
 
     const keywords = question.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
 
-    const [embResponse, allChunksResult] = await Promise.all([
+    // Detect explicit clause numbers in the question (e.g. "5.6.3.2", "A3.1")
+    const clauseNumberMatches = question.match(/\b[A-Za-z]?\d+(?:\.\d+){1,4}\b/g) || [];
+
+    const [embResponse, allChunksResult, clauseResult] = await Promise.all([
       fetch("https://api.openai.com/v1/embeddings", {
         method: "POST",
         headers: {
@@ -97,7 +100,15 @@ serve(async (req) => {
         .from("standard_chunks")
         .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
         .eq("user_id", userId)
-        .limit(1000),
+        .limit(2000),
+      clauseNumberMatches.length > 0
+        ? supabase
+            .from("standard_chunks")
+            .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
+            .eq("user_id", userId)
+            .in("clause_number", clauseNumberMatches)
+            .limit(20)
+        : Promise.resolve({ data: [] }),
     ]);
 
     // Vector results
@@ -114,7 +125,7 @@ serve(async (req) => {
       if (!matchError && data?.length) vectorChunks = data;
     }
 
-    // Keyword results — always run, not just as fallback
+    // Keyword results
     let keywordChunks: any[] = [];
     if (allChunksResult.data?.length) {
       const scored = allChunksResult.data.map((chunk: any) => {
@@ -126,10 +137,15 @@ serve(async (req) => {
       keywordChunks = scored.filter((s: any) => s.similarity > 0).slice(0, 10);
     }
 
-    // Merge: vector results take priority, fill remaining slots with keyword-only hits
-    const seenIds = new Set(vectorChunks.map((c: any) => c.id));
+    // Direct clause number hits — highest priority
+    const clauseChunks: any[] = (clauseResult.data || []).map((c: any) => ({ ...c, similarity: 1.0 }));
+
+    // Merge: clause number hits first, then vector, then keyword
+    const seenIds = new Set(clauseChunks.map((c: any) => c.id));
+    const uniqueVector = vectorChunks.filter((c: any) => !seenIds.has(c.id));
+    uniqueVector.forEach((c: any) => seenIds.add(c.id));
     const uniqueKeyword = keywordChunks.filter((c: any) => !seenIds.has(c.id));
-    matchedChunks = [...vectorChunks, ...uniqueKeyword].slice(0, 25);
+    matchedChunks = [...clauseChunks, ...uniqueVector, ...uniqueKeyword].slice(0, 25);
     topSimilarity = matchedChunks[0]?.similarity || 0;
 
     // Get standard details for context

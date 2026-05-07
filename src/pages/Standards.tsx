@@ -126,7 +126,7 @@ const Standards = () => {
   };
 
   return (
-    <div className="px-5 py-6">
+    <div className="h-full overflow-y-auto px-5 py-6">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="font-sans text-2xl font-extrabold tracking-tight text-foreground">
