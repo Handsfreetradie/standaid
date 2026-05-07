@@ -314,9 +314,9 @@ const Chat = () => {
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4 flex flex-col">
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-center px-4 gap-5">
+          <div className="flex-1 flex flex-col items-center justify-center text-center px-4 gap-5">
             <div>
               <Shield className="h-12 w-12 text-primary/30 mb-3 mx-auto" />
               <p className="text-sm font-semibold text-foreground mb-1">
@@ -340,6 +340,7 @@ const Chat = () => {
           </div>
         )}
 
+        <div className="space-y-4">
         {messages.map((msg) => (
           <div
             key={msg.id}
@@ -472,6 +473,7 @@ const Chat = () => {
             )}
           </div>
         ))}
+        </div>
 
         {isLoading && (
           <div className="flex justify-start">
