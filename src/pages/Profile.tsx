@@ -4,19 +4,16 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/hooks/useAuth";
-import { useNavigate } from "react-router-dom";
 
 const Profile = () => {
   const { signOut } = useAuth();
-  const navigate = useNavigate();
 
   const handleSignOut = async () => {
     try {
       await signOut();
     } catch {
-      // sign out locally even if server request fails
+      // signOut clears local state even if server call fails
     }
-    navigate("/auth");
   };
 
   return (
