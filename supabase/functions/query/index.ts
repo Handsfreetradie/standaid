@@ -4,6 +4,7 @@ import { buildSystemPrompt, type TradeType } from "./system-prompt.ts";
 import { detectTrade } from "./trade-detection.ts";
 import { validateResponse } from "./validation.ts";
 import { getAllowedOrigin } from "../_shared/cors.ts";
+import { expandQuery } from "./synonyms.ts";
 
 serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
@@ -32,7 +33,7 @@ serve(async (req) => {
     }
     const userId = user.id;
 
-    const { question } = await req.json();
+    const { question, conversation_history } = await req.json();
     if (!question || typeof question !== "string" || question.trim().length === 0) {
       return new Response(JSON.stringify({ error: "Question is required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
@@ -78,24 +79,46 @@ serve(async (req) => {
       });
     }
 
-    // Run vector search, keyword search, and clause-number lookup in parallel
-    let matchedChunks: any[] = [];
-    let topSimilarity = 0;
+    // Build a retrieval query that includes recent conversation context.
+    // When the user sends a short follow-up ("its on a 16amp type c"), the
+    // previous question provides the topic needed for a useful vector search.
+    const history: Array<{ role: string; content: string }> = Array.isArray(conversation_history)
+      ? conversation_history.slice(-6)
+      : [];
+    const lastUserMessages = history
+      .filter((m) => m.role === "user")
+      .slice(-2)
+      .map((m) => m.content)
+      .join(" ");
+    const retrievalQuery = lastUserMessages
+      ? `${lastUserMessages} ${question}`
+      : question;
 
-    const keywords = question.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
+    // Expand tradie terms to standards terminology before searching
+    const { keywords, expandedText, matchedPhrases } = expandQuery(retrievalQuery);
+    const hasExpansion = expandedText !== question;
 
     // Detect explicit clause numbers in the question (e.g. "5.6.3.2", "A3.1")
     const clauseNumberMatches = question.match(/\b[A-Za-z]?\d+(?:\.\d+){1,4}\b/g) || [];
 
-    const [embResponse, allChunksResult, clauseResult] = await Promise.all([
+    // Run all searches in parallel:
+    // - embed original query
+    // - embed expanded query (if tradie terms were found)
+    // - load all chunks for keyword search
+    // - direct clause number lookup
+    const [embResponse, expandedEmbResponse, allChunksResult, clauseResult] = await Promise.all([
       fetch("https://api.openai.com/v1/embeddings", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ model: "text-embedding-3-small", input: question }),
+        headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "text-embedding-3-small", input: retrievalQuery }),
       }),
+      hasExpansion
+        ? fetch("https://api.openai.com/v1/embeddings", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ model: "text-embedding-3-small", input: expandedText }),
+          })
+        : Promise.resolve(null),
       supabase
         .from("standard_chunks")
         .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
@@ -111,8 +134,8 @@ serve(async (req) => {
         : Promise.resolve({ data: [] }),
     ]);
 
-    // Vector results
-    let vectorChunks: any[] = [];
+    // Vector search 1 — original query
+    let vectorChunks1: any[] = [];
     if (embResponse.ok) {
       const embData = await embResponse.json();
       const queryEmbedding = embData.data[0].embedding;
@@ -120,12 +143,36 @@ serve(async (req) => {
         query_embedding: queryEmbedding,
         match_user_id: userId,
         match_threshold: 0.20,
-        match_count: 30,
+        match_count: 20,
       });
-      if (!matchError && data?.length) vectorChunks = data;
+      if (!matchError && data?.length) vectorChunks1 = data;
     }
 
-    // Keyword results
+    // Vector search 2 — expanded query (runs after emb fetch completes, still fast)
+    let vectorChunks2: any[] = [];
+    if (hasExpansion && expandedEmbResponse?.ok) {
+      const embData2 = await expandedEmbResponse.json();
+      const expandedEmbedding = embData2.data[0].embedding;
+      const { data, error: matchError2 } = await supabase.rpc("match_chunks", {
+        query_embedding: expandedEmbedding,
+        match_user_id: userId,
+        match_threshold: 0.20,
+        match_count: 20,
+      });
+      if (!matchError2 && data?.length) vectorChunks2 = data;
+    }
+
+    // Merge both vector searches (deduplicated, original query results first)
+    const seenVectorIds = new Set<string>();
+    const vectorChunks: any[] = [];
+    for (const c of [...vectorChunks1, ...vectorChunks2]) {
+      if (!seenVectorIds.has(c.id)) {
+        seenVectorIds.add(c.id);
+        vectorChunks.push(c);
+      }
+    }
+
+    // Keyword search — using expanded keywords (covers tradie terms + standard terms)
     let keywordChunks: any[] = [];
     if (allChunksResult.data?.length) {
       const scored = allChunksResult.data.map((chunk: any) => {
@@ -134,19 +181,19 @@ serve(async (req) => {
         return { ...chunk, similarity: score / keywords.length };
       });
       scored.sort((a: any, b: any) => b.similarity - a.similarity);
-      keywordChunks = scored.filter((s: any) => s.similarity > 0).slice(0, 10);
+      keywordChunks = scored.filter((s: any) => s.similarity > 0).slice(0, 15);
     }
 
     // Direct clause number hits — highest priority
     const clauseChunks: any[] = (clauseResult.data || []).map((c: any) => ({ ...c, similarity: 1.0 }));
 
-    // Merge: clause number hits first, then vector, then keyword
+    // Merge: clause number hits → vector results → keyword results
     const seenIds = new Set(clauseChunks.map((c: any) => c.id));
     const uniqueVector = vectorChunks.filter((c: any) => !seenIds.has(c.id));
     uniqueVector.forEach((c: any) => seenIds.add(c.id));
     const uniqueKeyword = keywordChunks.filter((c: any) => !seenIds.has(c.id));
-    matchedChunks = [...clauseChunks, ...uniqueVector, ...uniqueKeyword].slice(0, 25);
-    topSimilarity = matchedChunks[0]?.similarity || 0;
+    const matchedChunks = [...clauseChunks, ...uniqueVector, ...uniqueKeyword].slice(0, 25);
+    const topSimilarity = matchedChunks[0]?.similarity || 0;
 
     // Get standard details for context
     const standardIds = [...new Set(matchedChunks.map((c: any) => c.standard_id))];
@@ -179,8 +226,8 @@ ${chunk.content}`;
         }).join("\n\n")
       : "No relevant clauses found in uploaded standards.";
 
-    // Build dynamic system prompt
-    const systemPrompt = buildSystemPrompt(trade, contextChunks);
+    // Build dynamic system prompt (includes matched tradie phrases for context)
+    const systemPrompt = buildSystemPrompt(trade, contextChunks, matchedPhrases);
 
     // Pre-generate the query log ID so feedback can reference it without a blocking DB write
     const queryId = crypto.randomUUID();
@@ -201,6 +248,7 @@ ${chunk.content}`;
         max_tokens: 1200,
         messages: [
           { role: "system", content: systemPrompt },
+          ...history,
           { role: "user", content: question },
         ],
       }),
@@ -218,19 +266,38 @@ ${chunk.content}`;
     const aiData = await aiResponse.json();
     const rawContent = aiData.choices?.[0]?.message?.content || "";
 
-    // Parse AI response as JSON
+    // Parse AI response as JSON.
+    // Handle cases where the model outputs prose before/after the JSON object.
     let parsedResponse: any;
     try {
       const cleaned = rawContent.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
       parsedResponse = JSON.parse(cleaned);
     } catch {
-      parsedResponse = {
-        answer: rawContent,
-        citations: [],
-        safety_critical: false,
-        confidence: "low",
-        answer_found: true,
-      };
+      // Find the first { and try parsing from there
+      const jsonStart = rawContent.indexOf("{");
+      if (jsonStart !== -1) {
+        try {
+          parsedResponse = JSON.parse(rawContent.slice(jsonStart));
+        } catch {
+          // Strip any trailing JSON blob and use remaining prose as the answer
+          const stripped = rawContent.replace(/\{[\s\S]*\}$/, "").trim();
+          parsedResponse = {
+            answer: stripped || rawContent,
+            citations: [],
+            safety_critical: false,
+            confidence: "low",
+            answer_found: true,
+          };
+        }
+      } else {
+        parsedResponse = {
+          answer: rawContent,
+          citations: [],
+          safety_critical: false,
+          confidence: "low",
+          answer_found: true,
+        };
+      }
     }
 
     // Validate the answer text — catches hallucinated citations, missing safety warnings, low grounding
@@ -249,7 +316,6 @@ ${chunk.content}`;
       const allChunkText = matchedChunks.map((c: any) => c.content.toLowerCase()).join(" ");
       parsedResponse.citations = parsedResponse.citations.filter((c: any) => {
         if (!c.relevant_text || c.relevant_text.trim().length < 10) return false;
-        // Check that at least 60% of the words in relevant_text appear in the chunks
         const words = c.relevant_text.toLowerCase().split(/\W+/).filter((w: string) => w.length > 3);
         if (words.length === 0) return false;
         const matches = words.filter((w: string) => allChunkText.includes(w)).length;

@@ -100,15 +100,23 @@
 
   html {
     font-size: 16px;
+    height: 100%;
+    overflow: hidden;
   }
 
   body {
     @apply text-foreground antialiased;
     font-family: 'Inter', system-ui, sans-serif;
     background: linear-gradient(to right, #FFFFFF, #FFE8E8);
-    min-height: 100vh;
+    height: 100%;
+    overflow: hidden;
     -webkit-tap-highlight-color: transparent;
     -webkit-font-smoothing: antialiased;
+  }
+
+  #root {
+    height: 100%;
+    overflow: hidden;
   }
 
   h1, h2, h3, h4, h5, h6 {

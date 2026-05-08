@@ -142,14 +142,15 @@ const Chat = () => {
   const { session } = useAuth();
   const { data: profile } = useProfile();
   const scrollRef = useRef<HTMLDivElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
 
   const queriesRemaining = profile
     ? 5 - (profile.daily_query_count || 0)
     : 5;
 
   const scrollToBottom = useCallback(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
   }, []);
 
   useEffect(() => {
@@ -159,7 +160,9 @@ const Chat = () => {
   const startTypewriter = (msgId: string, fullContent: string) => {
     let pos = 0;
     const tick = setInterval(() => {
-      pos = Math.min(pos + 5, fullContent.length);
+      // Vary chars per tick slightly so it feels organic rather than mechanical
+      const charsThisTick = Math.random() < 0.15 ? 1 : 3;
+      pos = Math.min(pos + charsThisTick, fullContent.length);
       const partial = fullContent.slice(0, pos);
       const done = pos >= fullContent.length;
       setMessages((prev) =>
@@ -167,9 +170,11 @@ const Chat = () => {
           m.id === msgId ? { ...m, content: partial, isTyping: !done } : m
         )
       );
-      bottomRef.current?.scrollIntoView();
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
       if (done) clearInterval(tick);
-    }, 18);
+    }, 20);
   };
 
   const runQuery = async (question: string) => {
@@ -178,8 +183,14 @@ const Chat = () => {
       return null;
     }
 
+    // Send the last 6 completed messages as conversation context (3 Q&A pairs)
+    const history = messages
+      .filter((m) => !m.isTyping && m.content)
+      .slice(-6)
+      .map((m) => ({ role: m.role === "ai" ? "assistant" : "user", content: m.content }));
+
     const { data, error } = await supabase.functions.invoke("query", {
-      body: { question },
+      body: { question, conversation_history: history },
     });
 
     if (error) {
@@ -314,7 +325,7 @@ const Chat = () => {
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4 flex flex-col">
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-5 py-4 flex flex-col">
         {messages.length === 0 && (
           <div className="flex-1 flex flex-col items-center justify-center text-center px-4 gap-5">
             <div>
@@ -385,15 +396,11 @@ const Chat = () => {
                     </div>
                   )}
 
-                  {/* Answer — plain text + cursor while typing, markdown when done */}
+                  {/* Answer — markdown rendered during and after typing */}
                   <div className="text-sm text-card-foreground leading-relaxed prose prose-sm max-w-none prose-headings:text-foreground prose-p:text-card-foreground prose-strong:text-foreground prose-li:text-card-foreground">
-                    {msg.isTyping ? (
-                      <span>
-                        {msg.content}
-                        <span className="inline-block w-0.5 h-4 bg-primary ml-0.5 animate-pulse align-middle" />
-                      </span>
-                    ) : (
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    <ReactMarkdown>{msg.content || " "}</ReactMarkdown>
+                    {msg.isTyping && (
+                      <span className="inline-block w-0.5 h-4 bg-primary ml-0.5 animate-pulse align-middle" />
                     )}
                   </div>
 
@@ -489,7 +496,6 @@ const Chat = () => {
             </Card>
           </div>
         )}
-        <div ref={bottomRef} />
       </div>
 
       {/* Input */}

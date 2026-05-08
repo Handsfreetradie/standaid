@@ -4,10 +4,10 @@ StandAId — Claude-powered standard extraction.
 
 Usage:
     python extract.py <standard_id>
+    python extract.py <standard_id> --pdf /path/to/file.pdf
 
-The standard must already be uploaded via the app (so it exists in the
-standards table and the PDF is in Supabase storage). This script replaces
-the auto-extracted chunks with high-quality Claude-extracted ones.
+If the PDF is not stored in Supabase (e.g. uploaded via browser text
+extraction), pass --pdf with a local file path.
 
 Setup (one time):
     pip install -r requirements.txt
@@ -17,7 +17,6 @@ Setup (one time):
 import sys
 import os
 import time
-import textwrap
 import httpx
 from dotenv import load_dotenv
 from supabase import create_client
@@ -29,13 +28,18 @@ load_dotenv()
 
 
 def main():
-    if len(sys.argv) != 2:
-        print("Usage: python extract.py <standard_id>")
-        print("\nFind the standard_id in the Supabase dashboard → standards table,")
-        print("or from the app URL after uploading a standard.")
+    if len(sys.argv) < 2:
+        print("Usage: python extract.py <standard_id> [--pdf /path/to/file.pdf]")
         sys.exit(1)
 
     standard_id = sys.argv[1].strip()
+
+    # Optional local PDF path
+    local_pdf = None
+    if "--pdf" in sys.argv:
+        idx = sys.argv.index("--pdf")
+        if idx + 1 < len(sys.argv):
+            local_pdf = sys.argv[idx + 1]
 
     # ── Environment ───────────────────────────────────────────────────────────
     supabase_url = os.environ.get("SUPABASE_URL")
@@ -74,10 +78,6 @@ def main():
     print(f"  Standard: {std_code} {version}")
     print(f"  User:     {user_id}")
 
-    if not file_path:
-        print("No file_path on this standard — was the PDF uploaded?")
-        sys.exit(1)
-
     # ── Mark job as processing ────────────────────────────────────────────────
     supabase.table("processing_jobs").update({
         "status": "processing",
@@ -88,13 +88,37 @@ def main():
         "extraction_status": "processing",
     }).eq("id", standard_id).execute()
 
-    # ── Download PDF ──────────────────────────────────────────────────────────
-    print(f"\nDownloading PDF from storage...")
-    try:
-        pdf_bytes = bytes(supabase.storage.from_("standards").download(file_path))
-        print(f"  {round(len(pdf_bytes) / 1024 / 1024, 1)} MB downloaded")
-    except Exception as e:
-        _fail(supabase, standard_id, f"Failed to download PDF: {e}")
+    # ── Load PDF ──────────────────────────────────────────────────────────────
+    if local_pdf:
+        print(f"\nReading local PDF: {local_pdf}")
+        try:
+            with open(local_pdf, "rb") as f:
+                pdf_bytes = f.read()
+            print(f"  {round(len(pdf_bytes) / 1024 / 1024, 1)} MB read")
+            # Upload to storage so future runs don't need --pdf
+            if not file_path:
+                storage_path = f"{user_id}/{standard_id}.pdf"
+                print(f"  Uploading to storage as {storage_path}...")
+                supabase.storage.from_("standards").upload(
+                    storage_path, pdf_bytes, {"content-type": "application/pdf"}
+                )
+                supabase.table("standards").update({"file_path": storage_path}).eq("id", standard_id).execute()
+                print("  Saved to storage for future use")
+        except FileNotFoundError:
+            print(f"File not found: {local_pdf}")
+            sys.exit(1)
+    elif file_path:
+        print(f"\nDownloading PDF from storage...")
+        try:
+            pdf_bytes = bytes(supabase.storage.from_("standards").download(file_path))
+            print(f"  {round(len(pdf_bytes) / 1024 / 1024, 1)} MB downloaded")
+        except Exception as e:
+            _fail(supabase, standard_id, f"Failed to download PDF: {e}")
+            sys.exit(1)
+    else:
+        print("\nNo PDF found in storage and no --pdf path provided.")
+        print("Re-upload the standard via the app, or run:")
+        print(f"  python extract.py {standard_id} --pdf /path/to/your.pdf")
         sys.exit(1)
 
     # ── Run extraction ────────────────────────────────────────────────────────

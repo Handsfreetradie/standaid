@@ -1,5 +1,8 @@
 """
-Core extraction logic: PDF → Claude → Supabase chunks.
+Two-pass extraction pipeline:
+  Pass 1 — pdfplumber extracts raw text (free, 100% accurate for digital PDFs)
+  Pass 2 — Claude identifies clause/table/figure boundaries (tiny output, never truncates)
+  Content comes from the raw pdfplumber text, not Claude — no token limit issues.
 """
 
 import io
@@ -7,57 +10,37 @@ import json
 import math
 import re
 import time
-from typing import Callable, Optional
+from typing import Callable
 
 import anthropic
 import pdfplumber
 
-BATCH_SIZE = 15          # pages per Claude call
+BATCH_SIZE = 10          # pages per Claude boundary-detection call
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 TARGET_CHUNK_CHARS = 2000
 MAX_CHUNK_CHARS = 2500
-SCANNED_PAGE_THRESHOLD = 50  # chars below this = scanned/blank page
+SCANNED_PAGE_THRESHOLD = 50
 
-SYSTEM_PROMPT = """You are a precise technical document parser specialising in Australian Standards (AS/NZS).
+# Claude only returns a list of what starts on each page — tiny output, never truncates
+BOUNDARY_SYSTEM = """You are scanning pages of an Australian Standard document.
+Your ONLY job: list every clause number, table number, and figure number that BEGINS on these pages.
+Return ONLY valid JSON. No explanation. No other text."""
 
-Your job is to extract every clause, table, and figure from the provided pages — nothing skipped, nothing invented.
+BOUNDARY_PROMPT = """List every item that STARTS on these pages of {standard_code} {version}.
 
-RULES:
-- Clause numbers must be EXACT as printed (e.g. "4.4.2.1" not "4.4.2")
-- Content must be verbatim — do not paraphrase or summarise
-- Include ALL sub-clauses, notes, informative sections, and exceptions
-- If a clause number is unclear, use null — never guess
-- Tables must include all column headers and every data row
-- Figures must include exact caption text"""
+Return ONLY this JSON (no markdown, no explanation):
+{{"items": [
+  {{"type": "clause", "number": "4.4.2", "page": 45}},
+  {{"type": "table",  "number": "4.1",   "page": 46}},
+  {{"type": "figure", "number": "4.2",   "page": 47}}
+]}}
 
-USER_PROMPT = """Extract all clauses, tables and figures from these pages of {standard_code} {version}.
-
-Return ONLY valid JSON — no explanation, no markdown fences:
-{{
-  "clauses": [
-    {{
-      "number": "4.4.2",
-      "title": "Socket outlets — wet areas",
-      "content": "Complete verbatim clause text including all sub-points, notes and exceptions.",
-      "page": 234
-    }}
-  ],
-  "tables": [
-    {{
-      "number": "4.1",
-      "title": "Exact table title",
-      "content": "All column headers and every data row as readable text.",
-      "page": 235
-    }}
-  ],
-  "figures": [
-    {{
-      "number": "4.2",
-      "caption": "Exact figure caption",
-      "page": 236
-    }}
-  ]
-}}
+Rules:
+- Include ALL clause levels: 1, 1.1, 1.1.1, 1.1.1.1, 1.1.1.1.1
+- Include appendix clauses: A1, A1.1, B2 etc.
+- Clause numbers must be EXACT as printed
+- If nothing starts on a page, return empty items array
+- Do NOT include items from previous pages that continue onto these pages
 
 PAGES:
 {pages_text}"""
@@ -73,54 +56,50 @@ def run(
     claude: anthropic.Anthropic,
     log: Callable[[str], None] = print,
 ) -> dict:
-    """
-    Full pipeline: PDF bytes → Claude extraction → Supabase chunks.
-    Returns summary dict.
-    """
-
-    # 1. Extract text from PDF pages
+    # 1. Extract raw text with pdfplumber
     log("Reading PDF pages...")
-    pages = _pdf_to_pages(pdf_bytes)
+    pages, tables_by_page = _extract_pages_and_tables(pdf_bytes)
     total = len(pages)
     log(f"  {total} pages found")
 
     content_pages = sum(1 for p in pages if len(p.strip()) >= SCANNED_PAGE_THRESHOLD)
-    scanned_ratio = 1 - (content_pages / max(total, 1))
-
-    if scanned_ratio > 0.5:
-        log(f"  Scanned document ({round(scanned_ratio * 100)}% blank/image pages)")
-        log("  ERROR: Scanned PDFs not supported yet — use a digital PDF")
+    if content_pages / max(total, 1) < 0.5:
         raise ValueError(
-            "This PDF appears to be a scanned image. Please use a digital (text-based) PDF. "
-            "Digital versions are available from Standards Australia."
+            "This PDF appears to be scanned. Please use a digital PDF from Standards Australia."
         )
-
     log(f"  Digital PDF confirmed ({content_pages}/{total} pages with text)")
 
-    # 2. Claude extraction in batches
-    log(f"\nExtracting with Claude ({math.ceil(total / BATCH_SIZE)} batches of {BATCH_SIZE} pages)...")
-    extracted = _extract_all_pages(claude, pages, standard_code, version, log)
+    # 2. Claude identifies boundaries (clause numbers only — tiny output)
+    log(f"\nFinding clause boundaries ({math.ceil(total / BATCH_SIZE)} batches)...")
+    boundaries = _find_boundaries(claude, pages, standard_code, version, log)
+    log(f"  Found {len(boundaries)} boundaries")
 
-    clause_count = len(extracted["clauses"])
-    table_count = len(extracted["tables"])
-    figure_count = len(extracted["figures"])
-    log(f"\n  Extracted: {clause_count} clauses, {table_count} tables, {figure_count} figures")
+    if len(boundaries) == 0:
+        raise ValueError("No clause boundaries found. Check the PDF is a valid standard.")
 
-    if clause_count == 0:
-        raise ValueError("No clauses were extracted. Check that the PDF contains readable text.")
+    # 3. Build full text for content slicing
+    full_text = _build_full_text(pages)
 
-    # 3. Build Supabase-ready chunks
+    # 4. Extract content for each boundary from raw pdfplumber text
+    log("\nExtracting clause content from PDF text...")
+    items = _extract_content(full_text, boundaries, pages)
+    log(f"  {len(items)} clauses/tables/figures extracted")
+
+    # 5. Add pdfplumber-detected tables (structured data)
+    pdfplumber_tables = _format_pdfplumber_tables(tables_by_page, standard_code, version)
+    log(f"  {len(pdfplumber_tables)} structured tables from pdfplumber")
+
+    # 6. Build chunks
     log("\nBuilding chunks...")
-    chunks = _build_chunks(extracted, standard_code, version)
+    chunks = _build_chunks(items, pdfplumber_tables, standard_code, version)
     log(f"  {len(chunks)} chunks ready")
 
-    # 4. Replace existing chunks in DB
+    # 7. Save to database
     log("\nSaving to database...")
     _delete_existing_chunks(supabase, standard_id)
     _insert_chunks(supabase, chunks, standard_id, user_id)
     log(f"  {len(chunks)} chunks saved")
 
-    # 5. Update standard record
     supabase.table("standards").update({
         "extraction_quality_score": 95,
         "total_chunks": len(chunks),
@@ -128,37 +107,45 @@ def run(
         "extraction_status": "processing",
     }).eq("id", standard_id).execute()
 
-    return {
-        "total_chunks": len(chunks),
-        "clauses": clause_count,
-        "tables": table_count,
-        "figures": figure_count,
-    }
+    clause_count  = sum(1 for i in items if i["type"] == "clause")
+    table_count   = sum(1 for i in items if i["type"] == "table") + len(pdfplumber_tables)
+    figure_count  = sum(1 for i in items if i["type"] == "figure")
+
+    return {"total_chunks": len(chunks), "clauses": clause_count,
+            "tables": table_count, "figures": figure_count}
 
 
-# ── PDF reading ───────────────────────────────────────────────────────────────
+# ── PDF extraction ─────────────────────────────────────────────────────────────
 
-def _pdf_to_pages(pdf_bytes: bytes) -> list[str]:
+def _extract_pages_and_tables(pdf_bytes: bytes):
     pages = []
+    tables_by_page = {}
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-        for page in pdf.pages:
+        for i, page in enumerate(pdf.pages):
             pages.append(page.extract_text() or "")
-    return pages
+            tbls = page.extract_tables()
+            if tbls:
+                tables_by_page[i + 1] = tbls
+    return pages, tables_by_page
 
 
-# ── Claude extraction ─────────────────────────────────────────────────────────
+def _build_full_text(pages: list[str]) -> str:
+    parts = []
+    for i, text in enumerate(pages):
+        parts.append(f"[PAGE {i+1}]\n{text}")
+    return "\n\n".join(parts)
 
-def _extract_all_pages(
+
+# ── Claude boundary detection ──────────────────────────────────────────────────
+
+def _find_boundaries(
     claude: anthropic.Anthropic,
     pages: list[str],
     standard_code: str,
     version: str,
     log: Callable,
-) -> dict:
-    all_clauses: list = []
-    all_tables: list = []
-    all_figures: list = []
-
+) -> list[dict]:
+    all_items = []
     total = len(pages)
     num_batches = math.ceil(total / BATCH_SIZE)
 
@@ -167,50 +154,38 @@ def _extract_all_pages(
         end = min(start + BATCH_SIZE, total)
         batch = pages[start:end]
 
-        # Skip near-empty batches (e.g. table of contents, blank pages)
-        batch_text = "\n".join(batch)
-        if len(batch_text.strip()) < 200:
-            log(f"  Batch {i+1}/{num_batches} (pages {start+1}–{end}): skipped (no content)")
+        pages_text = ""
+        for j, text in enumerate(batch):
+            pages_text += f"\n--- PAGE {start + j + 1} ---\n{text}\n"
+
+        if len(pages_text.strip()) < 100:
             continue
 
-        pages_text = ""
-        for j, page_text in enumerate(batch):
-            pages_text += f"\n--- PAGE {start + j + 1} ---\n{page_text}\n"
-
         log(f"  Batch {i+1}/{num_batches} (pages {start+1}–{end})...", end=" ", flush=True)
+        items = _call_claude_boundaries(claude, pages_text, standard_code, version)
+        log(f"{len(items)} items")
+        all_items.extend(items)
+        time.sleep(0.2)
 
-        result = _call_claude(claude, pages_text, standard_code, version)
-
-        c = len(result.get("clauses", []))
-        t = len(result.get("tables", []))
-        f = len(result.get("figures", []))
-        log(f"{c} clauses, {t} tables, {f} figures")
-
-        all_clauses.extend(result.get("clauses", []))
-        all_tables.extend(result.get("tables", []))
-        all_figures.extend(result.get("figures", []))
-
-        time.sleep(0.3)  # polite rate limit pause
-
-    return {"clauses": all_clauses, "tables": all_tables, "figures": all_figures}
+    return all_items
 
 
-def _call_claude(
+def _call_claude_boundaries(
     claude: anthropic.Anthropic,
     pages_text: str,
     standard_code: str,
     version: str,
     retries: int = 3,
-) -> dict:
+) -> list[dict]:
     for attempt in range(retries):
         try:
             msg = claude.messages.create(
                 model=CLAUDE_MODEL,
-                max_tokens=8000,
-                system=SYSTEM_PROMPT,
+                max_tokens=8000,  # enough for dense pages
+                system=BOUNDARY_SYSTEM,
                 messages=[{
                     "role": "user",
-                    "content": USER_PROMPT.format(
+                    "content": BOUNDARY_PROMPT.format(
                         standard_code=standard_code,
                         version=version,
                         pages_text=pages_text,
@@ -218,52 +193,152 @@ def _call_claude(
                 }],
             )
             raw = msg.content[0].text
-            raw = re.sub(r"```json\s*", "", raw)
-            raw = re.sub(r"```\s*", "", raw)
-            return json.loads(raw.strip())
-
-        except json.JSONDecodeError as e:
-            print(f"\n    JSON parse error (attempt {attempt+1}): {e}")
-            if attempt == retries - 1:
-                return {"clauses": [], "tables": [], "figures": []}
-
-        except anthropic.RateLimitError:
-            wait = 2 ** attempt * 5
-            print(f"\n    Rate limit — waiting {wait}s...")
-            time.sleep(wait)
+            start = raw.find('{')
+            if start == -1:
+                return []
+            obj, _ = json.JSONDecoder().raw_decode(raw, start)
+            return obj.get("items", [])
 
         except Exception as e:
-            print(f"\n    Claude error (attempt {attempt+1}): {e}")
             if attempt == retries - 1:
-                return {"clauses": [], "tables": [], "figures": []}
+                print(f"\n    Failed after {retries} attempts: {e}")
+                return []
             time.sleep(2 ** attempt)
 
-    return {"clauses": [], "tables": [], "figures": []}
+    return []
+
+
+# ── Content extraction from raw PDF text ──────────────────────────────────────
+
+def _extract_content(full_text: str, boundaries: list[dict], pages: list[str]) -> list[dict]:
+    """
+    For each boundary, find where it starts in the full PDF text and extract
+    content up to the next boundary. Content comes from pdfplumber — not Claude.
+    """
+    # Build a char-offset index of where each page starts in full_text
+    page_offsets = []
+    pos = 0
+    for i, text in enumerate(pages):
+        marker = f"[PAGE {i+1}]\n"
+        idx = full_text.find(marker, pos)
+        page_offsets.append(idx if idx != -1 else pos)
+        pos = max(pos, idx + 1) if idx != -1 else pos
+
+    # Locate each boundary in the full text, searching near the stated page
+    positioned = []
+    for b in boundaries:
+        num = b.get("number", "").strip()
+        if not num:
+            continue
+
+        escaped = re.escape(num)
+        pattern = rf'(?m)^{escaped}(?=\s)'
+
+        # Start searching from the page Claude reported (skip TOC pages)
+        page_idx = b.get("page", 1) - 1
+        # Search from one page before to handle slight page-number drift
+        search_start = page_offsets[max(0, page_idx - 1)] if page_idx < len(page_offsets) else 0
+        match = re.search(pattern, full_text[search_start:])
+        if match:
+            positioned.append({
+                "boundary": b,
+                "pos": search_start + match.start(),
+            })
+
+    # Sort by position in document
+    positioned.sort(key=lambda x: x["pos"])
+
+    results = []
+    for i, item in enumerate(positioned):
+        b = item["boundary"]
+        start = item["pos"]
+        end = positioned[i + 1]["pos"] if i + 1 < len(positioned) else len(full_text)
+
+        raw_content = full_text[start:end].strip()
+
+        # Strip [PAGE N] markers from content
+        raw_content = re.sub(r'\[PAGE \d+\]\n?', '', raw_content).strip()
+
+        # Extract title from first line if not provided
+        title = (b.get("title") or "").strip()
+        if not title:
+            first_line = raw_content.split('\n')[0]
+            # Remove the clause number from first line to get title
+            title_match = re.match(rf'^{re.escape(b["number"])}\s+(.*)', first_line)
+            if title_match:
+                title = title_match.group(1).strip()
+
+        if len(raw_content) < 5:
+            continue
+
+        results.append({
+            "type": b.get("type", "clause"),
+            "number": b["number"],
+            "title": title,
+            "content": raw_content,
+            "page": b.get("page", 1),
+        })
+
+    return results
+
+
+# ── pdfplumber table formatting ────────────────────────────────────────────────
+
+def _format_pdfplumber_tables(tables_by_page: dict, standard_code: str, version: str) -> list[dict]:
+    chunks = []
+    label = f"[{standard_code}{f' {version}' if version else ''}]"
+    for page_num, tables in tables_by_page.items():
+        for t_idx, table in enumerate(tables):
+            if not table or len(table) < 2:
+                continue
+            # Format as readable text: header row + data rows
+            rows = []
+            for row in table:
+                clean = [str(cell or "").strip() for cell in row]
+                rows.append(" | ".join(clean))
+            content = f"{label} Table (page {page_num})\n\n" + "\n".join(rows)
+            chunks.append({
+                "type": "table",
+                "number": f"p{page_num}_{t_idx}",
+                "title": rows[0] if rows else "",
+                "content": content,
+                "page": page_num,
+            })
+    return chunks
 
 
 # ── Chunking ──────────────────────────────────────────────────────────────────
 
-def _build_chunks(extracted: dict, standard_code: str, version: str) -> list[dict]:
+def _build_chunks(items: list[dict], extra_tables: list[dict], standard_code: str, version: str) -> list[dict]:
     chunks = []
     idx = 0
     label = f"[{standard_code}{f' {version}' if version else ''}]"
 
-    for item in extracted.get("clauses", []):
-        number = (item.get("number") or "").strip()
-        title  = (item.get("title")  or "").strip()
+    all_items = items + extra_tables
+
+    for item in all_items:
+        number  = (item.get("number") or "").strip()
+        title   = (item.get("title")  or "").strip()
         content = (item.get("content") or "").strip()
-        page   = item.get("page") or 1
+        page    = item.get("page") or 1
+        itype   = item.get("type", "clause")
 
         if len(content) < 10:
             continue
 
-        breadcrumb = label
-        if number:
-            breadcrumb += f" Clause {number}"
+        if itype == "clause":
+            breadcrumb = f"{label} Clause {number}" if number else label
             if title:
                 breadcrumb += f": {title}"
-        elif title:
-            breadcrumb += f" {title}"
+        elif itype == "table":
+            breadcrumb = f"{label} Table {number}" if number else f"{label} Table"
+            if title:
+                breadcrumb += f": {title}"
+        else:  # figure
+            breadcrumb = f"{label} Figure {number}" if number else f"{label} Figure"
+            if title:
+                breadcrumb += f" — {title}"
+
         breadcrumb += "\n\n"
 
         for chunk_text in _split(breadcrumb + content, breadcrumb):
@@ -276,49 +351,10 @@ def _build_chunks(extracted: dict, standard_code: str, version: str) -> list[dic
             })
             idx += 1
 
-    for item in extracted.get("tables", []):
-        number  = (item.get("number")  or "").strip()
-        title   = (item.get("title")   or "").strip()
-        content = (item.get("content") or "").strip()
-        page    = item.get("page") or 1
-
-        if not content:
-            continue
-
-        text = f"{label} Table {number}{f': {title}' if title else ''}\n\n{content}"
-        chunks.append({
-            "clause_number": f"TABLE {number}" if number else None,
-            "clause_title":  title or None,
-            "content":       text,
-            "page_number":   page,
-            "chunk_index":   idx,
-        })
-        idx += 1
-
-    for item in extracted.get("figures", []):
-        number  = (item.get("number")  or "").strip()
-        caption = (item.get("caption") or "").strip()
-        page    = item.get("page") or 1
-
-        text = (
-            f"{label} Figure {number}{f' — {caption}' if caption else ''}\n\n"
-            f"Refer to Figure {number} on page {page} of the standard for the diagram.\n"
-            f"Caption: {caption}"
-        )
-        chunks.append({
-            "clause_number": f"FIGURE {number}" if number else None,
-            "clause_title":  caption or None,
-            "content":       text,
-            "page_number":   page,
-            "chunk_index":   idx,
-        })
-        idx += 1
-
     return chunks
 
 
 def _split(full_text: str, breadcrumb: str) -> list[str]:
-    """Split a long clause into overlapping TARGET_CHUNK_CHARS chunks."""
     if len(full_text) <= MAX_CHUNK_CHARS:
         return [full_text]
 
@@ -351,18 +387,15 @@ def _delete_existing_chunks(supabase, standard_id: str) -> None:
 def _insert_chunks(supabase, chunks: list[dict], standard_id: str, user_id: str) -> None:
     BATCH = 100
     for i in range(0, len(chunks), BATCH):
-        records = [
-            {
-                "standard_id":  standard_id,
-                "user_id":      user_id,
-                "clause_number": c["clause_number"],
-                "clause_title":  c["clause_title"],
-                "content":       c["content"],
-                "page_number":   c["page_number"],
-                "chunk_index":   c["chunk_index"],
-                "embedding":     None,
-                "is_indexed":    False,
-            }
-            for c in chunks[i:i + BATCH]
-        ]
+        records = [{
+            "standard_id":   standard_id,
+            "user_id":       user_id,
+            "clause_number": c["clause_number"],
+            "clause_title":  c["clause_title"],
+            "content":       c["content"],
+            "page_number":   c["page_number"],
+            "chunk_index":   c["chunk_index"],
+            "embedding":     None,
+            "is_indexed":    False,
+        } for c in chunks[i:i + BATCH]]
         supabase.table("standard_chunks").insert(records).execute()
