@@ -300,6 +300,44 @@ ${chunk.content}`;
       }
     }
 
+    // Look up image URLs for any figures/tables the AI referenced
+    const figuresReferenced: any[] = parsedResponse.figures_referenced || [];
+    const tablesReferenced: any[] = parsedResponse.tables_referenced || [];
+
+    if (figuresReferenced.length > 0 || tablesReferenced.length > 0) {
+      const figNums = figuresReferenced.map((f: any) => f.figure_number).filter(Boolean);
+      const tblNums = tablesReferenced.map((t: any) => t.table_number).filter(Boolean);
+
+      const [figRows, tblRows] = await Promise.all([
+        figNums.length > 0
+          ? supabase
+              .from("standard_figures")
+              .select("figure_number, image_url, caption, page_number")
+              .eq("user_id", userId)
+              .in("figure_number", figNums)
+          : Promise.resolve({ data: [] }),
+        tblNums.length > 0
+          ? supabase
+              .from("standard_tables")
+              .select("table_number, image_url, caption, page_number")
+              .eq("user_id", userId)
+              .in("table_number", tblNums)
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      const figMap = new Map((figRows.data || []).map((r: any) => [r.figure_number, r]));
+      const tblMap = new Map((tblRows.data || []).map((r: any) => [r.table_number, r]));
+
+      parsedResponse.figures_referenced = figuresReferenced.map((f: any) => {
+        const row = figMap.get(f.figure_number);
+        return row ? { ...f, image_url: row.image_url, caption: f.caption || row.caption, page_number: row.page_number } : f;
+      });
+      parsedResponse.tables_referenced = tablesReferenced.map((t: any) => {
+        const row = tblMap.get(t.table_number);
+        return row ? { ...t, image_url: row.image_url, caption: t.caption || row.caption, page_number: row.page_number } : t;
+      });
+    }
+
     // Validate the answer text — catches hallucinated citations, missing safety warnings, low grounding
     const validation = validateResponse({
       response: parsedResponse.answer || "",

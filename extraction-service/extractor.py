@@ -3,6 +3,7 @@ Two-pass extraction pipeline:
   Pass 1 — pdfplumber extracts raw text (free, 100% accurate for digital PDFs)
   Pass 2 — Claude identifies clause/table/figure boundaries (tiny output, never truncates)
   Content comes from the raw pdfplumber text, not Claude — no token limit issues.
+  Pass 3 — pymupdf renders figure/table pages as images and uploads to Supabase Storage.
 """
 
 import io
@@ -13,6 +14,7 @@ import time
 from typing import Callable
 
 import anthropic
+import fitz  # pymupdf
 import pdfplumber
 
 BATCH_SIZE = 10          # pages per Claude boundary-detection call
@@ -100,6 +102,19 @@ def run(
     _insert_chunks(supabase, chunks, standard_id, user_id)
     log(f"  {len(chunks)} chunks saved")
 
+    # 8. Render figure/table images and upload to Supabase Storage
+    log("\nExtracting figure and table images...")
+    figure_items = [i for i in items if i["type"] == "figure"]
+    table_items  = [i for i in items if i["type"] == "table"] + [
+        {"type": "table", "number": t["number"], "title": t["title"], "page": t["page"]}
+        for t in pdfplumber_tables
+    ]
+    img_counts = _extract_and_upload_images(
+        pdf_bytes, figure_items, table_items,
+        supabase, standard_id, user_id, log,
+    )
+    log(f"  {img_counts['figures']} figures, {img_counts['tables']} tables uploaded")
+
     supabase.table("standards").update({
         "extraction_quality_score": 95,
         "total_chunks": len(chunks),
@@ -107,9 +122,9 @@ def run(
         "extraction_status": "processing",
     }).eq("id", standard_id).execute()
 
-    clause_count  = sum(1 for i in items if i["type"] == "clause")
-    table_count   = sum(1 for i in items if i["type"] == "table") + len(pdfplumber_tables)
-    figure_count  = sum(1 for i in items if i["type"] == "figure")
+    clause_count = sum(1 for i in items if i["type"] == "clause")
+    table_count  = sum(1 for i in items if i["type"] == "table") + len(pdfplumber_tables)
+    figure_count = sum(1 for i in items if i["type"] == "figure")
 
     return {"total_chunks": len(chunks), "clauses": clause_count,
             "tables": table_count, "figures": figure_count}
@@ -376,6 +391,119 @@ def _split(full_text: str, breadcrumb: str) -> list[str]:
         results.append(buffer.strip())
 
     return results or [full_text]
+
+
+# ── Image extraction and upload ───────────────────────────────────────────────
+
+IMAGE_DPI = 150  # 150dpi balances quality vs file size (~100–300KB per page)
+
+
+def _render_page_png(pdf_bytes: bytes, page_number: int) -> bytes | None:
+    """Render a single PDF page (1-indexed) as a PNG using pymupdf."""
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        if page_number < 1 or page_number > len(doc):
+            return None
+        page = doc[page_number - 1]
+        mat = fitz.Matrix(IMAGE_DPI / 72, IMAGE_DPI / 72)
+        pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+        return pix.tobytes("png")
+    except Exception:
+        return None
+
+
+def _upload_image(supabase, user_id: str, standard_id: str, name: str, png_bytes: bytes) -> str | None:
+    """Upload a PNG to Supabase Storage and return the public URL."""
+    path = f"{user_id}/{standard_id}/{name}.png"
+    try:
+        # Remove existing file first (re-extraction case)
+        supabase.storage.from_("standard-figures").remove([path])
+    except Exception:
+        pass
+    try:
+        supabase.storage.from_("standard-figures").upload(
+            path,
+            png_bytes,
+            {"content-type": "image/png", "upsert": "true"},
+        )
+        result = supabase.storage.from_("standard-figures").get_public_url(path)
+        return result
+    except Exception as e:
+        print(f"    Upload failed for {path}: {e}")
+        return None
+
+
+def _extract_and_upload_images(
+    pdf_bytes: bytes,
+    figure_items: list[dict],
+    table_items: list[dict],
+    supabase,
+    standard_id: str,
+    user_id: str,
+    log: Callable,
+) -> dict:
+    """
+    Render the page for each figure/table, upload to Storage, and insert
+    metadata rows into standard_figures / standard_tables.
+    """
+    # Delete old image records so re-extraction is clean
+    supabase.table("standard_figures").delete().eq("standard_id", standard_id).execute()
+    supabase.table("standard_tables").delete().eq("standard_id", standard_id).execute()
+
+    fig_count = 0
+    tbl_count = 0
+
+    # Cache rendered pages — many figures/tables may be on the same page
+    page_cache: dict[int, bytes | None] = {}
+
+    def get_page_png(page_num: int) -> bytes | None:
+        if page_num not in page_cache:
+            page_cache[page_num] = _render_page_png(pdf_bytes, page_num)
+        return page_cache[page_num]
+
+    for item in figure_items:
+        num  = (item.get("number") or "").strip()
+        page = item.get("page") or 1
+        if not num:
+            continue
+        png = get_page_png(page)
+        if not png:
+            continue
+        safe_num = re.sub(r"[^A-Za-z0-9._-]", "_", num)
+        url = _upload_image(supabase, user_id, standard_id, f"figure_{safe_num}", png)
+        if url:
+            supabase.table("standard_figures").insert({
+                "standard_id": standard_id,
+                "user_id": user_id,
+                "figure_number": num,
+                "caption": (item.get("title") or "").strip() or None,
+                "page_number": page,
+                "image_url": url,
+            }).execute()
+            fig_count += 1
+
+    for item in table_items:
+        num  = (item.get("number") or "").strip()
+        page = item.get("page") or 1
+        if not num:
+            continue
+        png = get_page_png(page)
+        if not png:
+            continue
+        safe_num = re.sub(r"[^A-Za-z0-9._-]", "_", num)
+        url = _upload_image(supabase, user_id, standard_id, f"table_{safe_num}", png)
+        if url:
+            supabase.table("standard_tables").insert({
+                "standard_id": standard_id,
+                "user_id": user_id,
+                "table_number": num,
+                "caption": (item.get("title") or "").strip() or None,
+                "page_number": page,
+                "image_url": url,
+            }).execute()
+            tbl_count += 1
+
+    return {"figures": fig_count, "tables": tbl_count}
 
 
 # ── Database ──────────────────────────────────────────────────────────────────

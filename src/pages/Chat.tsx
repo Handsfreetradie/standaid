@@ -20,6 +20,15 @@ interface Citation {
   gated?: boolean;
 }
 
+interface ImageRef {
+  figure_number?: string;
+  table_number?: string;
+  caption?: string;
+  standard_code?: string;
+  page_number?: number;
+  image_url?: string;
+}
+
 type FeedbackRating = "helpful" | "wrong" | "unclear";
 
 interface Message {
@@ -28,6 +37,8 @@ interface Message {
   content: string;
   isTyping?: boolean;
   citations?: Citation[];
+  figures_referenced?: ImageRef[];
+  tables_referenced?: ImageRef[];
   safety_critical?: boolean;
   safety_message?: string;
   confidence?: string;
@@ -223,6 +234,8 @@ const Chat = () => {
       isTyping: true,
       _full: data.answer || "No response generated.",
       citations: data.citations || [],
+      figures_referenced: (data.figures_referenced || []).filter((f: ImageRef) => f.image_url),
+      tables_referenced: (data.tables_referenced || []).filter((t: ImageRef) => t.image_url),
       safety_critical: data.safety_critical || false,
       safety_message: data.safety_message,
       confidence: data.confidence,
@@ -414,6 +427,48 @@ const Chat = () => {
                           {citation.clause_number}
                           {citation.standard_code ? ` (${citation.standard_code})` : ""}
                         </Badge>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Figure images */}
+                  {!msg.isTyping && msg.figures_referenced && msg.figures_referenced.length > 0 && (
+                    <div className="mt-3 space-y-3">
+                      {msg.figures_referenced.map((fig, idx) => (
+                        <div key={idx} className="rounded-lg overflow-hidden border border-border">
+                          <img
+                            src={fig.image_url}
+                            alt={fig.caption || `Figure ${fig.figure_number}`}
+                            className="w-full h-auto"
+                            loading="lazy"
+                          />
+                          {(fig.caption || fig.figure_number) && (
+                            <p className="text-[10px] text-muted-foreground px-3 py-1.5 bg-muted/30">
+                              Figure {fig.figure_number}{fig.caption ? ` — ${fig.caption}` : ""}{fig.standard_code ? ` (${fig.standard_code})` : ""}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Table images */}
+                  {!msg.isTyping && msg.tables_referenced && msg.tables_referenced.length > 0 && (
+                    <div className="mt-3 space-y-3">
+                      {msg.tables_referenced.map((tbl, idx) => (
+                        <div key={idx} className="rounded-lg overflow-hidden border border-border">
+                          <img
+                            src={tbl.image_url}
+                            alt={tbl.caption || `Table ${tbl.table_number}`}
+                            className="w-full h-auto"
+                            loading="lazy"
+                          />
+                          {(tbl.caption || tbl.table_number) && (
+                            <p className="text-[10px] text-muted-foreground px-3 py-1.5 bg-muted/30">
+                              Table {tbl.table_number}{tbl.caption ? ` — ${tbl.caption}` : ""}{tbl.standard_code ? ` (${tbl.standard_code})` : ""}
+                            </p>
+                          )}
+                        </div>
                       ))}
                     </div>
                   )}
