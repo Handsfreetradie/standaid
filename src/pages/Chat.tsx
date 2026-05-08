@@ -307,22 +307,16 @@ const Chat = () => {
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
-      {/* Header */}
-      <div className="px-5 py-4 border-b border-border">
-        <div className="flex items-center gap-2">
-          <Shield className="h-5 w-5 text-primary" />
-          <h1 className="font-sans text-lg font-bold text-foreground">
-            Compliance Chat
-          </h1>
-        </div>
-        {profile?.subscription_tier === "free" && (
-          <p className="text-xs text-muted-foreground mt-0.5">
+      {/* Query count for free tier */}
+      {profile?.subscription_tier === "free" && (
+        <div className="px-5 py-1.5 border-b border-border bg-muted/30">
+          <p className="text-xs text-muted-foreground text-center">
             {queriesRemaining > 0
               ? `${queriesRemaining} of 5 free queries remaining today`
               : "Daily limit reached — upgrade to Pro"}
           </p>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-5 py-4 flex flex-col">
