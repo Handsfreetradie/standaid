@@ -398,17 +398,77 @@ def _split(full_text: str, breadcrumb: str) -> list[str]:
 IMAGE_DPI = 150  # 150dpi balances quality vs file size (~100–300KB per page)
 
 
-def _render_page_png(pdf_bytes: bytes, page_number: int) -> bytes | None:
-    """Render a single PDF page (1-indexed) as a PNG using pymupdf."""
+def _render_figure_png(pdf_bytes: bytes, page_number: int, label: str, item_type: str) -> bytes | None:
+    """
+    Render just the region of a page that contains a specific figure or table.
+    Searches for the label text (e.g. "FIGURE 2.4" or "TABLE 3.5") on the page,
+    then crops from that point to the next heading/label or end of page.
+    Falls back to the full page if the label can't be found.
+    """
     try:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        if page_number < 1 or page_number > len(doc):
+        total_pages = len(doc)
+        if page_number < 1 or page_number > total_pages:
             return None
+
         page = doc[page_number - 1]
+        page_rect = page.rect
         mat = fitz.Matrix(IMAGE_DPI / 72, IMAGE_DPI / 72)
-        pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+
+        # Try to find the label text on this page or the next
+        # Standards use uppercase (FIGURE 2.4) or title case (Figure 2.4)
+        search_variants = [
+            f"{item_type.upper()} {label}",
+            f"{item_type.capitalize()} {label}",
+            f"{item_type.upper()}{label}",  # no space variant
+        ]
+
+        crop_top = None
+        search_page = page
+
+        for variant in search_variants:
+            hits = search_page.search_for(variant)
+            if hits:
+                crop_top = hits[0].y0 - 5  # small padding above label
+                break
+
+        if crop_top is None and page_number < total_pages:
+            # Try next page (figure might start there even though boundary says this page)
+            next_page = doc[page_number]
+            for variant in search_variants:
+                hits = next_page.search_for(variant)
+                if hits:
+                    search_page = next_page
+                    crop_top = hits[0].y0 - 5
+                    break
+
+        if crop_top is None:
+            # Label not found — render full page
+            pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+            return pix.tobytes("png")
+
+        # Find where the next figure/table starts so we know where to crop bottom
+        next_labels = ["FIGURE", "Figure", "TABLE", "Table", "APPENDIX", "SECTION", "CLAUSE"]
+        crop_bottom = search_page.rect.height  # default: bottom of page
+
+        blocks = search_page.get_text("blocks")  # (x0, y0, x1, y1, text, ...)
+        for block in blocks:
+            by0 = block[1]
+            btext = block[4].strip()
+            if by0 > crop_top + 20:  # must be below our label
+                for nl in next_labels:
+                    if btext.startswith(nl) and btext != f"{item_type.upper()} {label}":
+                        crop_bottom = by0 - 5
+                        break
+                if crop_bottom < search_page.rect.height:
+                    break
+
+        clip = fitz.Rect(0, max(0, crop_top), search_page.rect.width, min(crop_bottom, search_page.rect.height))
+        pix = search_page.get_pixmap(matrix=mat, colorspace=fitz.csRGB, clip=clip)
         return pix.tobytes("png")
-    except Exception:
+
+    except Exception as e:
+        print(f"    Image render error for {item_type} {label}: {e}")
         return None
 
 
@@ -453,20 +513,12 @@ def _extract_and_upload_images(
     fig_count = 0
     tbl_count = 0
 
-    # Cache rendered pages — many figures/tables may be on the same page
-    page_cache: dict[int, bytes | None] = {}
-
-    def get_page_png(page_num: int) -> bytes | None:
-        if page_num not in page_cache:
-            page_cache[page_num] = _render_page_png(pdf_bytes, page_num)
-        return page_cache[page_num]
-
     for item in figure_items:
         num  = (item.get("number") or "").strip()
         page = item.get("page") or 1
         if not num:
             continue
-        png = get_page_png(page)
+        png = _render_figure_png(pdf_bytes, page, num, "figure")
         if not png:
             continue
         safe_num = re.sub(r"[^A-Za-z0-9._-]", "_", num)
@@ -487,7 +539,7 @@ def _extract_and_upload_images(
         page = item.get("page") or 1
         if not num:
             continue
-        png = get_page_png(page)
+        png = _render_figure_png(pdf_bytes, page, num, "table")
         if not png:
             continue
         safe_num = re.sub(r"[^A-Za-z0-9._-]", "_", num)

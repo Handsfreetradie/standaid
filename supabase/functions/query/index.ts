@@ -300,27 +300,27 @@ ${chunk.content}`;
       }
     }
 
-    // Look up image URLs for figures/tables.
-    // We extract figure/table numbers from three places so we never miss one:
-    //   1. The AI's figures_referenced / tables_referenced JSON fields
-    //   2. The original question (e.g. "show me figure 2.4")
-    //   3. The answer text (e.g. "Figure 2.4 shows...")
-    const combinedText = `${question} ${parsedResponse.answer || ""}`;
-    const figNumsFromText = [...combinedText.matchAll(/\bfigure[s]?\s+(\d+\.\d+(?:\.\d+)?)\b/gi)]
+    // Look up image URLs for figures/tables the AI explicitly referenced.
+    // We use two sources (deduplicated):
+    //   1. The AI's figures_referenced / tables_referenced JSON fields (AI is declaring these intentionally)
+    //   2. Explicit figure/table numbers in the question itself (e.g. "show me figure 2.4")
+    //      — but NOT from the answer text, to avoid showing wrong figures when AI mentions
+    //        multiple figures in passing or describes exclusion zone numbers.
+    const questionFigNums = [...question.matchAll(/\bfigure[s]?\s+(\d+\.\d+(?:\.\d+)?)\b/gi)]
       .map((m) => m[1]);
-    const tblNumsFromText = [...combinedText.matchAll(/\btable[s]?\s+(\d+\.\d+(?:\.\d+)?)\b/gi)]
+    const questionTblNums = [...question.matchAll(/\btable[s]?\s+(\d+\.\d+(?:\.\d+)?)\b/gi)]
       .map((m) => m[1]);
 
     const aiFigures: any[] = parsedResponse.figures_referenced || [];
     const aiTables: any[] = parsedResponse.tables_referenced || [];
 
-    // Merge AI-declared refs with text-extracted numbers (deduplicated)
+    // Merge question-extracted numbers with AI-declared refs (deduplicated)
     const seenFigNums = new Set(aiFigures.map((f: any) => f.figure_number));
-    for (const n of figNumsFromText) {
+    for (const n of questionFigNums) {
       if (!seenFigNums.has(n)) { aiFigures.push({ figure_number: n }); seenFigNums.add(n); }
     }
     const seenTblNums = new Set(aiTables.map((t: any) => t.table_number));
-    for (const n of tblNumsFromText) {
+    for (const n of questionTblNums) {
       if (!seenTblNums.has(n)) { aiTables.push({ table_number: n }); seenTblNums.add(n); }
     }
 
