@@ -300,14 +300,34 @@ ${chunk.content}`;
       }
     }
 
-    // Look up image URLs for any figures/tables the AI referenced
-    const figuresReferenced: any[] = parsedResponse.figures_referenced || [];
-    const tablesReferenced: any[] = parsedResponse.tables_referenced || [];
+    // Look up image URLs for figures/tables.
+    // We extract figure/table numbers from three places so we never miss one:
+    //   1. The AI's figures_referenced / tables_referenced JSON fields
+    //   2. The original question (e.g. "show me figure 2.4")
+    //   3. The answer text (e.g. "Figure 2.4 shows...")
+    const combinedText = `${question} ${parsedResponse.answer || ""}`;
+    const figNumsFromText = [...combinedText.matchAll(/\bfigure[s]?\s+(\d+\.\d+(?:\.\d+)?)\b/gi)]
+      .map((m) => m[1]);
+    const tblNumsFromText = [...combinedText.matchAll(/\btable[s]?\s+(\d+\.\d+(?:\.\d+)?)\b/gi)]
+      .map((m) => m[1]);
 
-    if (figuresReferenced.length > 0 || tablesReferenced.length > 0) {
-      const figNums = figuresReferenced.map((f: any) => f.figure_number).filter(Boolean);
-      const tblNums = tablesReferenced.map((t: any) => t.table_number).filter(Boolean);
+    const aiFigures: any[] = parsedResponse.figures_referenced || [];
+    const aiTables: any[] = parsedResponse.tables_referenced || [];
 
+    // Merge AI-declared refs with text-extracted numbers (deduplicated)
+    const seenFigNums = new Set(aiFigures.map((f: any) => f.figure_number));
+    for (const n of figNumsFromText) {
+      if (!seenFigNums.has(n)) { aiFigures.push({ figure_number: n }); seenFigNums.add(n); }
+    }
+    const seenTblNums = new Set(aiTables.map((t: any) => t.table_number));
+    for (const n of tblNumsFromText) {
+      if (!seenTblNums.has(n)) { aiTables.push({ table_number: n }); seenTblNums.add(n); }
+    }
+
+    const figNums = aiFigures.map((f: any) => f.figure_number).filter(Boolean);
+    const tblNums = aiTables.map((t: any) => t.table_number).filter(Boolean);
+
+    if (figNums.length > 0 || tblNums.length > 0) {
       const [figRows, tblRows] = await Promise.all([
         figNums.length > 0
           ? supabase
@@ -328,14 +348,22 @@ ${chunk.content}`;
       const figMap = new Map((figRows.data || []).map((r: any) => [r.figure_number, r]));
       const tblMap = new Map((tblRows.data || []).map((r: any) => [r.table_number, r]));
 
-      parsedResponse.figures_referenced = figuresReferenced.map((f: any) => {
-        const row = figMap.get(f.figure_number);
-        return row ? { ...f, image_url: row.image_url, caption: f.caption || row.caption, page_number: row.page_number } : f;
-      });
-      parsedResponse.tables_referenced = tablesReferenced.map((t: any) => {
-        const row = tblMap.get(t.table_number);
-        return row ? { ...t, image_url: row.image_url, caption: t.caption || row.caption, page_number: row.page_number } : t;
-      });
+      parsedResponse.figures_referenced = aiFigures
+        .map((f: any) => {
+          const row = figMap.get(f.figure_number);
+          return row ? { ...f, image_url: row.image_url, caption: f.caption || row.caption, page_number: row.page_number } : f;
+        })
+        .filter((f: any) => f.image_url);
+
+      parsedResponse.tables_referenced = aiTables
+        .map((t: any) => {
+          const row = tblMap.get(t.table_number);
+          return row ? { ...t, image_url: row.image_url, caption: t.caption || row.caption, page_number: row.page_number } : t;
+        })
+        .filter((t: any) => t.image_url);
+    } else {
+      parsedResponse.figures_referenced = [];
+      parsedResponse.tables_referenced = [];
     }
 
     // Validate the answer text — catches hallucinated citations, missing safety warnings, low grounding
