@@ -276,9 +276,16 @@ const Chat = () => {
         }
         return;
       }
+      setMessages((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), role: "assistant", content: "Sorry, something went wrong. Please try again." },
+      ]);
     } catch (e: any) {
       console.error("Query error:", e);
-      toast.error(e.message || "Failed to send query");
+      setMessages((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), role: "assistant", content: e.message || "Sorry, something went wrong. Please try again." },
+      ]);
     }
     setIsLoading(false);
     scrollToBottom();

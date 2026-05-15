@@ -51,14 +51,6 @@ class ErrorBoundary extends React.Component<
   }
 }
 
-const ONBOARDING_DONE_KEY = "standaid_onboarding_complete";
-
-function OnboardingGate({ children }: { children: React.ReactNode }) {
-  const done = localStorage.getItem(ONBOARDING_DONE_KEY) === "true";
-  if (!done) return <Navigate to="/onboarding" replace />;
-  return <>{children}</>;
-}
-
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) return (
@@ -93,20 +85,16 @@ const AppRoutes = () => (
     <Route
       path="/auth"
       element={
-        <OnboardingGate>
-          <AuthRoute>
-            <Auth />
-          </AuthRoute>
-        </OnboardingGate>
+        <AuthRoute>
+          <Auth />
+        </AuthRoute>
       }
     />
     <Route
       element={
-        <OnboardingGate>
-          <ProtectedRoute>
-            <AppLayout />
-          </ProtectedRoute>
-        </OnboardingGate>
+        <ProtectedRoute>
+          <AppLayout />
+        </ProtectedRoute>
       }
     >
       <Route path="/" element={<Index />} />

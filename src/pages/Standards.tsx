@@ -116,6 +116,7 @@ const Standards = () => {
   };
 
   const handleDelete = async (standardId: string) => {
+    if (!window.confirm("Delete this standard? This cannot be undone.")) return;
     const { error } = await supabase.from("standards").delete().eq("id", standardId);
     if (error) {
       toast.error("Failed to delete standard");

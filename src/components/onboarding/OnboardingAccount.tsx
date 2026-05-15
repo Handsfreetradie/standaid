@@ -27,8 +27,8 @@ const OnboardingAccount = ({ onNext, onBack, onSignIn }: Props) => {
       toast.error("Passwords don't match");
       return;
     }
-    if (password.length < 6) {
-      toast.error("Password must be at least 6 characters");
+    if (password.length < 8) {
+      toast.error("Password must be at least 8 characters");
       return;
     }
 
@@ -84,7 +84,7 @@ const OnboardingAccount = ({ onNext, onBack, onSignIn }: Props) => {
               onChange={(e) => setPassword(e.target.value)}
               className="h-[52px] rounded-xl border-foreground/20 focus:border-primary pr-10"
               required
-              minLength={6}
+              minLength={8}
             />
             <button
               type="button"

@@ -11,12 +11,14 @@ import { supabase } from "@/integrations/supabase/client";
 
 const ONBOARDING_KEY = "standaid_onboarding_step";
 const ONBOARDING_DONE_KEY = "standaid_onboarding_complete";
+const ONBOARDING_INDUSTRIES_KEY = "standaid_onboarding_industries";
 
 const Onboarding = () => {
   const navigate = useNavigate();
   const savedStep = parseInt(localStorage.getItem(ONBOARDING_KEY) || "0", 10);
+  const savedIndustries = JSON.parse(localStorage.getItem(ONBOARDING_INDUSTRIES_KEY) || "[]");
   const [step, setStep] = useState(savedStep);
-  const [selectedIndustries, setSelectedIndustries] = useState<string[]>([]);
+  const [selectedIndustries, setSelectedIndustries] = useState<string[]>(savedIndustries);
   const [firstName, setFirstName] = useState("");
 
   useEffect(() => {
@@ -26,6 +28,7 @@ const Onboarding = () => {
   const finish = () => {
     localStorage.setItem(ONBOARDING_DONE_KEY, "true");
     localStorage.removeItem(ONBOARDING_KEY);
+    localStorage.removeItem(ONBOARDING_INDUSTRIES_KEY);
     navigate("/", { replace: true });
   };
 
@@ -38,6 +41,7 @@ const Onboarding = () => {
   // Save industries to profile when selected
   const handleIndustryNext = async (industries: string[]) => {
     setSelectedIndustries(industries);
+    localStorage.setItem(ONBOARDING_INDUSTRIES_KEY, JSON.stringify(industries));
     // Save to profile if user is already authed
     const { data: { session } } = await supabase.auth.getSession();
     if (session) {

@@ -21,8 +21,8 @@ const Auth = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !password.trim()) return;
-    if (isSignUp && password.length < 12) {
-      toast.error("Password must be at least 12 characters");
+    if (isSignUp && password.length < 8) {
+      toast.error("Password must be at least 8 characters");
       return;
     }
 
@@ -169,7 +169,7 @@ const Auth = () => {
                 onChange={(e) => setPassword(e.target.value)}
                 className="pl-9 pr-10 h-11"
                 required
-                minLength={isSignUp ? 12 : undefined}
+                minLength={isSignUp ? 8 : undefined}
               />
               <button
                 type="button"
@@ -184,7 +184,7 @@ const Auth = () => {
               </button>
             </div>
             {isSignUp && (
-              <p className="text-xs text-muted-foreground mt-1">Minimum 12 characters</p>
+              <p className="text-xs text-muted-foreground mt-1">Minimum 8 characters</p>
             )}
           </div>
           <Button type="submit" className="w-full h-11 font-semibold" disabled={loading}>
