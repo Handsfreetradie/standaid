@@ -12,14 +12,18 @@ async function fetchStandardChunks(
   supabase: any,
   standardId: string,
   limit: number,
+  topic?: string,
 ): Promise<StandardChunk[]> {
+  // Fetch a larger pool so topic filtering has something to work with
+  const poolSize = topic ? Math.max(limit * 10, 300) : limit;
+
   let { data: chunks, error: indexedError } = await supabase
     .from("standard_chunks")
     .select("content, clause_number, clause_title")
     .eq("standard_id", standardId)
     .eq("is_indexed", true)
     .order("chunk_index", { ascending: true })
-    .limit(limit);
+    .limit(poolSize);
 
   if (indexedError) throw indexedError;
 
@@ -29,13 +33,30 @@ async function fetchStandardChunks(
       .select("content, clause_number, clause_title")
       .eq("standard_id", standardId)
       .order("chunk_index", { ascending: true })
-      .limit(limit);
+      .limit(poolSize);
 
     if (fallbackError) throw fallbackError;
     chunks = fallbackChunks;
   }
 
-  return chunks || [];
+  // If a topic is given, score by keyword relevance and take the top N
+  if (topic && chunks?.length) {
+    const words = topic.toLowerCase().split(/[\s,\/\-]+/).filter((w) => w.length > 3);
+    if (words.length > 0) {
+      const scored = (chunks as StandardChunk[]).map((c) => {
+        const hay = ((c.content || "") + " " + (c.clause_title || "")).toLowerCase();
+        const score = words.reduce((acc, w) => acc + (hay.includes(w) ? 1 : 0), 0);
+        return { chunk: c, score };
+      });
+      const relevant = scored.filter((s) => s.score > 0).sort((a, b) => b.score - a.score);
+      // Use topic-relevant chunks if we have enough; otherwise fall back to first N
+      if (relevant.length >= Math.min(limit, 5)) {
+        return relevant.slice(0, limit).map((s) => s.chunk);
+      }
+    }
+  }
+
+  return (chunks || []).slice(0, limit);
 }
 
 async function getChunksWithRecovery(
@@ -43,8 +64,9 @@ async function getChunksWithRecovery(
   standardId: string,
   authHeader: string,
   limit: number,
+  topic?: string,
 ): Promise<StandardChunk[]> {
-  let chunks = await fetchStandardChunks(supabase, standardId, limit);
+  let chunks = await fetchStandardChunks(supabase, standardId, limit, topic);
   if (chunks.length > 0) return chunks;
 
   const processUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/process-standard`;
@@ -64,7 +86,7 @@ async function getChunksWithRecovery(
     return chunks;
   }
 
-  chunks = await fetchStandardChunks(supabase, standardId, limit);
+  chunks = await fetchStandardChunks(supabase, standardId, limit, topic);
   return chunks;
 }
 
@@ -134,7 +156,7 @@ serve(async (req) => {
 
     // ── GENERATE QUIZ QUESTIONS ──
     if (action === "generate_questions") {
-      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 30);
+      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 30, topic);
 
       if (!chunks?.length) throw new Error("No content found for this standard");
 
@@ -147,7 +169,7 @@ serve(async (req) => {
       const aiResponse = await callAI({
           model: "gpt-4o-mini",
           messages: [
-            { role: "system", content: `You are an exam question generator for trade apprentices studying ${standard?.title || "industry standards"}. Generate multiple-choice questions ONLY from the provided standard content. Never invent facts. Each question must reference specific clauses.` },
+            { role: "system", content: `You are an exam question generator for trade apprentices studying ${standard?.title || "industry standards"}. Generate practical, scenario-based multiple-choice questions ONLY from the provided standard content. Never invent facts. Frame questions as real on-site situations — e.g. "You are wiring a bathroom and...", "A customer asks you to install...", "On a job site you find...". Do NOT ask "What does Clause X.X say?" or "According to Clause X.X..." — test understanding and application, not clause memorisation.` },
             { role: "user", content: `Generate ${count} ${diff}-difficulty multiple-choice questions from this standard content. ${topicFilter}\n\nStandard: ${standard?.standard_code || standard?.title}\n\nContent:\n${chunks.map((c) => `[${c.clause_number || ""}] ${c.content}`).join("\n\n")}` },
           ],
           tools: [{
@@ -384,7 +406,7 @@ Rules:
 
     // ── GENERATE STUDY GUIDE ──
     if (action === "generate_study_guide") {
-      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 40);
+      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 40, topic);
       if (!chunks?.length) throw new Error("No content found");
 
       const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();

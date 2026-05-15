@@ -301,11 +301,12 @@ ${chunk.content}`;
     }
 
     // Look up image URLs for figures/tables the AI explicitly referenced.
-    // We use two sources (deduplicated):
-    //   1. The AI's figures_referenced / tables_referenced JSON fields (AI is declaring these intentionally)
-    //   2. Explicit figure/table numbers in the question itself (e.g. "show me figure 2.4")
-    //      — but NOT from the answer text, to avoid showing wrong figures when AI mentions
-    //        multiple figures in passing or describes exclusion zone numbers.
+    // Sources (deduplicated, in priority order):
+    //   1. AI's figures_referenced JSON field (explicit declaration)
+    //   2. Explicit figure/table numbers in the question ("show me figure 2.4")
+    //   3. When the question is a visual request ("show me", "diagram", "zones" etc.),
+    //      also scan the AI answer for "Figure X.X" mentions — the AI often describes
+    //      a figure by number in its answer without putting it in figures_referenced.
     const questionFigNums = [...question.matchAll(/\bfigure[s]?\s+(\d+\.\d+(?:\.\d+)?)\b/gi)]
       .map((m) => m[1]);
     const questionTblNums = [...question.matchAll(/\btable[s]?\s+(\d+\.\d+(?:\.\d+)?)\b/gi)]
@@ -322,6 +323,16 @@ ${chunk.content}`;
     const seenTblNums = new Set(aiTables.map((t: any) => t.table_number));
     for (const n of questionTblNums) {
       if (!seenTblNums.has(n)) { aiTables.push({ table_number: n }); seenTblNums.add(n); }
+    }
+
+    // For visual/diagram requests, also extract figure numbers the AI mentioned in its answer
+    const isVisualRequest = /\b(show\s+me|diagram|zones|layout|exclusion|illustrat|picture|what does.{0,20}look like)\b/i.test(question);
+    if (isVisualRequest) {
+      const answerFigRefs = [...(parsedResponse.answer || "").matchAll(/\bfigure\s+(\d+\.\d+(?:\.\d+)?)\b/gi)]
+        .map((m) => m[1]);
+      for (const n of answerFigRefs) {
+        if (!seenFigNums.has(n)) { aiFigures.push({ figure_number: n }); seenFigNums.add(n); }
+      }
     }
 
     const figNums = aiFigures.map((f: any) => f.figure_number).filter(Boolean);
