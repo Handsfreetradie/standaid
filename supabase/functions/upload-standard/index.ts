@@ -40,20 +40,6 @@ serve(async (req) => {
 
     const tier = profile?.subscription_tier || "free";
 
-    if (tier === "free") {
-      const { count } = await supabaseAdmin
-        .from("standards")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", userId);
-
-      if ((count || 0) >= 1) {
-        return new Response(JSON.stringify({
-          error: "Free tier limit reached. You can only upload 1 standard on the free plan. Upgrade to Pro for unlimited uploads.",
-          upgrade_required: true
-        }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-    }
-
     // Parse JSON body — file was uploaded directly to storage by the browser
     const body = await req.json();
     const { title, standard_code: standardCode, version, trade_category: tradeCategory, file_path: filePath, extracted_text: extractedText } = body;
@@ -72,7 +58,9 @@ serve(async (req) => {
     }
 
     // If the user already has this standard code, delete the old record and its chunks
-    // so the new upload replaces it cleanly (handles both same-version re-upload and new version)
+    // so the new upload replaces it cleanly. Do this BEFORE the tier check so re-uploads
+    // of existing standards don't incorrectly count against the limit.
+    let isReplacement = false;
     if (standardCode) {
       const { data: existing } = await supabaseAdmin
         .from("standards")
@@ -82,9 +70,25 @@ serve(async (req) => {
         .maybeSingle();
 
       if (existing) {
+        isReplacement = true;
         await supabaseAdmin.from("standard_chunks").delete().eq("standard_id", existing.id);
         await supabaseAdmin.from("processing_jobs").delete().eq("standard_id", existing.id);
         await supabaseAdmin.from("standards").delete().eq("id", existing.id);
+      }
+    }
+
+    // Tier limit only applies to brand-new standards (not replacements)
+    if (tier === "free" && !isReplacement) {
+      const { count } = await supabaseAdmin
+        .from("standards")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", userId);
+
+      if ((count || 0) >= 5) {
+        return new Response(JSON.stringify({
+          error: "Free tier limit reached. You can upload up to 5 standards on the free plan. Upgrade to Pro for unlimited uploads.",
+          upgrade_required: true
+        }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
     }
 
