@@ -554,8 +554,8 @@ const Chat = () => {
         )}
       </div>
 
-      {/* Input */}
-      <div className="flex-shrink-0 border-t border-border px-4 pt-3 pb-3 bg-card">
+      {/* Input — chat-input-wrapper class is locked in index.css, do not remove */}
+      <div className="chat-input-wrapper flex-shrink-0 border-t border-border px-4 pt-3 bg-card">
         <div className="flex items-end gap-2">
           <Button
             size="icon"
@@ -589,7 +589,7 @@ const Chat = () => {
             <Send className="h-4 w-4" />
           </Button>
         </div>
-        <p className="text-center text-[10px] text-muted-foreground mt-2">
+        <p className="chat-disclaimer text-center text-[10px] text-muted-foreground">
           Always verify AI answers against the original standard before relying on them on the job.
         </p>
       </div>

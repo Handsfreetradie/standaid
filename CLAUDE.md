@@ -74,5 +74,22 @@ An app for Australian tradies to:
 
 ---
 
+## Locked Fixes — DO NOT REVERT
+
+These have been broken repeatedly by Lovable regenerating files. Do not change without understanding the reason.
+
+### Chat input position (src/index.css + src/pages/Chat.tsx)
+- The chat input wrapper uses CSS class `chat-input-wrapper` defined in `index.css`
+- `index.css` has `!important` rules that cancel any `pb-safe` padding inside the input area
+- The BottomNav already handles `safe-area-inset-bottom` — adding it again inside the chat pushes the input too high on iPhones
+- **Never add `pb-safe` to any element inside `.chat-input-wrapper`**
+
+### Sign out (src/hooks/useAuth.tsx + src/pages/Profile.tsx)
+- `useAuth.tsx` wraps `window.location.href = "/auth"` in a `finally` block so it redirects even if Supabase throws
+- `Profile.tsx` `handleSignOut` also has its own `finally` redirect as a second layer
+- **Never remove the `finally { window.location.href = "/auth" }` from either file**
+
+---
+
 ## Other Projects (context only — not this repo)
 - **HandsFree** — AI voice receptionist business for tradies, built with my partner Cassie. Early stage.

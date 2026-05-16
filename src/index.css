@@ -183,6 +183,25 @@
   }
 }
 
+/*
+ * LOCKED — do not remove or edit these rules.
+ * The BottomNav already handles safe-area-inset-bottom via pb-safe.
+ * Adding pb-safe inside the chat input area causes double padding on iPhones
+ * which pushes the text box too high. This rule hard-cancels any pb-safe
+ * that Lovable or future edits may add back inside the chat input wrapper.
+ */
+.chat-input-wrapper,
+.chat-input-wrapper * {
+  padding-bottom: revert;
+}
+.chat-input-wrapper {
+  padding-bottom: 12px !important;
+}
+.chat-input-wrapper .chat-disclaimer {
+  padding-bottom: 0 !important;
+  margin-top: 8px;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 4px;

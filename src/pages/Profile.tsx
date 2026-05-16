@@ -25,7 +25,12 @@ const Profile = () => {
   const { data: profile } = useProfile();
 
   const handleSignOut = async () => {
-    await signOut();
+    try {
+      await signOut();
+    } finally {
+      // Belt-and-braces: always redirect even if signOut throws
+      window.location.href = "/auth";
+    }
   };
 
   const handleComingSoon = (feature: string) => {
