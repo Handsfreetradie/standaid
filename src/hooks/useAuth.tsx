@@ -55,8 +55,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
-    window.location.href = "/auth";
+    try {
+      await supabase.auth.signOut();
+    } finally {
+      window.location.href = "/auth";
+    }
   };
 
   const resetPassword = async (email: string) => {
