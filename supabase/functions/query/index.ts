@@ -173,11 +173,14 @@ serve(async (req) => {
     }
 
     // Keyword search — using expanded keywords (covers tradie terms + standard terms)
+    // Normalize unit spacing so "600mm" matches "600 mm" and vice versa
+    const normalizeUnits = (s: string) =>
+      s.replace(/(\d+)\s*(mm|cm|m(?!a)|kpa|kv|kw|watts?|amps?|volts?|°c)\b/gi, (_, n, u) => `${n}${u.toLowerCase()}`);
     let keywordChunks: any[] = [];
     if (allChunksResult.data?.length) {
       const scored = allChunksResult.data.map((chunk: any) => {
-        const lower = chunk.content.toLowerCase();
-        const score = keywords.reduce((acc: number, kw: string) => acc + (lower.includes(kw) ? 1 : 0), 0);
+        const lower = normalizeUnits(chunk.content.toLowerCase());
+        const score = keywords.reduce((acc: number, kw: string) => acc + (lower.includes(normalizeUnits(kw)) ? 1 : 0), 0);
         return { ...chunk, similarity: score / keywords.length };
       });
       scored.sort((a: any, b: any) => b.similarity - a.similarity);
