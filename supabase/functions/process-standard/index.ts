@@ -679,7 +679,7 @@ serve(async (req) => {
     console.log(`[${standard_id}] Chunking done: ${Date.now() - t0}ms, ${totalChunks} chunks`);
 
     const { data: profile } = await supabaseAdmin.from("profiles").select("subscription_tier").eq("user_id", userId).single();
-    const tier = profile?.subscription_tier || "free";
+    const tier = profile?.subscription_tier || "pro";
     const isPartial = tier === "free";
 
     const DB_BATCH_SIZE = 100;

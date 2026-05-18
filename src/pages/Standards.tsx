@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { BookOpen, Upload, Lock, Search, Loader2, Trash2, CheckCircle2, AlertCircle, Clock } from "lucide-react";
+import { BookOpen, Upload, Lock, Search, Loader2, Trash2, CheckCircle2, AlertCircle, Clock, FileText } from "lucide-react";
+import { PDFViewerModal } from "@/components/PDFViewerModal";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +22,7 @@ const statusIcon = {
 const Standards = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [pdfViewer, setPdfViewer] = useState<{ standardId: string; standardCode: string } | null>(null);
   const { user, session } = useAuth();
   const { data: standards = [], isLoading } = useStandards();
   const { data: profile } = useProfile();
@@ -28,7 +30,7 @@ const Standards = () => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
-  const tier = profile?.subscription_tier || "free";
+  const tier = profile?.subscription_tier || "pro";
 
   const filteredStandards = standards.filter(
     (s) =>
@@ -275,20 +277,41 @@ const Standards = () => {
                       year: "numeric",
                     })}
                   </span>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                    onClick={() => handleDelete(s.id)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    {s.extraction_status === "complete" && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                        onClick={() => setPdfViewer({ standardId: s.id, standardCode: s.standard_code || s.title })}
+                      >
+                        <FileText className="h-4 w-4" />
+                        View PDF
+                      </Button>
+                    )}
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                      onClick={() => handleDelete(s.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               </Card>
             );
           })}
         </div>
       )}
+
+      <PDFViewerModal
+        isOpen={!!pdfViewer}
+        onClose={() => setPdfViewer(null)}
+        clauseNumber=""
+        standardId={pdfViewer?.standardId}
+        standardCode={pdfViewer?.standardCode}
+      />
 
       {/* Upgrade CTA for free tier */}
       {tier === "free" && (

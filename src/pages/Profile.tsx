@@ -41,7 +41,7 @@ const Profile = () => {
   const tradeLabel = profile?.trade_type
     ? profile.trade_type.split(",").filter(Boolean).map((id) => TRADE_LABELS[id] || id).join(", ")
     : null;
-  const tier = profile?.subscription_tier || "free";
+  const tier = profile?.subscription_tier || "pro";
   const queriesUsed = profile?.daily_query_count || 0;
   const isPro = tier === "pro" || tier === "business";
 

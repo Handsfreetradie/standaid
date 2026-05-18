@@ -39,7 +39,7 @@ const Index = () => {
   const [savingTrade, setSavingTrade] = useState(false);
   const [pickingTrade, setPickingTrade] = useState(false);
 
-  const tier = profile?.subscription_tier || "free";
+  const tier = profile?.subscription_tier || "pro";
   const queriesUsed = profile?.daily_query_count || 0;
   const firstName = profile?.display_name?.split(" ")[0] || "";
   const selectedTrades = profile?.trade_type

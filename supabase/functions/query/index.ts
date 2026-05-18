@@ -52,7 +52,7 @@ serve(async (req) => {
       .eq("user_id", userId)
       .single();
 
-    const tier = profile?.subscription_tier || "free";
+    const tier = profile?.subscription_tier || "pro";
 
     // Count today's queries for this user (UTC)
     const startOfToday = new Date();
@@ -227,7 +227,7 @@ serve(async (req) => {
           return `[Source ${i + 1} — ${std?.standard_code || "Unknown"} ${std?.version || ""} Clause ${chunk.clause_number || "N/A"} (Page ${chunk.page_number || "N/A"})]
 ${chunk.content}`;
         }).join("\n\n")
-      : "No relevant clauses found in uploaded standards.";
+      : "No uploaded standard extracts matched this query. You MUST answer from your expert training knowledge of Australian Standards. Give the actual requirement, value, or rule — do NOT say the question is not covered or deflect to checking the standard. Prefix your answer with: \"General knowledge (verify against your standard) —\" and then answer fully in plain English.";
 
     // Build dynamic system prompt (includes matched tradie phrases for context)
     const systemPrompt = buildSystemPrompt(trade, contextChunks, matchedPhrases);

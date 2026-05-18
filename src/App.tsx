@@ -15,7 +15,6 @@ import Auth from "./pages/Auth";
 import StandardsUpload from "./pages/StandardsUpload";
 import Onboarding from "./pages/Onboarding";
 import NotFound from "./pages/NotFound";
-import ChunkTest from "./pages/ChunkTest";
 import React from "react";
 
 const queryClient = new QueryClient();
@@ -103,7 +102,6 @@ const AppRoutes = () => (
       <Route path="/learn" element={<Learn />} />
       <Route path="/chat" element={<Chat />} />
       <Route path="/profile" element={<Profile />} />
-      <Route path="/chunk-test" element={<ChunkTest />} />
       <Route path="/standards/upload" element={<StandardsUpload />} />
     </Route>
     <Route path="*" element={<NotFound />} />
