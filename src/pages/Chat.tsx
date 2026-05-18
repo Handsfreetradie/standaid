@@ -2,13 +2,14 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Mic, ThumbsUp, ThumbsDown, HelpCircle, Check } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import VoiceMode from "@/components/VoiceMode";
+import { PDFViewerModal } from "@/components/PDFViewerModal";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/useAuth";
 import { useProfile } from "@/hooks/useData";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
 interface Citation {
@@ -150,6 +151,7 @@ const Chat = () => {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
+  const [pdfViewer, setPdfViewer] = useState<{ clauseNumber: string; standardCode: string } | null>(null);
   const { session } = useAuth();
   const { data: profile } = useProfile();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -168,127 +170,129 @@ const Chat = () => {
     scrollToBottom();
   }, [messages.length, isLoading, scrollToBottom]);
 
-  const startTypewriter = (msgId: string, fullContent: string) => {
-    let pos = 0;
-    const tick = setInterval(() => {
-      // Vary chars per tick slightly so it feels organic rather than mechanical
-      const charsThisTick = Math.random() < 0.15 ? 1 : 3;
-      pos = Math.min(pos + charsThisTick, fullContent.length);
-      const partial = fullContent.slice(0, pos);
-      const done = pos >= fullContent.length;
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === msgId ? { ...m, content: partial, isTyping: !done } : m
-        )
-      );
-      if (scrollRef.current) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-      }
-      if (done) clearInterval(tick);
-    }, 20);
-  };
-
-  const runQuery = async (question: string) => {
+  const runQuery = async (question: string): Promise<string | undefined> => {
     if (!session) {
       toast.error("Please sign in to use the chat");
-      return null;
+      return undefined;
     }
 
-    // Send the last 6 completed messages as conversation context (3 Q&A pairs)
     const history = messages
       .filter((m) => !m.isTyping && m.content)
       .slice(-6)
       .map((m) => ({ role: m.role === "ai" ? "assistant" : "user", content: m.content }));
 
-    const { data, error } = await supabase.functions.invoke("query", {
-      body: { question, conversation_history: history },
-    });
+    // Add AI placeholder immediately — user sees typing cursor straight away
+    const aiMsgId = crypto.randomUUID();
+    setMessages((prev) => [...prev, { id: aiMsgId, role: "ai" as const, content: "", isTyping: true }]);
+    scrollToBottom();
 
-    if (error) {
-      let msg = "Query failed";
-      try {
-        const body = await (error as any).context?.json();
-        msg = body?.error || error.message || msg;
-      } catch { msg = error.message || msg; }
-      throw new Error(msg);
-    }
+    try {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/query`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${session.access_token}`,
+          "apikey": SUPABASE_PUBLISHABLE_KEY,
+        },
+        body: JSON.stringify({ question, conversation_history: history }),
+      });
 
-    if (data?.error) {
-      if (data.upgrade_required) {
-        return {
-          id: crypto.randomUUID(),
-          role: "ai" as const,
-          content: data.message || data.error,
-          gated: true,
-          gated_message: data.message,
-          isTyping: false,
-        };
+      if (!response.ok || !response.body) {
+        const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+        setMessages((prev) => prev.map((m) =>
+          m.id === aiMsgId ? { ...m, content: err.error || "Request failed", isTyping: false } : m
+        ));
+        return undefined;
       }
-      throw new Error(data.error);
-    }
 
-    return {
-      id: crypto.randomUUID(),
-      role: "ai" as const,
-      content: "",
-      isTyping: true,
-      _full: data.answer || "No response generated.",
-      citations: data.citations || [],
-      figures_referenced: (data.figures_referenced || []).filter((f: ImageRef) => f.image_url),
-      tables_referenced: (data.tables_referenced || []).filter((t: ImageRef) => t.image_url),
-      safety_critical: data.safety_critical || false,
-      safety_message: data.safety_message,
-      confidence: data.confidence,
-      gated: data.gated || false,
-      gated_message: data.gated_message,
-      low_confidence: data.low_confidence || false,
-      answer_found: data.answer_found,
-      follow_up_questions: data.follow_up_questions || [],
-      accuracy_score: data.accuracy_score ?? null,
-      accuracy_reason: data.accuracy_reason ?? null,
-      queryId: data.queryId ?? null,
-    };
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let sseBuffer = "";
+      let streamedAnswer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        sseBuffer += decoder.decode(value, { stream: true });
+        const lines = sseBuffer.split("\n");
+        sseBuffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const data = line.slice(6).trim();
+          if (!data) continue;
+
+          try {
+            const event = JSON.parse(data);
+
+            if (event.error) {
+              setMessages((prev) => prev.map((m) =>
+                m.id === aiMsgId ? { ...m, content: event.error, isTyping: false } : m
+              ));
+              return undefined;
+            }
+
+            if (event.token !== undefined) {
+              streamedAnswer += event.token;
+              setMessages((prev) => prev.map((m) =>
+                m.id === aiMsgId ? { ...m, content: streamedAnswer } : m
+              ));
+              if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            }
+
+            if (event.done) {
+              const finalAnswer = event.answer || streamedAnswer;
+              setMessages((prev) => prev.map((m) =>
+                m.id === aiMsgId ? {
+                  ...m,
+                  content: finalAnswer,
+                  isTyping: false,
+                  citations: event.citations || [],
+                  figures_referenced: (event.figures_referenced || []).filter((f: ImageRef) => f.image_url),
+                  tables_referenced: (event.tables_referenced || []).filter((t: ImageRef) => t.image_url),
+                  safety_critical: event.safety_critical || false,
+                  safety_message: event.safety_message,
+                  confidence: event.confidence,
+                  gated: event.gated || false,
+                  gated_message: event.gated_message,
+                  low_confidence: event.low_confidence || false,
+                  answer_found: event.answer_found,
+                  follow_up_questions: event.follow_up_questions || [],
+                  queryId: event.queryId || null,
+                } : m
+              ));
+              scrollToBottom();
+              return finalAnswer;
+            }
+          } catch { /* ignore incomplete JSON lines */ }
+        }
+      }
+    } catch (e: any) {
+      console.error("Stream error:", e);
+      setMessages((prev) => prev.map((m) =>
+        m.id === aiMsgId ? { ...m, content: "Sorry, something went wrong. Please try again.", isTyping: false } : m
+      ));
+    }
+    return undefined;
   };
 
   const sendQuery = async (overrideText?: string) => {
     const question = (overrideText ?? input).trim();
     if (!question || isLoading) return;
 
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: question,
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
+    setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "user" as const, content: question }]);
     setInput("");
     setIsLoading(true);
 
     try {
-      const result = await runQuery(question);
-      if (result) {
-        const { _full, ...aiMessage } = result as any;
-        setMessages((prev) => [...prev, aiMessage]);
-        setIsLoading(false);
-        scrollToBottom();
-        if (_full) {
-          startTypewriter(aiMessage.id, _full);
-        }
-        return;
-      }
-      setMessages((prev) => [
-        ...prev,
-        { id: crypto.randomUUID(), role: "assistant", content: "Sorry, something went wrong. Please try again." },
-      ]);
+      await runQuery(question);
     } catch (e: any) {
       console.error("Query error:", e);
-      setMessages((prev) => [
-        ...prev,
-        { id: crypto.randomUUID(), role: "assistant", content: e.message || "Sorry, something went wrong. Please try again." },
-      ]);
+    } finally {
+      setIsLoading(false);
+      scrollToBottom();
     }
-    setIsLoading(false);
-    scrollToBottom();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -301,28 +305,17 @@ const Chat = () => {
   const handleVoiceQuery = useCallback(async (text: string): Promise<string | undefined> => {
     if (!text.trim() || !session) return undefined;
 
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: text.trim(),
-    };
-    setMessages((prev) => [...prev, userMessage]);
+    setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "user" as const, content: text.trim() }]);
     setIsLoading(true);
 
     try {
-      const result = await runQuery(text.trim());
-      if (result) {
-        const { _full, ...aiMessage } = result as any;
-        setMessages((prev) => [...prev, aiMessage]);
-        setIsLoading(false);
-        if (_full) startTypewriter(aiMessage.id, _full);
-        return _full || aiMessage.content;
-      }
+      return await runQuery(text.trim());
     } catch (e: any) {
       console.error("Voice query error:", e);
       return "Sorry, I couldn't process that. Please try again.";
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   }, [session]);
 
   return (
@@ -421,20 +414,26 @@ const Chat = () => {
                   {/* Clause badges */}
                   {!msg.isTyping && msg.citations && msg.citations.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mt-3">
-                      {msg.citations.map((citation, idx) => (
-                        <Badge
-                          key={idx}
-                          className={`border-0 text-xs font-semibold ${
-                            citation.gated
-                              ? "bg-muted text-muted-foreground"
-                              : "bg-primary/10 text-primary"
-                          }`}
-                        >
-                          {citation.gated ? "🔒 " : ""}
-                          {citation.clause_number}
-                          {citation.standard_code ? ` (${citation.standard_code})` : ""}
-                        </Badge>
-                      ))}
+                      {msg.citations.map((citation, idx) =>
+                        citation.gated ? (
+                          <Badge
+                            key={idx}
+                            className="border-0 text-xs font-semibold bg-muted text-muted-foreground"
+                          >
+                            🔒 {citation.clause_number}
+                            {citation.standard_code ? ` (${citation.standard_code})` : ""}
+                          </Badge>
+                        ) : (
+                          <button
+                            key={idx}
+                            onClick={() => setPdfViewer({ clauseNumber: citation.clause_number, standardCode: citation.standard_code })}
+                            className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 active:scale-95 transition-all"
+                          >
+                            {citation.clause_number}
+                            {citation.standard_code ? ` (${citation.standard_code})` : ""}
+                          </button>
+                        )
+                      )}
                     </div>
                   )}
 
@@ -538,7 +537,7 @@ const Chat = () => {
         ))}
         </div>
 
-        {isLoading && (
+        {isLoading && !messages.some(m => m.isTyping) && (
           <div className="flex justify-start">
             <Card className="p-4 shadow-sm">
               <div className="flex items-center gap-2">
@@ -600,6 +599,16 @@ const Chat = () => {
           onTranscript={handleVoiceQuery}
           isQuerying={isLoading}
           onClose={() => setVoiceMode(false)}
+        />
+      )}
+
+      {/* PDF Clause Viewer */}
+      {pdfViewer && (
+        <PDFViewerModal
+          isOpen={!!pdfViewer}
+          onClose={() => setPdfViewer(null)}
+          clauseNumber={pdfViewer.clauseNumber}
+          standardCode={pdfViewer.standardCode}
         />
       )}
     </div>

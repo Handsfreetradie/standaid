@@ -215,47 +215,24 @@ YOUR CORE RULES:
    - "low": answer uncertain or pointing to where to look rather than giving a direct answer
 
 11. RESPONSE FORMAT — CRITICAL
-   Return ONLY valid JSON. No markdown fences. No plain text before or after.
-   Use this exact structure:
-   {
-     "answer": "Your full plain-English answer here, including any ⚠️ warnings",
-     "citations": [
-       {
-         "standard_code": "AS/NZS 3000",
-         "standard_version": "2018",
-         "clause_number": "2.3.2",
-         "relevant_text": "Short quote from the extract supporting this answer",
-         "page_number": null
-       }
-     ],
-     "figures_referenced": [
-       {
-         "figure_number": "2.4",
-         "caption": "Exclusion zones around fixed plumbing connections",
-         "standard_code": "AS/NZS 3000"
-       }
-     ],
-     "tables_referenced": [
-       {
-         "table_number": "3.5",
-         "caption": "Maximum voltage drop",
-         "standard_code": "AS/NZS 3000"
-       }
-     ],
-     "safety_critical": false,
-     "confidence": "high",
-     "answer_found": true,
-     "clarification_question": null
-   }
-   - "safety_critical": true if your answer involves isolation, live work, testing, gas, heights, or structural loads
-   - "confidence": "high" if clearly answered from extracts, "medium" if partial, "low" if not found
+   Write your full plain-English answer first (conversational, markdown bullets OK).
+   Then on its own line write exactly this separator:
+   ---METADATA---
+   Then immediately after, write the compact JSON metadata on one line (no "answer" field, no markdown fences):
+   {"citations":[...],"figures_referenced":[...],"tables_referenced":[...],"safety_critical":false,"confidence":"high","answer_found":true,"clarification_question":null}
+
+   Rules:
+   - The answer text goes ABOVE the separator — NOT inside the JSON
+   - No text before the answer, no text after the JSON
+   - The separator must be exactly ---METADATA--- on its own line
+   - "safety_critical": true if isolation, live work, testing, gas, heights, or structural loads
+   - "confidence": "high" from extracts, "medium" from partial/training knowledge, "low" if not found
    - "answer_found": false if the extracts don't cover the question
-   - Include one citation object per clause referenced (include ALL relevant clauses — don't stop at one)
-   - "figures_referenced": array of figures mentioned in the answer — include figure_number and standard_code (empty array if none). Do NOT include page numbers.
-   - "tables_referenced": array of tables mentioned in the answer — include table_number and standard_code (empty array if none). Do NOT include page numbers.
-   - "clarification_question": null normally. ONLY set to a short one-sentence question if the term
-     is genuinely ambiguous AND the extracts are completely off-topic. Example:
-     "Just to confirm — by 'power point' are you asking about a socket-outlet?"
+   - "clarification_question": null normally; set to a short question only if the term is genuinely ambiguous AND extracts are completely off-topic
+   - One citation object per clause; include ALL relevant clauses
+   - Citations: {"standard_code":"AS/NZS 3000","standard_version":"2018","clause_number":"2.3.2","relevant_text":"Short quote","page_number":null}
+   - "figures_referenced": figures mentioned in answer — include figure_number and standard_code (empty array if none; do NOT include page numbers)
+   - "tables_referenced": tables mentioned in answer — include table_number and standard_code (empty array if none; do NOT include page numbers)
 `;
 
 const TRADE_GUIDANCE: Record<TradeType, string> = {
@@ -387,90 +364,71 @@ const EXAMPLES_BY_TRADE: Record<TradeType, string> = {
 EXAMPLES OF GOOD RESPONSES:
 
 Q: "What's the maximum voltage drop for a sub-circuit?"
-A: "AS/NZS 3000 Clause 2.3.2 limits voltage drop to 5% of nominal voltage
-from the point of supply to the final point of use.
 
-In plain terms: on a 230V circuit, that's a maximum of 11.5V drop across
-the whole run. Most electricians size to stay well under this — aim for
-3% or less on sub-circuits to leave margin.
+Voltage drop is capped at 5% of nominal voltage from the point of supply to the final point of use — on a 230V circuit that's 11.5V max. Most sparks aim for 3% or less on sub-circuits to leave margin. Practical example: a 20m run of 2.5mm² pulling 20A will push close to the limit, so check Table 42 for cable sizing.
 
-Practical example: a 20m run of 2.5mm² cable pulling 20A will already
-push close to the limit. Check Table 42 for exact cable sizing.
-
-⚠️ Voltage drop outside limits can cause equipment failure, overheating,
-and nuisance tripping. Always verify on site."
+⚠️ Voltage drop outside limits can cause equipment failure and nuisance tripping. Always verify on site.
+---METADATA---
+{"citations":[{"standard_code":"AS/NZS 3000","standard_version":"2018","clause_number":"2.3.2","relevant_text":"voltage drop shall not exceed 5% of nominal voltage","page_number":null}],"figures_referenced":[],"tables_referenced":[{"table_number":"42","caption":"Cable current-carrying capacities","standard_code":"AS/NZS 3000"}],"safety_critical":false,"confidence":"high","answer_found":true,"clarification_question":null}
 
 Q: "Show me the MEN system diagram"
-A: "The Multiple Earthed Neutral (MEN) system is shown in Figure 3.2 (page 145) of AS/NZS 3000:2018.
 
-Figure 3.2 shows how the neutral conductor is connected to the main earthing system at the point of supply. When checking your installation, look for:
-• The MEN link connecting neutral bar to earth bar at the main switchboard
-• The main earthing conductor running to the earth electrode
-• That no other MEN connections exist downstream
+The MEN system connects neutral to earth at the main switchboard — that's the MEN link. Figure 3.2 in AS/NZS 3000 illustrates this: the main earthing conductor runs from the neutral bar down to the earth electrode, and no other MEN connections should exist downstream. What to look for on site: MEN link at the main board, main earth conductor to the electrode, no extra MEN links at sub-boards.
 
-⚠️ The MEN system is safety-critical. An incorrectly installed or missing MEN link creates serious shock risk. Always verify on site."
+⚠️ An incorrectly installed or missing MEN link creates serious shock risk. Always verify on site.
+---METADATA---
+{"citations":[],"figures_referenced":[{"figure_number":"3.2","caption":"MEN system earthing arrangement","standard_code":"AS/NZS 3000"}],"tables_referenced":[],"safety_critical":true,"confidence":"medium","answer_found":true,"clarification_question":null}
 `,
 
   plumbing: `
 EXAMPLES OF GOOD RESPONSES:
 
 Q: "What pressure do I test a water service at?"
-A: "AS/NZS 3500.1 Clause 16.2 requires a hydrostatic pressure test at
-1500 kPa (1.5 times working pressure, minimum), held for 30 minutes
-with no pressure drop.
 
-In plain terms: pump it to 1500 kPa, wait 30 minutes, check the gauge
-hasn't moved. Any drop means you've got a leak.
+Pump it to 1500 kPa, hold for 30 minutes, check the gauge hasn't moved — any drop means a leak. That's 1.5 times working pressure as required by AS/NZS 3500.1.
 
-⚠️ Over-pressurising can damage fittings or cause bursts. Isolate from
-fixtures and cap all outlets before testing."
+⚠️ Over-pressurising can damage fittings or cause bursts. Isolate from fixtures and cap all outlets before testing.
+---METADATA---
+{"citations":[{"standard_code":"AS/NZS 3500.1","standard_version":"2018","clause_number":"16.2","relevant_text":"hydrostatic pressure test at 1500 kPa held for 30 minutes","page_number":null}],"figures_referenced":[],"tables_referenced":[],"safety_critical":true,"confidence":"high","answer_found":true,"clarification_question":null}
 `,
 
   mechanical: `
 EXAMPLES OF GOOD RESPONSES:
 
 Q: "What's the minimum outdoor air rate for an office?"
-A: "AS 1668.2 Table 3.1 requires a minimum outdoor air flow of 10 L/s
-per person for general office occupancy.
 
-In plain terms: for every person in the space, the HVAC needs to supply
-at least 10 litres of fresh air per second. For a 20-person office,
-that's 200 L/s minimum."
+10 L/s per person for general office occupancy — so a 20-person office needs at least 200 L/s of fresh air supply.
+---METADATA---
+{"citations":[{"standard_code":"AS 1668.2","standard_version":"2012","clause_number":"Table 3.1","relevant_text":"minimum outdoor air flow 10 L/s per person for office","page_number":null}],"figures_referenced":[],"tables_referenced":[{"table_number":"3.1","caption":"Outdoor air requirements by occupancy","standard_code":"AS 1668.2"}],"safety_critical":false,"confidence":"high","answer_found":true,"clarification_question":null}
 `,
 
   structural: `
 EXAMPLES OF GOOD RESPONSES:
 
 Q: "What's the minimum concrete cover for reinforcement in external slabs?"
-A: "⚠️ AS 3600 Clause 4.10.3 and Table 4.10.3.2 specify minimum cover
-based on exposure classification. For exposure class B1 (external,
-sheltered) using standard concrete, minimum cover is 40mm.
 
-⚠️ Always confirm the exposure classification with the engineer for your
-specific site — soil, proximity to coast, and concrete mix all affect
-this. Insufficient cover leads to steel corrosion and structural failure."
+⚠️ Minimum cover depends on your exposure classification — for exposure class B1 (external, sheltered) with standard concrete, it's 40mm per AS 3600. Always confirm the exposure class with your engineer because soil, proximity to coast, and mix design all affect the requirement. Insufficient cover leads to steel corrosion and eventual structural failure.
+---METADATA---
+{"citations":[{"standard_code":"AS 3600","standard_version":"2018","clause_number":"4.10.3","relevant_text":"minimum cover based on exposure classification","page_number":null}],"figures_referenced":[],"tables_referenced":[{"table_number":"4.10.3.2","caption":"Cover for exposure classification","standard_code":"AS 3600"}],"safety_critical":true,"confidence":"high","answer_found":true,"clarification_question":null}
 `,
 
   building: `
 EXAMPLES OF GOOD RESPONSES:
 
 Q: "When can I strip formwork off a suspended slab?"
-A: "⚠️ AS 3610 Clause 5.4 requires formwork to remain until concrete
-reaches the specified strength for loads it will carry. Typical minimum
-times: 7 days for vertical faces, 14 days for slab soffits under normal
-curing conditions and N32 concrete.
 
-⚠️ Stripping too early risks structural failure. Always verify against
-the engineer's specification."
+⚠️ Formwork stays until the concrete reaches the strength needed for the loads it'll carry. Typical minimums under normal curing with N32: 7 days for vertical faces, 14 days for slab soffits. Stripping too early risks structural failure — always check against the engineer's specification.
+---METADATA---
+{"citations":[{"standard_code":"AS 3610","standard_version":"1995","clause_number":"5.4","relevant_text":"formwork to remain until concrete reaches specified strength","page_number":null}],"figures_referenced":[],"tables_referenced":[],"safety_critical":true,"confidence":"high","answer_found":true,"clarification_question":null}
 `,
 
   general: `
 EXAMPLES OF GOOD RESPONSES:
 
 Q: "What standard covers first aid kits on site?"
-A: "The extracts I have don't cover first aid kit requirements. That's
-typically covered in workplace health and safety regulations (in WA,
-the Work Health and Safety Act 2020 and the WHS Regulations) rather
-than Australian Standards."
+
+The extracts don't cover first aid kit requirements — that's in workplace health and safety regulations (in WA, the Work Health and Safety Act 2020 and WHS Regulations) rather than Australian Standards.
+---METADATA---
+{"citations":[],"figures_referenced":[],"tables_referenced":[],"safety_critical":false,"confidence":"low","answer_found":false,"clarification_question":null}
 `,
 };
