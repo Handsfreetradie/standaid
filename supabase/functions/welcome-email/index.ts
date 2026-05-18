@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const APP_URL = "https://standaid-9mas.vercel.app";
-const FROM_EMAIL = "noreply@standaid.com.au";
+const FROM_EMAIL = "hello@standaid.ai";
 const FROM_NAME = "StandAId";
 
 function buildWelcomeEmail(name: string): string {
