@@ -62,7 +62,7 @@ const Index = () => {
   };
 
   return (
-    <div className="px-5 py-6">
+    <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-2xl md:mx-auto">
       {/* Greeting */}
       <div className="mb-6">
         <h1 className="font-sans text-2xl font-extrabold text-foreground">

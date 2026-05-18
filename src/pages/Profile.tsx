@@ -46,7 +46,7 @@ const Profile = () => {
   const isPro = tier === "pro" || tier === "business";
 
   return (
-    <div className="h-full overflow-y-auto px-5 py-6">
+    <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-2xl md:mx-auto">
       {/* User Info */}
       <div className="flex items-center gap-4 mb-6">
         <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">

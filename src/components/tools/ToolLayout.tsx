@@ -19,7 +19,8 @@ const ToolLayout = ({ title, subtitle, disclaimer, onBack, children, result, onC
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   return (
-    <div className="px-5 py-6 pb-24 max-w-md mx-auto">
+    <div className="h-full overflow-y-auto">
+    <div className="px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
       <button onClick={onBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
         <ArrowLeft className="h-4 w-4" /> Back
       </button>
@@ -57,6 +58,7 @@ const ToolLayout = ({ title, subtitle, disclaimer, onBack, children, result, onC
       )}
 
       <p className="text-[10px] text-muted-foreground mt-4 leading-relaxed">{disclaimer}</p>
+    </div>
     </div>
   );
 };

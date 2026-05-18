@@ -15,7 +15,7 @@ const BottomNav = () => {
   const navigate = useNavigate();
 
   return (
-    <nav className="flex-shrink-0 z-50 border-t border-border bg-white pb-safe overflow-x-hidden">
+    <nav className="md:hidden flex-shrink-0 z-50 border-t border-border bg-white pb-safe overflow-x-hidden">
       <div className="mx-auto flex max-w-md items-stretch justify-around py-2 w-full">
         {tabs.map(({ path, icon: Icon, label }) => {
           const isActive = location.pathname === path;

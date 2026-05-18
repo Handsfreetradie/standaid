@@ -1,16 +1,44 @@
 import { useState, useEffect } from "react";
-import { GraduationCap, BookOpen, ClipboardList, FileText, ChevronRight, Loader2, CheckCircle2, XCircle, ArrowLeft, Trophy, Clock, Camera, Target, Upload } from "lucide-react";
+import { GraduationCap, BookOpen, ClipboardList, FileText, ChevronRight, Loader2, CheckCircle2, XCircle, ArrowLeft, Trophy, Clock, Camera, Target, Upload, Calculator, ExternalLink } from "lucide-react";
+import { PDFViewerModal } from "@/components/PDFViewerModal";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 
-type Mode = "menu" | "quiz" | "exam" | "exam-active" | "exam-result" | "study-guide" | "study-view" | "photo-analysis" | "exam-prep" | "exam-prep-result";
+type Mode = "menu" | "quiz" | "exam" | "exam-active" | "exam-result" | "study-guide" | "study-view" | "photo-analysis" | "exam-prep" | "exam-prep-result" | "short-answer" | "short-answer-result" | "calculation";
+
+interface CalculationQuestion {
+  calculation_type: "voltage_drop" | "maximum_demand" | "cable_sizing" | "fault_current";
+  scenario: string;
+  given_data: string[];
+  question_parts: string[];
+  model_solution: string;
+  total_marks: number;
+  key_answers: string[];
+}
+
+interface ShortAnswerQuestion {
+  question: string;
+  model_answer: string;
+  clause_reference: string;
+  marks: number;
+}
+
+interface ShortAnswerResult {
+  marks_awarded: number;
+  answer_correct: boolean;
+  clause_correct: boolean;
+  feedback: string;
+  model_answer: string;
+  clause_reference: string;
+}
 
 interface Question {
   id: string;
@@ -37,6 +65,9 @@ const Learn = () => {
   const [standards, setStandards] = useState<any[]>([]);
   const [selectedStandard, setSelectedStandard] = useState("");
   const [loading, setLoading] = useState(false);
+  const [sections, setSections] = useState<{ prefix: string; title: string }[]>([]);
+  const [selectedSection, setSelectedSection] = useState("");
+  const [pdfViewer, setPdfViewer] = useState<{ clauseNumber: string; standardId: string } | null>(null);
 
   // Quiz state
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -56,6 +87,21 @@ const Learn = () => {
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [photoAnalysis, setPhotoAnalysis] = useState<string | null>(null);
 
+  // Calculation state
+  const [calcQuestion, setCalcQuestion] = useState<CalculationQuestion | null>(null);
+  const [calcWorking, setCalcWorking] = useState("");
+  const [calcGrading, setCalcGrading] = useState(false);
+  const [calcResult, setCalcResult] = useState<{ marks_awarded: number; correct_method: boolean; correct_answer: boolean; feedback: string } | null>(null);
+
+  // Short answer state
+  const [shortAnswerQuestions, setShortAnswerQuestions] = useState<ShortAnswerQuestion[]>([]);
+  const [shortAnswerCurrentQ, setShortAnswerCurrentQ] = useState(0);
+  const [shortAnswerText, setShortAnswerText] = useState("");
+  const [shortAnswerClause, setShortAnswerClause] = useState("");
+  const [shortAnswerResults, setShortAnswerResults] = useState<ShortAnswerResult[]>([]);
+  const [shortAnswerGrading, setShortAnswerGrading] = useState(false);
+  const [shortAnswerCurrentResult, setShortAnswerCurrentResult] = useState<ShortAnswerResult | null>(null);
+
   // Exam prep state
   const [examPrepTopics, setExamPrepTopics] = useState("");
   const [examPrepPdfText, setExamPrepPdfText] = useState<string | null>(null);
@@ -74,6 +120,158 @@ const Learn = () => {
     if (data) setStandards(data);
   };
 
+  const loadSections = async (standardId: string) => {
+    setSections([]);
+    setSelectedSection("");
+
+    // Primary: query explicit section/appendix heading chunks stored by process-standard
+    // These have clause_number = null and clause_title like "SECTION 1 SCOPE..."
+    // Fetch content too — some PDFs put the title on the next line, so clause_title is just
+    // "APPENDIX A" or "SECTION 1" with no title text; we extract it from content instead.
+    const { data: headingData } = await supabase
+      .from("standard_chunks")
+      .select("clause_title, chunk_index, content")
+      .eq("standard_id", standardId)
+      .is("clause_number", null)
+      .or("clause_title.ilike.SECTION %,clause_title.ilike.PART %,clause_title.ilike.APPENDIX %")
+      .order("chunk_index", { ascending: true });
+
+    const SECTION_RE = /^(?:SECTION|PART)\s+(\d+)\s*(.*)/i;
+    const APPENDIX_RE = /^APPENDIX\s+([A-Z])\s*(.*)/i;
+    // Strip "(NORMATIVE)" / "(INFORMATIVE)" labels that some standards prepend to appendix titles
+    const NORMATIVE_RE = /^\((?:NORMATIVE|INFORMATIVE|MANDATORY)\)\s*/i;
+
+    const parsed: { prefix: string; title: string }[] = [];
+    // Tracks prefixes we've accepted (not just seen) so we keep scanning for a real heading
+    const accepted = new Set<string>();
+
+    // Strip trailing dots and page number e.g. "EARTHING ............... 416" → "EARTHING"
+    const cleanTitle = (raw: string) =>
+      raw.replace(/[\s.…]+\d+\s*$/, "").replace(/^[\s,\-—:]+|[\s,\-—:]+$/g, "").trim();
+
+    const toTitleCase = (s: string) =>
+      s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : "";
+
+    // Real section headings in AS/NZ standards are ALL CAPS.
+    // Narrative foreword refs ("Section 5 requires...") are sentence/mixed case.
+    // Require >50% uppercase letters to accept a title as a real heading.
+    const isRealHeading = (raw: string): boolean => {
+      if (raw.length < 3) return false;
+      const letters = raw.match(/[a-zA-Z]/g) || [];
+      if (letters.length < 3) return false;
+      const upper = raw.match(/[A-Z]/g) || [];
+      return upper.length / letters.length >= 0.5;
+    };
+
+    // When clause_title has no title text (just "APPENDIX A" or "SECTION 1"),
+    // scan the chunk's content body for the first all-caps heading line.
+    const titleFromContent = (content: string): string => {
+      const lines = (content || "").split("\n").map(l => l.trim()).filter(Boolean);
+      for (const line of lines) {
+        if (line.startsWith("[")) continue; // skip breadcrumb e.g. "[AS/NZS 3000 2018] APPENDIX A"
+        if (/^(?:SECTION|PART|APPENDIX)\s+[\dA-Z]$/i.test(line)) continue; // skip bare "APPENDIX A"
+        if (line.length < 4) continue;
+        const letters = line.match(/[a-zA-Z]/g) || [];
+        if (letters.length < 3) continue;
+        const upper = line.match(/[A-Z]/g) || [];
+        if (upper.length / letters.length >= 0.5) return cleanTitle(line);
+      }
+      return "";
+    };
+
+    for (const chunk of headingData || []) {
+      const t = ((chunk.clause_title as string) || "").trim();
+      const content = (chunk.content as string) || "";
+      const sm = t.match(SECTION_RE);
+      const am = t.match(APPENDIX_RE);
+
+      if (sm) {
+        const prefix = sm[1];
+        if (accepted.has(prefix)) continue;
+        let raw = cleanTitle(sm[2].trim());
+        // If title is missing from clause_title, try to find it in the content body
+        if (!raw || raw.length < 3 || !isRealHeading(raw)) raw = titleFromContent(content);
+        if (!raw || raw.length < 3 || !isRealHeading(raw)) continue;
+        accepted.add(prefix);
+        parsed.push({ prefix, title: toTitleCase(raw.replace(NORMATIVE_RE, "").trim()) });
+      } else if (am) {
+        const prefix = am[1];
+        if (accepted.has(prefix)) continue;
+        let raw = cleanTitle(am[2].trim());
+        // If title is missing from clause_title, try to find it in the content body
+        if (!raw || raw.length < 3 || !isRealHeading(raw)) raw = titleFromContent(content);
+        // Accept even with no title — show "Appendix A" rather than silently drop the appendix
+        accepted.add(prefix);
+        if (raw && raw.length >= 3 && isRealHeading(raw)) {
+          parsed.push({ prefix, title: toTitleCase(raw.replace(NORMATIVE_RE, "").trim()) });
+        } else {
+          parsed.push({ prefix, title: "" });
+        }
+      }
+    }
+
+    if (parsed.length > 0) {
+      parsed.sort((a, b) => {
+        const aNum = Number(a.prefix), bNum = Number(b.prefix);
+        if (!isNaN(aNum) && !isNaN(bNum)) return aNum - bNum;
+        if (!isNaN(aNum)) return -1;
+        if (!isNaN(bNum)) return 1;
+        return a.prefix.localeCompare(b.prefix);
+      });
+      setSections(parsed.slice(0, 30));
+      return;
+    }
+
+    // Fallback for standards without explicit SECTION headings — infer from clause numbers
+    const { data } = await supabase
+      .from("standard_chunks")
+      .select("clause_number, clause_title")
+      .eq("standard_id", standardId)
+      .not("clause_number", "is", null)
+      .order("chunk_index", { ascending: true });
+
+    if (!data) return;
+
+    const counts = new Map<string, number>();
+    const allTitles = new Map<string, string[]>();
+
+    for (const chunk of data) {
+      const cn = chunk.clause_number as string;
+      if (!cn || !/^[\dA-Za-z]/.test(cn)) continue;
+      const prefix = cn.split(".")[0];
+      counts.set(prefix, (counts.get(prefix) || 0) + 1);
+      if (chunk.clause_title) {
+        const list = allTitles.get(prefix) || [];
+        list.push(chunk.clause_title as string);
+        allTitles.set(prefix, list);
+      }
+    }
+
+    const SENTENCE_PATTERN = /\b(has been|have been|are indicated|will be|should be|must be|was added|were added|is now|are now|replaced|removed|clarified|revised)\b/i;
+    const pickBestTitle = (titles: string[]): string | undefined => {
+      const candidates = titles.filter((t) => t.length >= 4 && t.length <= 70 && !SENTENCE_PATTERN.test(t));
+      if (!candidates.length) return undefined;
+      return candidates.sort((a, b) => a.length - b.length)[0];
+    };
+
+    const sorted = [...counts.entries()]
+      .filter(([, count]) => count >= 5)
+      .sort(([a], [b]) => {
+        const aNum = Number(a), bNum = Number(b);
+        if (!isNaN(aNum) && !isNaN(bNum)) return aNum - bNum;
+        if (!isNaN(aNum)) return -1;
+        if (!isNaN(bNum)) return 1;
+        return a.localeCompare(b);
+      })
+      .slice(0, 30)
+      .map(([prefix]) => ({
+        prefix,
+        title: pickBestTitle(allTitles.get(prefix) || []) ?? (isNaN(Number(prefix)) ? `Appendix ${prefix}` : `Section ${prefix}`),
+      }));
+
+    setSections(sorted);
+  };
+
   const loadGuides = async () => {
     const { data } = await supabase
       .from("capstone_study_guides")
@@ -87,7 +285,7 @@ const Learn = () => {
     setLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke("capstone", {
-        body: { action: "generate_questions", standardId: selectedStandard, questionCount: 5 },
+        body: { action: "generate_questions", standardId: selectedStandard, questionCount: 5, sectionFilter: (selectedSection && selectedSection !== "__all__") ? selectedSection : undefined },
       });
       if (error) throw await extractFnError(error);
       if (data?.error) throw new Error(data.error);
@@ -135,7 +333,7 @@ const Learn = () => {
     setLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke("capstone", {
-        body: { action: "start_exam", standardId: selectedStandard, questionCount: 10 },
+        body: { action: "start_exam", standardId: selectedStandard, questionCount: 10, sectionFilter: (selectedSection && selectedSection !== "__all__") ? selectedSection : undefined },
       });
       if (error) throw await extractFnError(error);
       if (data?.error) throw new Error(data.error);
@@ -175,7 +373,7 @@ const Learn = () => {
     setLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke("capstone", {
-        body: { action: "generate_study_guide", standardId: selectedStandard },
+        body: { action: "generate_study_guide", standardId: selectedStandard, sectionFilter: (selectedSection && selectedSection !== "__all__") ? selectedSection : undefined },
       });
       if (error) throw await extractFnError(error);
       if (data?.error) throw new Error(data.error);
@@ -185,6 +383,116 @@ const Learn = () => {
       toast.error(e.message || "Failed to generate study guide");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const CALC_TYPE_LABELS: Record<string, string> = {
+    voltage_drop: "Voltage Drop",
+    maximum_demand: "Maximum Demand",
+    cable_sizing: "Cable Sizing",
+    fault_current: "Fault Current",
+  };
+
+  const generateCalculation = async () => {
+    if (!selectedStandard) { toast.error("Select a standard first"); return; }
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("capstone", {
+        body: { action: "generate_calculation", standardId: selectedStandard, sectionFilter: (selectedSection && selectedSection !== "__all__") ? selectedSection : undefined },
+      });
+      if (error) throw await extractFnError(error);
+      if (data?.error) throw new Error(data.error);
+      setCalcQuestion(data.question);
+      setCalcWorking("");
+      setCalcResult(null);
+      setMode("calculation");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to generate question");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const gradeCalculation = async () => {
+    if (!calcQuestion) return;
+    setCalcGrading(true);
+    try {
+      const fullQuestion = `${calcQuestion.scenario}\n\nGiven:\n${calcQuestion.given_data.join("\n")}\n\nQuestions:\n${calcQuestion.question_parts.join("\n")}`;
+      const { data, error } = await supabase.functions.invoke("capstone", {
+        body: {
+          action: "grade_calculation",
+          questionText: fullQuestion,
+          modelAnswer: calcQuestion.model_solution,
+          correctClause: String(calcQuestion.total_marks),
+          userAnswer: calcWorking,
+        },
+      });
+      if (error) throw await extractFnError(error);
+      setCalcResult(data);
+    } catch (e: any) {
+      toast.error(e.message || "Grading failed");
+    } finally {
+      setCalcGrading(false);
+    }
+  };
+
+  const generateShortAnswer = async () => {
+    if (!selectedStandard) { toast.error("Select a standard first"); return; }
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("capstone", {
+        body: { action: "generate_short_answer", standardId: selectedStandard, questionCount: 5, sectionFilter: (selectedSection && selectedSection !== "__all__") ? selectedSection : undefined },
+      });
+      if (error) throw await extractFnError(error);
+      if (data?.error) throw new Error(data.error);
+      setShortAnswerQuestions(data.questions);
+      setShortAnswerCurrentQ(0);
+      setShortAnswerResults([]);
+      setShortAnswerText("");
+      setShortAnswerClause("");
+      setShortAnswerCurrentResult(null);
+      setMode("short-answer");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to generate questions");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const gradeShortAnswer = async () => {
+    const q = shortAnswerQuestions[shortAnswerCurrentQ];
+    if (!q) return;
+    setShortAnswerGrading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("capstone", {
+        body: {
+          action: "grade_short_answer",
+          questionText: q.question,
+          modelAnswer: q.model_answer,
+          correctClause: q.clause_reference,
+          userAnswer: shortAnswerText,
+          userClauseRef: shortAnswerClause,
+        },
+      });
+      if (error) throw await extractFnError(error);
+      const result: ShortAnswerResult = { ...data, model_answer: q.model_answer, clause_reference: q.clause_reference };
+      setShortAnswerCurrentResult(result);
+      setShortAnswerResults((prev) => [...prev, result]);
+    } catch (e: any) {
+      toast.error(e.message || "Grading failed");
+    } finally {
+      setShortAnswerGrading(false);
+    }
+  };
+
+  const nextShortAnswer = () => {
+    if (shortAnswerCurrentQ < shortAnswerQuestions.length - 1) {
+      setShortAnswerCurrentQ((c) => c + 1);
+      setShortAnswerText("");
+      setShortAnswerClause("");
+      setShortAnswerCurrentResult(null);
+    } else {
+      setMode("short-answer-result");
     }
   };
 
@@ -240,6 +548,14 @@ const Learn = () => {
     setExamPrepPdfText(null);
     setExamPrepPdfName(null);
     setExamPrepTopics("");
+    setShortAnswerQuestions([]);
+    setShortAnswerResults([]);
+    setShortAnswerCurrentResult(null);
+    setShortAnswerText("");
+    setShortAnswerClause("");
+    setCalcQuestion(null);
+    setCalcWorking("");
+    setCalcResult(null);
   };
 
   const handleExamPdfUpload = () => {
@@ -340,7 +656,7 @@ const Learn = () => {
   // ── MENU ──
   if (mode === "menu") {
     return (
-      <div className="h-full overflow-y-auto px-5 py-6 pb-24 max-w-md mx-auto">
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
         <div className="flex items-center gap-3 mb-6">
           <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
             <GraduationCap className="h-5 w-5 text-primary" />
@@ -351,9 +667,9 @@ const Learn = () => {
           </div>
         </div>
 
-        <div className="mb-6">
+        <div className="mb-4">
           <label className="text-sm font-medium text-foreground mb-2 block">Select a standard</label>
-          <Select value={selectedStandard} onValueChange={setSelectedStandard}>
+          <Select value={selectedStandard} onValueChange={(v) => { setSelectedStandard(v); loadSections(v); }}>
             <SelectTrigger className="h-12">
               <SelectValue placeholder="Choose a standard to study..." />
             </SelectTrigger>
@@ -370,6 +686,25 @@ const Learn = () => {
           )}
         </div>
 
+        {selectedStandard && sections.length > 0 && (
+          <div className="mb-6">
+            <label className="text-sm font-medium text-foreground mb-2 block">Focus on a section <span className="text-muted-foreground font-normal">(optional)</span></label>
+            <Select value={selectedSection || "__all__"} onValueChange={(v) => setSelectedSection(v === "__all__" ? "" : v)}>
+              <SelectTrigger className="h-12">
+                <SelectValue placeholder="All sections" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All sections</SelectItem>
+                {sections.map((s) => (
+                  <SelectItem key={s.prefix} value={s.prefix}>
+                    {isNaN(Number(s.prefix)) ? `Appendix ${s.prefix}` : `Section ${s.prefix}`}{s.title ? ` — ${s.title}` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         <div className="space-y-3">
           <Card
             className="p-4 cursor-pointer hover:border-primary/50 transition-colors"
@@ -382,6 +717,38 @@ const Learn = () => {
               <div className="flex-1">
                 <p className="font-bold text-foreground text-sm">Practice Quiz</p>
                 <p className="text-xs text-muted-foreground">5 questions from your standard</p>
+              </div>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </div>
+          </Card>
+
+          <Card
+            className="p-4 cursor-pointer hover:border-primary/50 transition-colors"
+            onClick={generateShortAnswer}
+          >
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                <FileText className="h-5 w-5 text-primary" />
+              </div>
+              <div className="flex-1">
+                <p className="font-bold text-foreground text-sm">Short Answer Practice</p>
+                <p className="text-xs text-muted-foreground">Section B style — write your answer + clause ref</p>
+              </div>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </div>
+          </Card>
+
+          <Card
+            className="p-4 cursor-pointer hover:border-primary/50 transition-colors"
+            onClick={generateCalculation}
+          >
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                <Calculator className="h-5 w-5 text-primary" />
+              </div>
+              <div className="flex-1">
+                <p className="font-bold text-foreground text-sm">Calculation Practice</p>
+                <p className="text-xs text-muted-foreground">Section C style — voltage drop, cable sizing, max demand</p>
               </div>
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </div>
@@ -486,7 +853,7 @@ const Learn = () => {
     if (!q) return null;
 
     return (
-      <div className="h-full overflow-y-auto px-5 py-6 pb-24 max-w-md mx-auto">
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> Back
@@ -514,8 +881,14 @@ const Learn = () => {
 
         <Card className="p-5 mb-4">
           <p className="font-bold text-foreground leading-relaxed">{q.question}</p>
-          {q.clause_reference && (
-            <Badge className="bg-primary/10 text-primary border-0 text-xs mt-2">{q.clause_reference}</Badge>
+          {answered && q.clause_reference && (
+            <button
+              onClick={() => setPdfViewer({ clauseNumber: q.clause_reference })}
+              className="inline-flex items-center gap-1.5 mt-2 rounded-full px-2.5 py-0.5 text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 active:scale-95 transition-all"
+            >
+              Clause {q.clause_reference}
+              <ExternalLink className="h-3 w-3" />
+            </button>
           )}
         </Card>
 
@@ -568,6 +941,13 @@ const Learn = () => {
             Score: {score.correct}/{score.total}
           </p>
         </div>
+
+        <PDFViewerModal
+          isOpen={!!pdfViewer}
+          onClose={() => setPdfViewer(null)}
+          clauseNumber={pdfViewer?.clauseNumber ?? ""}
+          standardId={selectedStandard}
+        />
       </div>
     );
   }
@@ -610,7 +990,7 @@ const Learn = () => {
   // ── STUDY GUIDE LIST ──
   if (mode === "study-guide") {
     return (
-      <div className="h-full overflow-y-auto px-5 py-6 pb-24 max-w-md mx-auto">
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
         <div className="flex items-center gap-2 mb-6">
           <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> Back
@@ -646,7 +1026,7 @@ const Learn = () => {
   // ── STUDY GUIDE VIEW ──
   if (mode === "study-view" && activeGuide) {
     return (
-      <div className="h-full overflow-y-auto px-5 py-6 pb-24 max-w-md mx-auto">
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
         <div className="flex items-center gap-2 mb-6">
           <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> Back
@@ -665,7 +1045,7 @@ const Learn = () => {
   // ── PHOTO ANALYSIS ──
   if (mode === "photo-analysis") {
     return (
-      <div className="h-full overflow-y-auto px-5 py-6 pb-24 max-w-md mx-auto">
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
         <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
@@ -707,7 +1087,7 @@ const Learn = () => {
   // ── EXAM PREP INPUT ──
   if (mode === "exam-prep") {
     return (
-      <div className="h-full overflow-y-auto px-5 py-6 pb-24 max-w-md mx-auto">
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
         <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
@@ -785,7 +1165,7 @@ const Learn = () => {
   // ── EXAM PREP RESULT ──
   if (mode === "exam-prep-result" && examPrepResult) {
     return (
-      <div className="h-full overflow-y-auto px-5 py-6 pb-24 max-w-md mx-auto">
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
         <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
@@ -842,6 +1222,287 @@ const Learn = () => {
         <Button variant="outline" onClick={() => setMode("exam-prep")} className="w-full h-11">
           Prepare for Another Exam
         </Button>
+      </div>
+    );
+  }
+
+  // ── CALCULATION ──
+  if (mode === "calculation" && calcQuestion) {
+    const typeLabel = CALC_TYPE_LABELS[calcQuestion.calculation_type] || "Calculation";
+
+    return (
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
+        <div className="flex items-center justify-between mb-6">
+          <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="h-4 w-4" /> Back
+          </button>
+          <Badge className="bg-primary/10 text-primary border-0 text-xs">{typeLabel}</Badge>
+        </div>
+
+        {/* Scenario */}
+        <Card className="p-4 mb-4">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Scenario</p>
+          <p className="text-sm text-foreground leading-relaxed">{calcQuestion.scenario}</p>
+        </Card>
+
+        {/* Given data */}
+        <Card className="p-4 mb-4 bg-secondary/50">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Given</p>
+          <ul className="space-y-1">
+            {calcQuestion.given_data.map((item, i) => (
+              <li key={i} className="text-sm text-foreground font-mono">{item}</li>
+            ))}
+          </ul>
+        </Card>
+
+        {/* Questions */}
+        <Card className="p-4 mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Questions</p>
+            <span className="text-xs font-semibold text-muted-foreground">{calcQuestion.total_marks} marks</span>
+          </div>
+          <ul className="space-y-2">
+            {calcQuestion.question_parts.map((part, i) => (
+              <li key={i} className="text-sm text-foreground leading-relaxed">{part}</li>
+            ))}
+          </ul>
+        </Card>
+
+        {!calcResult ? (
+          <>
+            <div className="mb-4">
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">Your Working</label>
+              <Textarea
+                placeholder={"Show all working…\ne.g. VD = I × mV/A.m × L / 1000\n    = 32 × 9.22 × 45 / 1000\n    = 13.3V"}
+                value={calcWorking}
+                onChange={(e) => setCalcWorking(e.target.value)}
+                className="min-h-[140px] text-sm font-mono"
+                disabled={calcGrading}
+              />
+            </div>
+
+            <Button
+              className="w-full h-12 font-bold rounded-xl"
+              onClick={gradeCalculation}
+              disabled={calcGrading || !calcWorking.trim()}
+            >
+              {calcGrading ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Marking…</> : "Submit Working"}
+            </Button>
+          </>
+        ) : (
+          <>
+            {/* Grade result */}
+            <Card className={`p-4 mb-4 ${calcResult.correct_answer ? "border-primary bg-primary/5" : calcResult.correct_method ? "border-yellow-400 bg-yellow-50" : "border-destructive bg-destructive/5"}`}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-bold text-foreground">
+                  {calcResult.correct_answer ? "✓ Correct" : calcResult.correct_method ? "Method correct, check answer" : "✗ Review needed"}
+                </span>
+                <Badge className={`text-xs border-0 ${calcResult.correct_answer ? "bg-primary/10 text-primary" : calcResult.correct_method ? "bg-yellow-100 text-yellow-700" : "bg-destructive/10 text-destructive"}`}>
+                  {calcResult.marks_awarded} / {calcQuestion.total_marks}
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">{calcResult.feedback}</p>
+            </Card>
+
+            {/* Worked solution */}
+            <Card className="p-4 mb-4">
+              <p className="text-xs font-semibold text-foreground mb-2">Worked Solution</p>
+              <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono leading-relaxed">{calcQuestion.model_solution}</pre>
+              {calcQuestion.key_answers.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-border">
+                  <p className="text-xs font-semibold text-foreground mb-1">Key answers:</p>
+                  {calcQuestion.key_answers.map((a, i) => (
+                    <p key={i} className="text-xs text-primary font-mono font-semibold">{a}</p>
+                  ))}
+                </div>
+              )}
+            </Card>
+
+            <div className="space-y-3">
+              <Button className="w-full h-12 font-bold rounded-xl" onClick={generateCalculation}>Try Another Question</Button>
+              <Button variant="outline" className="w-full h-11" onClick={goBack}>Back to Learn</Button>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // ── SHORT ANSWER ──
+  if (mode === "short-answer") {
+    const q = shortAnswerQuestions[shortAnswerCurrentQ];
+    if (!q) return null;
+    const totalMarks = shortAnswerQuestions.length * 2;
+    const earnedSoFar = shortAnswerResults.reduce((s, r) => s + r.marks_awarded, 0);
+
+    return (
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
+        <div className="flex items-center justify-between mb-6">
+          <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="h-4 w-4" /> Back
+          </button>
+          <Badge variant="secondary" className="text-xs">
+            {shortAnswerCurrentQ + 1} / {shortAnswerQuestions.length}
+          </Badge>
+        </div>
+
+        <div className="h-1.5 bg-secondary rounded-full overflow-hidden mb-6">
+          <div
+            className="h-full bg-primary rounded-full transition-all"
+            style={{ width: `${((shortAnswerCurrentQ + 1) / shortAnswerQuestions.length) * 100}%` }}
+          />
+        </div>
+
+        <Card className="p-4 mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <Badge className="bg-primary/10 text-primary border-0 text-xs">Section B Style</Badge>
+            <span className="text-xs text-muted-foreground font-semibold">2 marks</span>
+          </div>
+          <p className="font-bold text-foreground leading-relaxed">{q.question}</p>
+        </Card>
+
+        {!shortAnswerCurrentResult ? (
+          <>
+            <div className="space-y-3 mb-4">
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">Your Answer</label>
+                <Textarea
+                  placeholder="Write your answer here…"
+                  value={shortAnswerText}
+                  onChange={(e) => setShortAnswerText(e.target.value)}
+                  className="min-h-[100px] text-sm"
+                  disabled={shortAnswerGrading}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">Clause Reference</label>
+                <Input
+                  placeholder="e.g. 1.5.1"
+                  value={shortAnswerClause}
+                  onChange={(e) => setShortAnswerClause(e.target.value)}
+                  className="h-11 font-mono"
+                  disabled={shortAnswerGrading}
+                />
+              </div>
+            </div>
+
+            <Button
+              className="w-full h-12 font-bold rounded-xl"
+              onClick={gradeShortAnswer}
+              disabled={shortAnswerGrading || !shortAnswerText.trim()}
+            >
+              {shortAnswerGrading ? (
+                <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Marking…</>
+              ) : "Submit Answer"}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Card className={`p-4 mb-4 ${shortAnswerCurrentResult.marks_awarded === 2 ? "border-primary bg-primary/5" : shortAnswerCurrentResult.marks_awarded === 1 ? "border-yellow-400 bg-yellow-50" : "border-destructive bg-destructive/5"}`}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-bold text-foreground">
+                  {shortAnswerCurrentResult.marks_awarded === 2 ? "✓ Full marks" : shortAnswerCurrentResult.marks_awarded === 1 ? "½ Partial" : "✗ No marks"}
+                </span>
+                <Badge className={`text-xs border-0 ${shortAnswerCurrentResult.marks_awarded === 2 ? "bg-primary/10 text-primary" : shortAnswerCurrentResult.marks_awarded === 1 ? "bg-yellow-100 text-yellow-700" : "bg-destructive/10 text-destructive"}`}>
+                  {shortAnswerCurrentResult.marks_awarded} / 2
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed mb-3">{shortAnswerCurrentResult.feedback}</p>
+              <div className="pt-3 border-t border-border space-y-1">
+                <p className="text-xs font-semibold text-foreground">Model answer:</p>
+                <p className="text-xs text-muted-foreground leading-relaxed">{shortAnswerCurrentResult.model_answer}</p>
+                <div className="flex items-center gap-2 mt-2">
+                  <p className="text-xs font-semibold text-foreground">Correct clause:</p>
+                  <button
+                    onClick={() => setPdfViewer({ clauseNumber: shortAnswerCurrentResult.clause_reference })}
+                    className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-mono font-semibold bg-primary/10 text-primary hover:bg-primary/20 active:scale-95 transition-all"
+                  >
+                    {shortAnswerCurrentResult.clause_reference}
+                    <ExternalLink className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+            </Card>
+
+            <Button className="w-full h-12 font-bold rounded-xl" onClick={nextShortAnswer}>
+              {shortAnswerCurrentQ < shortAnswerQuestions.length - 1 ? "Next Question" : "See Results"}
+            </Button>
+          </>
+        )}
+
+        <p className="text-center text-xs text-muted-foreground mt-4">
+          Score so far: {earnedSoFar} / {shortAnswerResults.length * 2}
+        </p>
+
+        <PDFViewerModal
+          isOpen={!!pdfViewer}
+          onClose={() => setPdfViewer(null)}
+          clauseNumber={pdfViewer?.clauseNumber ?? ""}
+          standardId={selectedStandard}
+        />
+      </div>
+    );
+  }
+
+  // ── SHORT ANSWER RESULT ──
+  if (mode === "short-answer-result") {
+    const totalMarks = shortAnswerQuestions.length * 2;
+    const earnedMarks = shortAnswerResults.reduce((s, r) => s + r.marks_awarded, 0);
+    const pct = totalMarks > 0 ? Math.round((earnedMarks / totalMarks) * 100) : 0;
+    const passed = pct >= 70;
+
+    return (
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
+        <div className="text-center mb-6 mt-4">
+          <div className={`h-20 w-20 rounded-full mx-auto mb-4 flex items-center justify-center ${passed ? "bg-primary/10" : "bg-destructive/10"}`}>
+            <Trophy className={`h-10 w-10 ${passed ? "text-primary" : "text-destructive"}`} />
+          </div>
+          <h2 className="font-sans text-2xl font-extrabold text-foreground mb-1">
+            {passed ? "Well done!" : "Keep practising"}
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            {passed ? "You're on track for the real exam." : "Review the model answers and try again."}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3 mb-6">
+          <Card className="p-3 text-center">
+            <p className="text-2xl font-extrabold text-foreground">{pct}%</p>
+            <p className="text-xs text-muted-foreground">Score</p>
+          </Card>
+          <Card className="p-3 text-center">
+            <p className="text-2xl font-extrabold text-primary">{earnedMarks}</p>
+            <p className="text-xs text-muted-foreground">Marks</p>
+          </Card>
+          <Card className="p-3 text-center">
+            <p className="text-2xl font-extrabold text-foreground">{totalMarks}</p>
+            <p className="text-xs text-muted-foreground">Available</p>
+          </Card>
+        </div>
+
+        <div className="space-y-2 mb-6">
+          {shortAnswerQuestions.map((q, i) => {
+            const r = shortAnswerResults[i];
+            return (
+              <Card key={i} className="p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-xs text-foreground font-medium flex-1 leading-relaxed">{q.question}</p>
+                  <Badge className={`text-xs border-0 flex-shrink-0 ${!r ? "bg-secondary text-muted-foreground" : r.marks_awarded === 2 ? "bg-primary/10 text-primary" : r.marks_awarded === 1 ? "bg-yellow-100 text-yellow-700" : "bg-destructive/10 text-destructive"}`}>
+                    {r ? `${r.marks_awarded}/2` : "-"}
+                  </Badge>
+                </div>
+                {r && r.marks_awarded < 2 && (
+                  <p className="text-[10px] text-muted-foreground mt-1">Clause: <span className="font-mono">{q.clause_reference}</span></p>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+
+        <div className="space-y-3">
+          <Button className="w-full h-12 font-bold rounded-xl" onClick={generateShortAnswer}>Try Again</Button>
+          <Button variant="outline" className="w-full h-11" onClick={goBack}>Back to Learn</Button>
+        </div>
       </div>
     );
   }
