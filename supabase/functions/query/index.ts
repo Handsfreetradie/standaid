@@ -350,9 +350,9 @@ ${chunk.content}`;
           clarification_question: parsedMetadata.clarification_question || null,
         };
 
-        // Figure/table lookup
-        const questionFigNums = [...question.matchAll(/\bfigure[s]?\s+(\d+\.\d+(?:\.\d+)?)\b/gi)].map((m) => m[1]);
-        const questionTblNums = [...question.matchAll(/\btable[s]?\s+(\d+\.\d+(?:\.\d+)?)\b/gi)].map((m) => m[1]);
+        // Figure/table lookup — regex supports whole numbers (e.g. "Table 50") and "fig" abbreviation/typos
+        const questionFigNums = [...question.matchAll(/\bfig(?:ure)?s?\s+(\d+(?:\.\d+)*)\b/gi)].map((m) => m[1]);
+        const questionTblNums = [...question.matchAll(/\btable[s]?\s+(\d+(?:\.\d+)*)\b/gi)].map((m) => m[1]);
         const aiFigures: any[] = parsedResponse.figures_referenced || [];
         const aiTables: any[] = parsedResponse.tables_referenced || [];
 
@@ -367,9 +367,14 @@ ${chunk.content}`;
 
         const isVisualRequest = /\b(show\s+me|diagram|zones|layout|exclusion|illustrat|picture|what does.{0,20}look like)\b/i.test(question);
         if (isVisualRequest) {
-          const answerFigRefs = [...(parsedResponse.answer || "").matchAll(/\bfigure\s+(\d+\.\d+(?:\.\d+)?)\b/gi)].map((m) => m[1]);
+          const answerText2 = parsedResponse.answer || "";
+          const answerFigRefs = [...answerText2.matchAll(/\bfigure\s+(\d+(?:\.\d+)*)\b/gi)].map((m) => m[1]);
           for (const n of answerFigRefs) {
             if (!seenFigNums.has(n)) { aiFigures.push({ figure_number: n }); seenFigNums.add(n); }
+          }
+          const answerTblRefs = [...answerText2.matchAll(/\btable\s+(\d+(?:\.\d+)*)\b/gi)].map((m) => m[1]);
+          for (const n of answerTblRefs) {
+            if (!seenTblNums.has(n)) { aiTables.push({ table_number: n }); seenTblNums.add(n); }
           }
         }
 
