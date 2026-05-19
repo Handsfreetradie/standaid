@@ -218,7 +218,7 @@ ${chunk.content}`;
       body: JSON.stringify({
         model: "gpt-4o-mini",
         temperature: 0.1,
-        max_tokens: 1200,
+        max_tokens: 2000,
         stream: true,
         messages: [
           { role: "system", content: systemPrompt },
