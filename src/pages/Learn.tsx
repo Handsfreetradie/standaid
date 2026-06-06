@@ -59,6 +59,14 @@ async function extractFnError(error: any): Promise<Error> {
   return new Error(msg);
 }
 
+const ScrollPage = ({ children }: { children: React.ReactNode }) => (
+  <div className="h-full overflow-y-auto">
+    <div className="px-5 py-6 pb-24 md:pb-8 max-w-2xl mx-auto">
+      {children}
+    </div>
+  </div>
+);
+
 const Learn = () => {
   const { user } = useAuth();
   const [mode, setMode] = useState<Mode>("menu");
@@ -656,7 +664,7 @@ const Learn = () => {
   // ── MENU ──
   if (mode === "menu") {
     return (
-      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
+      <ScrollPage>
         <div className="flex items-center gap-3 mb-6">
           <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
             <GraduationCap className="h-5 w-5 text-primary" />
@@ -843,7 +851,7 @@ const Learn = () => {
             </div>
           </div>
         )}
-      </div>
+      </ScrollPage>
     );
   }
 
@@ -853,7 +861,7 @@ const Learn = () => {
     if (!q) return null;
 
     return (
-      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
+      <ScrollPage>
         <div className="flex items-center justify-between mb-6">
           <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> Back
@@ -948,7 +956,7 @@ const Learn = () => {
           clauseNumber={pdfViewer?.clauseNumber ?? ""}
           standardId={selectedStandard}
         />
-      </div>
+      </ScrollPage>
     );
   }
 
@@ -956,7 +964,7 @@ const Learn = () => {
   if (mode === "exam-result" && examResult) {
     const passed = examResult.passed;
     return (
-      <div className="px-5 py-6 pb-24 max-w-md mx-auto text-center">
+      <ScrollPage><div className="text-center">
         <div className={`h-20 w-20 rounded-full mx-auto mb-4 flex items-center justify-center ${passed ? "bg-accent" : "bg-destructive/10"}`}>
           <Trophy className={`h-10 w-10 ${passed ? "text-primary" : "text-destructive"}`} />
         </div>
@@ -983,14 +991,14 @@ const Learn = () => {
         </div>
 
         <Button onClick={goBack} className="w-full h-12 font-bold rounded-xl">Back to Learn</Button>
-      </div>
+      </div></ScrollPage>
     );
   }
 
   // ── STUDY GUIDE LIST ──
   if (mode === "study-guide") {
     return (
-      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
+      <ScrollPage>
         <div className="flex items-center gap-2 mb-6">
           <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> Back
@@ -1019,14 +1027,14 @@ const Learn = () => {
             ))}
           </div>
         )}
-      </div>
+      </ScrollPage>
     );
   }
 
   // ── STUDY GUIDE VIEW ──
   if (mode === "study-view" && activeGuide) {
     return (
-      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
+      <ScrollPage>
         <div className="flex items-center gap-2 mb-6">
           <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> Back
@@ -1038,14 +1046,14 @@ const Learn = () => {
             <ReactMarkdown>{activeGuide.content}</ReactMarkdown>
           </div>
         </Card>
-      </div>
+      </ScrollPage>
     );
   }
 
   // ── PHOTO ANALYSIS ──
   if (mode === "photo-analysis") {
     return (
-      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
+      <ScrollPage>
         <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
@@ -1080,14 +1088,14 @@ const Learn = () => {
             Upload Another Photo
           </Button>
         )}
-      </div>
+      </ScrollPage>
     );
   }
 
   // ── EXAM PREP INPUT ──
   if (mode === "exam-prep") {
     return (
-      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
+      <ScrollPage>
         <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
@@ -1158,14 +1166,14 @@ const Learn = () => {
             "Generate Study Materials & Mock Questions"
           )}
         </Button>
-      </div>
+      </ScrollPage>
     );
   }
 
   // ── EXAM PREP RESULT ──
   if (mode === "exam-prep-result" && examPrepResult) {
     return (
-      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
+      <ScrollPage>
         <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
@@ -1222,7 +1230,7 @@ const Learn = () => {
         <Button variant="outline" onClick={() => setMode("exam-prep")} className="w-full h-11">
           Prepare for Another Exam
         </Button>
-      </div>
+      </ScrollPage>
     );
   }
 
@@ -1231,7 +1239,7 @@ const Learn = () => {
     const typeLabel = CALC_TYPE_LABELS[calcQuestion.calculation_type] || "Calculation";
 
     return (
-      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
+      <ScrollPage>
         <div className="flex items-center justify-between mb-6">
           <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> Back
@@ -1324,7 +1332,7 @@ const Learn = () => {
             </div>
           </>
         )}
-      </div>
+      </ScrollPage>
     );
   }
 
@@ -1336,7 +1344,7 @@ const Learn = () => {
     const earnedSoFar = shortAnswerResults.reduce((s, r) => s + r.marks_awarded, 0);
 
     return (
-      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
+      <ScrollPage>
         <div className="flex items-center justify-between mb-6">
           <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> Back
@@ -1440,7 +1448,7 @@ const Learn = () => {
           clauseNumber={pdfViewer?.clauseNumber ?? ""}
           standardId={selectedStandard}
         />
-      </div>
+      </ScrollPage>
     );
   }
 
@@ -1452,7 +1460,7 @@ const Learn = () => {
     const passed = pct >= 70;
 
     return (
-      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
+      <ScrollPage>
         <div className="text-center mb-6 mt-4">
           <div className={`h-20 w-20 rounded-full mx-auto mb-4 flex items-center justify-center ${passed ? "bg-primary/10" : "bg-destructive/10"}`}>
             <Trophy className={`h-10 w-10 ${passed ? "text-primary" : "text-destructive"}`} />
@@ -1503,7 +1511,7 @@ const Learn = () => {
           <Button className="w-full h-12 font-bold rounded-xl" onClick={generateShortAnswer}>Try Again</Button>
           <Button variant="outline" className="w-full h-11" onClick={goBack}>Back to Learn</Button>
         </div>
-      </div>
+      </ScrollPage>
     );
   }
 
