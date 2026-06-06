@@ -505,6 +505,10 @@ const Learn = () => {
   };
 
   const handlePhotoUpload = () => {
+    if (!selectedStandard) {
+      toast.error("Please select a standard before uploading a photo.");
+      return;
+    }
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "image/*";
@@ -713,7 +717,7 @@ const Learn = () => {
           </div>
         )}
 
-        <div className="space-y-3">
+        <div className={`space-y-3 ${loading ? "pointer-events-none opacity-60" : ""}`}>
           <Card
             className="p-4 cursor-pointer hover:border-primary/50 transition-colors"
             onClick={generateQuestions}
@@ -863,7 +867,14 @@ const Learn = () => {
     return (
       <ScrollPage>
         <div className="flex items-center justify-between mb-6">
-          <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+          <button
+            onClick={() => {
+              if (window.confirm("Are you sure you want to quit? Your progress will be lost.")) {
+                goBack();
+              }
+            }}
+            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+          >
             <ArrowLeft className="h-4 w-4" /> Back
           </button>
           <Badge variant="secondary" className="text-xs">
@@ -891,7 +902,7 @@ const Learn = () => {
           <p className="font-bold text-foreground leading-relaxed">{q.question}</p>
           {answered && q.clause_reference && (
             <button
-              onClick={() => setPdfViewer({ clauseNumber: q.clause_reference })}
+              onClick={() => setPdfViewer({ clauseNumber: q.clause_reference, standardId: selectedStandard })}
               className="inline-flex items-center gap-1.5 mt-2 rounded-full px-2.5 py-0.5 text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 active:scale-95 transition-all"
             >
               Clause {q.clause_reference}
@@ -985,7 +996,7 @@ const Learn = () => {
             <p className="text-xs text-muted-foreground">Correct</p>
           </Card>
           <Card className="p-3">
-            <p className="text-2xl font-extrabold text-foreground">{Math.floor(examResult.timeTaken / 60)}m</p>
+            <p className="text-2xl font-extrabold text-foreground">{examResult.timeTaken < 60 ? `${examResult.timeTaken}s` : `${Math.floor(examResult.timeTaken / 60)}m`}</p>
             <p className="text-xs text-muted-foreground">Time</p>
           </Card>
         </div>
@@ -1422,7 +1433,7 @@ const Learn = () => {
                 <div className="flex items-center gap-2 mt-2">
                   <p className="text-xs font-semibold text-foreground">Correct clause:</p>
                   <button
-                    onClick={() => setPdfViewer({ clauseNumber: shortAnswerCurrentResult.clause_reference })}
+                    onClick={() => setPdfViewer({ clauseNumber: shortAnswerCurrentResult.clause_reference, standardId: selectedStandard })}
                     className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-mono font-semibold bg-primary/10 text-primary hover:bg-primary/20 active:scale-95 transition-all"
                   >
                     {shortAnswerCurrentResult.clause_reference}
@@ -1439,7 +1450,7 @@ const Learn = () => {
         )}
 
         <p className="text-center text-xs text-muted-foreground mt-4">
-          Score so far: {earnedSoFar} / {shortAnswerResults.length * 2}
+          Score so far: {earnedSoFar} / {shortAnswerQuestions.length * 2}
         </p>
 
         <PDFViewerModal

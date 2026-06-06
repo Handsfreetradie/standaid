@@ -8,33 +8,41 @@ type StandardChunk = {
   clause_title: string | null;
 };
 
+const FIGURE_PLACEHOLDER = "A full description will be generated shortly";
+
 async function fetchStandardChunks(
   supabase: any,
   standardId: string,
   limit: number,
   topic?: string,
+  sectionFilter?: string,
 ): Promise<StandardChunk[]> {
   // Fetch a larger pool so topic filtering has something to work with
   const poolSize = topic ? Math.max(limit * 10, 300) : limit;
 
-  let { data: chunks, error: indexedError } = await supabase
-    .from("standard_chunks")
-    .select("content, clause_number, clause_title")
-    .eq("standard_id", standardId)
-    .eq("is_indexed", true)
-    .order("chunk_index", { ascending: true })
-    .limit(poolSize);
-
-  if (indexedError) throw indexedError;
-
-  if (!chunks?.length) {
-    const { data: fallbackChunks, error: fallbackError } = await supabase
+  const buildQuery = (indexed: boolean) => {
+    let q = supabase
       .from("standard_chunks")
       .select("content, clause_number, clause_title")
       .eq("standard_id", standardId)
       .order("chunk_index", { ascending: true })
       .limit(poolSize);
+    if (indexed) q = q.eq("is_indexed", true);
+    if (sectionFilter) {
+      // Include text clauses, figures, and tables for this section
+      q = q.or(
+        `clause_number.like.${sectionFilter}.%,clause_number.eq.${sectionFilter},clause_number.ilike.FIGURE ${sectionFilter}.%,clause_number.ilike.FIGURE ${sectionFilter},clause_number.ilike.TABLE ${sectionFilter}.%,clause_number.ilike.TABLE ${sectionFilter}`
+      );
+    }
+    return q;
+  };
 
+  let { data: chunks, error: indexedError } = await buildQuery(true);
+
+  if (indexedError) throw indexedError;
+
+  if (!chunks?.length) {
+    const { data: fallbackChunks, error: fallbackError } = await buildQuery(false);
     if (fallbackError) throw fallbackError;
     chunks = fallbackChunks;
   }
@@ -59,14 +67,38 @@ async function fetchStandardChunks(
   return (chunks || []).slice(0, limit);
 }
 
+// Fetch described figure chunks (those that have been processed by describe-figures)
+async function fetchDescribedFigures(
+  supabase: any,
+  standardId: string,
+  limit: number,
+  sectionFilter?: string,
+): Promise<StandardChunk[]> {
+  let q = supabase
+    .from("standard_chunks")
+    .select("content, clause_number, clause_title")
+    .eq("standard_id", standardId)
+    .like("clause_number", "FIGURE%")
+    .not("content", "ilike", `%${FIGURE_PLACEHOLDER}%`)
+    .limit(limit);
+
+  if (sectionFilter) {
+    q = q.or(`clause_number.ilike.FIGURE ${sectionFilter}.%,clause_number.ilike.FIGURE ${sectionFilter}`);
+  }
+
+  const { data } = await q;
+  return data || [];
+}
+
 async function getChunksWithRecovery(
   supabase: any,
   standardId: string,
   authHeader: string,
   limit: number,
   topic?: string,
+  sectionFilter?: string,
 ): Promise<StandardChunk[]> {
-  let chunks = await fetchStandardChunks(supabase, standardId, limit, topic);
+  let chunks = await fetchStandardChunks(supabase, standardId, limit, topic, sectionFilter);
   if (chunks.length > 0) return chunks;
 
   const processUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/process-standard`;
@@ -86,16 +118,32 @@ async function getChunksWithRecovery(
     return chunks;
   }
 
-  chunks = await fetchStandardChunks(supabase, standardId, limit, topic);
+  chunks = await fetchStandardChunks(supabase, standardId, limit, topic, sectionFilter);
   return chunks;
 }
 
-async function callAI(body: object, openAiKey: string): Promise<Response> {
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${openAiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+async function callAI(
+  body: Record<string, unknown>,
+  openAiKey: string,
+  options: { temperature?: number; max_tokens?: number } = {},
+): Promise<Response> {
+  const payload: Record<string, unknown> = { ...body };
+  if (!("temperature" in payload)) payload.temperature = options.temperature ?? 0.1;
+  if (!("max_tokens" in payload)) payload.max_tokens = options.max_tokens ?? 1000;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  let res: Response;
+  try {
+    res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${openAiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!res.ok) {
     const errText = await res.clone().text();
     console.error(`[capstone] OpenAI error (${res.status}): ${errText}`);
@@ -124,7 +172,7 @@ serve(async (req) => {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) throw new Error("Unauthorized");
 
-    const { action, standardId, topic, difficulty, questionCount, examId, questionId, userAnswer, imageBase64, chunkId, examTopics, examPdfText } = await req.json();
+    const { action, standardId, topic, difficulty, questionCount, examId, questionId, userAnswer, imageBase64, chunkId, examTopics, examPdfText, sectionFilter, userClauseRef, modelAnswer, correctClause, questionText } = await req.json();
     const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
     if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY not configured");
 
@@ -156,9 +204,13 @@ serve(async (req) => {
 
     // ── GENERATE QUIZ QUESTIONS ──
     if (action === "generate_questions") {
-      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 30, topic);
+      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 30, topic, sectionFilter);
 
       if (!chunks?.length) throw new Error("No content found for this standard");
+
+      // Append any described figure chunks so AI can reference diagrams in explanations
+      const figureChunks = await fetchDescribedFigures(supabase, standardId, 5, sectionFilter);
+      const allChunks = [...chunks, ...figureChunks];
 
       const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
 
@@ -169,8 +221,8 @@ serve(async (req) => {
       const aiResponse = await callAI({
           model: "gpt-4o-mini",
           messages: [
-            { role: "system", content: `You are an exam question generator for trade apprentices studying ${standard?.title || "industry standards"}. Generate practical, scenario-based multiple-choice questions ONLY from the provided standard content. Never invent facts. Frame questions as real on-site situations — e.g. "You are wiring a bathroom and...", "A customer asks you to install...", "On a job site you find...". Do NOT ask "What does Clause X.X say?" or "According to Clause X.X..." — test understanding and application, not clause memorisation.` },
-            { role: "user", content: `Generate ${count} ${diff}-difficulty multiple-choice questions from this standard content. ${topicFilter}\n\nStandard: ${standard?.standard_code || standard?.title}\n\nContent:\n${chunks.map((c) => `[${c.clause_number || ""}] ${c.content}`).join("\n\n")}` },
+            { role: "system", content: `You are an exam question generator for trade apprentices studying ${standard?.title || "industry standards"}. Generate practical, scenario-based multiple-choice questions ONLY from the provided standard content. Never invent facts. Frame questions as real on-site situations — e.g. "You are wiring a bathroom and...", "A customer asks you to install...", "On a job site you find...". Do NOT ask "What does Clause X.X say?" or "According to Clause X.X..." — test understanding and application, not clause memorisation. CRITICAL: Never mention any clause number in the question text. Clause numbers belong only in the explanation field.` },
+            { role: "user", content: `Generate ${count} ${diff}-difficulty multiple-choice questions from this standard content. ${topicFilter}\n\nStandard: ${standard?.standard_code || standard?.title}\n\nContent:\n${allChunks.map((c) => `[${c.clause_number || ""}] ${c.content}`).join("\n\n")}` },
           ],
           tools: [{
             type: "function",
@@ -202,7 +254,7 @@ serve(async (req) => {
             },
           }],
           tool_choice: { type: "function", function: { name: "return_questions" } },
-      }, OPENAI_API_KEY);
+      }, OPENAI_API_KEY, { temperature: 0.1, max_tokens: 3000 });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
 
@@ -227,6 +279,12 @@ serve(async (req) => {
     // ── ANALYZE PHOTO OF HANDWRITTEN WORK ──
     if (action === "analyze_photo") {
       if (!imageBase64) throw new Error("No image provided");
+
+      if (imageBase64.length > 1_000_000) {
+        return new Response(JSON.stringify({ error: "Image too large. Please use an image under 750KB." }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
 
       const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 20);
 
@@ -262,7 +320,7 @@ Rules:
               ],
             },
           ],
-      }, OPENAI_API_KEY);
+      }, OPENAI_API_KEY, { temperature: 0.1, max_tokens: 1500 });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
 
@@ -318,7 +376,7 @@ Rules:
               content: `Explain this standard clause in apprentice-friendly language:\n\n[${chunk.clause_number || ""}${chunk.clause_title ? " — " + chunk.clause_title : ""}]\n${chunk.content}`,
             },
           ],
-      }, OPENAI_API_KEY);
+      }, OPENAI_API_KEY, { temperature: 0.1, max_tokens: 1000 });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
 
@@ -349,9 +407,13 @@ Rules:
       const timeLimit = 30 * 60;
       const count = questionCount || 10;
 
-      let { data: questions } = await supabase
+      let questionQuery = supabase
         .from("capstone_questions").select("*")
-        .eq("user_id", user.id).eq("standard_id", standardId).limit(count);
+        .eq("user_id", user.id).eq("standard_id", standardId).limit(count * 3);
+      if (sectionFilter) {
+        questionQuery = questionQuery.or(`clause_reference.like.${sectionFilter}.%,clause_reference.like.Clause ${sectionFilter}.%,topic.ilike.Section ${sectionFilter}%`);
+      }
+      let { data: questions } = await questionQuery;
 
       if (!questions?.length) {
         return new Response(JSON.stringify({ error: "No questions available. Generate practice questions first." }), {
@@ -377,6 +439,16 @@ Rules:
         .eq("id", questionId).single();
       if (!question) throw new Error("Question not found");
 
+      // FIX 4 — verify the exam belongs to the current user
+      const { data: exam } = await supabase
+        .from("capstone_exams").select("user_id")
+        .eq("id", examId).single();
+      if (!exam || exam.user_id !== user.id) {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
       const isCorrect = userAnswer === question.correct_answer;
 
       await supabase.from("capstone_exam_answers").insert({
@@ -394,9 +466,10 @@ Rules:
       const correct = answers?.filter((a) => a.is_correct).length || 0;
       const total = answers?.length || 0;
 
+      // FIX 5 — ownership check + prevent double-completion
       await supabase.from("capstone_exams").update({
         status: "completed", correct_answers: correct, total_questions: total, completed_at: new Date().toISOString(),
-      }).eq("id", examId);
+      }).eq("id", examId).eq("user_id", user.id).eq("status", "in_progress");
 
       const percentage = total > 0 ? Math.round((correct / total) * 100) : 0;
       return new Response(JSON.stringify({ correct, total, percentage, passed: percentage >= 70 }), {
@@ -406,18 +479,30 @@ Rules:
 
     // ── GENERATE STUDY GUIDE ──
     if (action === "generate_study_guide") {
-      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 40, topic);
-      if (!chunks?.length) throw new Error("No content found");
+      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 40, topic, sectionFilter);
+      if (!chunks?.length) throw new Error("No content found for this section");
+
+      // Include described figure diagrams so study guide can reference them
+      const figureChunks = await fetchDescribedFigures(supabase, standardId, 8, sectionFilter);
+      const allChunks = [...chunks, ...figureChunks];
 
       const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
+
+      const sectionLabel = sectionFilter ? ` — Section ${sectionFilter}` : "";
+      const focusNote = sectionFilter
+        ? `Focus ONLY on Section ${sectionFilter} content provided below.`
+        : topic ? `Focus on: ${topic}` : "";
+      const figureNote = figureChunks.length > 0
+        ? " Where relevant, reference the figures by number (e.g. 'Refer to Figure 8.1') and summarise what they show."
+        : "";
 
       const aiResponse = await callAI({
           model: "gpt-4o-mini",
           messages: [
-            { role: "system", content: "You are an expert trade educator. Create concise, apprentice-friendly study guides from standard content. Use clear headings, bullet points, and highlight key clause numbers. Only use information from the provided content." },
-            { role: "user", content: `Create a comprehensive study guide for apprentices from this standard.${topic ? ` Focus on: ${topic}` : ""}\n\nStandard: ${standard?.standard_code || standard?.title}\n\nContent:\n${chunks.map((c) => `[${c.clause_number || ""}${c.clause_title ? " - " + c.clause_title : ""}] ${c.content}`).join("\n\n")}` },
+            { role: "system", content: `You are an expert trade educator. Create concise, apprentice-friendly study guides from standard content. Use clear headings, bullet points, and highlight key clause numbers. Only use information from the provided content.${figureNote}` },
+            { role: "user", content: `Create a comprehensive study guide for apprentices from this standard. ${focusNote}\n\nStandard: ${standard?.standard_code || standard?.title}${sectionLabel}\n\nContent:\n${allChunks.map((c) => `[${c.clause_number || ""}${c.clause_title ? " - " + c.clause_title : ""}] ${c.content}`).join("\n\n")}` },
           ],
-      }, OPENAI_API_KEY);
+      }, OPENAI_API_KEY, { temperature: 0.1, max_tokens: 3000 });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
 
@@ -425,10 +510,14 @@ Rules:
       const content = aiData.choices?.[0]?.message?.content;
       if (!content) throw new Error("No guide generated");
 
+      const guideTitle = sectionFilter
+        ? `${standard?.standard_code || standard?.title} — Section ${sectionFilter}`
+        : `${standard?.standard_code || standard?.title} — Study Guide`;
+
       const { data: guide, error: guideErr } = await supabase.from("capstone_study_guides").insert({
         user_id: user.id, standard_id: standardId,
-        title: `${standard?.standard_code || standard?.title} — Study Guide`,
-        content, topics: topic ? [topic] : [],
+        title: guideTitle,
+        content, topics: topic ? [topic] : sectionFilter ? [`Section ${sectionFilter}`] : [],
       }).select().single();
       if (guideErr) throw guideErr;
 
@@ -438,6 +527,16 @@ Rules:
 
     // ── EXAM PREP: Generate from uploaded exam or listed topics ──
     if (action === "exam_prep") {
+      // FIX 3 — require meaningful grounding input
+      const hasStandard = !!standardId;
+      const hasTopics = examTopics && examTopics.trim().length > 0;
+      const hasPdfText = examPdfText && examPdfText.trim().length >= 100;
+      if (!hasStandard && !hasTopics && !hasPdfText) {
+        return new Response(JSON.stringify({
+          error: "Please select a standard or provide exam topics before generating prep materials.",
+        }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
       let contextParts: string[] = [];
 
       if (examPdfText && examPdfText.trim().length > 0) {
@@ -448,14 +547,17 @@ Rules:
         contextParts.push(`EXAM TOPICS/AREAS IDENTIFIED BY THE STUDENT:\n${examTopics}`);
       }
 
-      if (!contextParts.length) throw new Error("Please provide exam content or topics");
+      if (!contextParts.length && !standardId) throw new Error("Please provide exam content or topics");
 
       let standardContext = "";
       let standardTitle = "General Trade Knowledge";
       if (standardId) {
         const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 40);
         if (chunks.length > 0) {
-          standardContext = `\n\nRELEVANT STANDARD CONTENT:\n${chunks.map((c) => `[${c.clause_number || ""}${c.clause_title ? " - " + c.clause_title : ""}] ${c.content}`).join("\n\n")}`;
+          // FIX 7 — cap standard context to prevent prompt overflow
+          const rawContext = chunks.map((c) => `[${c.clause_number || ""}${c.clause_title ? " - " + c.clause_title : ""}] ${c.content}`).join("\n\n");
+          const cappedContext = rawContext.slice(0, 10000);
+          standardContext = `\n\nRELEVANT STANDARD CONTENT:\n${cappedContext}`;
         }
         const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
         if (standard) standardTitle = standard.standard_code || standard.title;
@@ -518,7 +620,7 @@ Rules:
             },
           }],
           tool_choice: { type: "function", function: { name: "return_exam_prep" } },
-      }, OPENAI_API_KEY);
+      }, OPENAI_API_KEY, { temperature: 0.1, max_tokens: 4000 });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
 
@@ -543,6 +645,270 @@ Rules:
       return new Response(JSON.stringify({ topics: result.identified_topics, guide, questions: savedQuestions }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // ── GENERATE CALCULATION QUESTION (Section C style) ──
+    if (action === "generate_calculation") {
+      const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
+
+      // Fetch demand/installation chunks from primary standard (AS/NZS 3000)
+      const primaryChunks = await getChunksWithRecovery(supabase, standardId, authHeader, 25, "maximum demand voltage drop cable", sectionFilter);
+
+      // Auto-detect AS/NZS 3008 in user's library
+      const { data: as3008 } = await supabase
+        .from("standards")
+        .select("id")
+        .or("standard_code.ilike.%3008%,title.ilike.%3008%")
+        .limit(1)
+        .single();
+
+      let cableChunks: StandardChunk[] = [];
+      if (as3008?.id) {
+        cableChunks = await fetchStandardChunks(supabase, as3008.id, 25);
+      }
+
+      const fallbackCableData = `Standard cable data (AS/NZS 3008, TPS clipped single circuit at 40°C):
+2.5mm²: mV/A.m=14.7, Iz=20A | 4mm²: 9.22, 27A | 6mm²: 6.19, 34A | 10mm²: 3.84, 46A
+16mm²: 2.40, 61A | 25mm²: 1.54, 80A | 35mm²: 1.11, 96A | 50mm²: 0.786, 117A
+70mm²: 0.571, 143A | 95mm²: 0.422, 174A | 120mm²: 0.336, 200A
+Voltage drop limit: 5% of supply voltage (AS/NZS 3000 Clause 3.6)`;
+
+      const context = [
+        primaryChunks.length > 0 ? `AS/NZS 3000 CONTENT:\n${primaryChunks.map((c) => `[${c.clause_number || ""}] ${c.content}`).join("\n\n")}` : "",
+        cableChunks.length > 0 ? `AS/NZS 3008 CABLE DATA:\n${cableChunks.map((c) => `[${c.clause_number || ""}] ${c.content}`).join("\n\n")}` : fallbackCableData,
+      ].filter(Boolean).join("\n\n---\n\n");
+
+      const aiResponse = await callAI({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You generate Section C calculation questions for Australian TAFE electrical capstone exams. Create one realistic, practical calculation scenario.
+
+Key formulas:
+- Voltage drop: VD(V) = I × mV/A·m × L / 1000; VD% = (VD / V_supply) × 100
+- Single-phase V_supply = 230V; three-phase V_supply = 230V phase (use 400V only for line voltage)
+- Maximum demand: total load groups × demand factors from AS/NZS 3000
+- Cable sizing: Iz (derated) ≥ load current, In ≤ Iz
+- Fault loop: Zs = Ze + (R1+R2); If = Vc / Zs
+
+Question types (pick one):
+1. voltage_drop — given cable, current, length → calculate VD% and state compliance
+2. maximum_demand — given load schedule → calculate maximum demand per phase
+3. cable_sizing — given load, installation conditions → select minimum cable size
+4. fault_current — given supply impedance, cable data → calculate fault level
+
+Use realistic Australian values. Show clear step-by-step working in the model solution.`,
+          },
+          {
+            role: "user",
+            content: `Generate one Section C calculation question. Use this standard content where possible:\n\n${context}`,
+          },
+        ],
+        tools: [{
+          type: "function",
+          function: {
+            name: "return_calculation",
+            description: "Return a calculation question",
+            parameters: {
+              type: "object",
+              properties: {
+                calculation_type: { type: "string", enum: ["voltage_drop", "maximum_demand", "cable_sizing", "fault_current"] },
+                scenario: { type: "string" },
+                given_data: { type: "array", items: { type: "string" } },
+                question_parts: { type: "array", items: { type: "string" } },
+                model_solution: { type: "string", description: "Full step-by-step worked solution" },
+                total_marks: { type: "number" },
+                key_answers: { type: "array", items: { type: "string" }, description: "Final answers for each part" },
+              },
+              required: ["calculation_type", "scenario", "given_data", "question_parts", "model_solution", "total_marks", "key_answers"],
+              additionalProperties: false,
+            },
+          },
+        }],
+        tool_choice: { type: "function", function: { name: "return_calculation" } },
+      }, OPENAI_API_KEY, { temperature: 0.1, max_tokens: 2000 });
+
+      if (!aiResponse.ok) return await aiError(aiResponse);
+      const aiData = await aiResponse.json();
+      const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
+      if (!toolCall) throw new Error("No calculation generated");
+
+      try { await supabase.from("capstone_usage").insert({ user_id: user.id }); } catch (_) {}
+      return new Response(JSON.stringify({ question: JSON.parse(toolCall.function.arguments) }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ── GRADE CALCULATION ──
+    if (action === "grade_calculation") {
+      if (!questionText || !modelAnswer) throw new Error("Missing grading data");
+
+      const aiResponse = await callAI({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You are marking a Section C calculation from an Australian electrical capstone exam.
+Award method marks if the correct formula and approach is used, even with minor arithmetic errors.
+Award answer marks only for the correct final value(s).
+Give specific, helpful feedback.`,
+          },
+          {
+            role: "user",
+            content: `Scenario + question:\n${questionText}\n\nModel solution:\n${modelAnswer}\n\nTotal marks: ${correctClause || "4"}\n\nStudent's working:\n${userAnswer || "(nothing submitted)"}\n\nGrade this.`,
+          },
+        ],
+        tools: [{
+          type: "function",
+          function: {
+            name: "return_grade",
+            parameters: {
+              type: "object",
+              properties: {
+                marks_awarded: { type: "number" },
+                correct_method: { type: "boolean" },
+                correct_answer: { type: "boolean" },
+                feedback: { type: "string" },
+              },
+              required: ["marks_awarded", "correct_method", "correct_answer", "feedback"],
+              additionalProperties: false,
+            },
+          },
+        }],
+        tool_choice: { type: "function", function: { name: "return_grade" } },
+      }, OPENAI_API_KEY, { temperature: 0.1, max_tokens: 1000 });
+
+      if (!aiResponse.ok) return await aiError(aiResponse);
+      const aiData = await aiResponse.json();
+      const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
+      if (!toolCall) throw new Error("Grading failed");
+      return new Response(JSON.stringify(JSON.parse(toolCall.function.arguments)), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ── GENERATE SHORT ANSWER QUESTIONS (Section B style) ──
+    if (action === "generate_short_answer") {
+      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 40, topic, sectionFilter);
+      if (!chunks?.length) throw new Error("No content found for this standard");
+
+      const figureChunks = await fetchDescribedFigures(supabase, standardId, 5, sectionFilter);
+      const allChunks = [...chunks, ...figureChunks];
+
+      const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
+      const count = questionCount || 5;
+
+      const aiResponse = await callAI({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You are an exam question generator for electrical apprentices studying ${standard?.standard_code || standard?.title}. Generate Section B style short-answer questions exactly like a TAFE capstone exam.
+Each question MUST:
+- Be answerable in 1–3 sentences from the standard content provided
+- Have a specific, verifiable correct answer
+- Be worth 2 marks (correct answer + correct clause reference)
+Good examples: "What are the three major risks identified in AS/NZS 3000?", "What is the function of the MEN link?", "What are the minimum requirements for aluminium earthing conductors?"
+Do NOT generate calculation questions, diagram questions, or questions that cannot be answered from the text.
+CRITICAL: Never mention any clause number in the question text itself. Clause numbers belong only in the clause_reference field, not the question.`,
+          },
+          {
+            role: "user",
+            content: `Generate ${count} short-answer exam questions from this standard content.${sectionFilter ? ` Focus on Section ${sectionFilter}.` : ""}\n\nStandard: ${standard?.standard_code || standard?.title}\n\nContent:\n${allChunks.map((c) => `[${c.clause_number || ""}${c.clause_title ? " — " + c.clause_title : ""}] ${c.content}`).join("\n\n")}`,
+          },
+        ],
+        tools: [{
+          type: "function",
+          function: {
+            name: "return_questions",
+            description: "Return short answer questions",
+            parameters: {
+              type: "object",
+              properties: {
+                questions: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      question: { type: "string" },
+                      model_answer: { type: "string", description: "Correct answer in 1–3 sentences" },
+                      clause_reference: { type: "string", description: "Specific clause number e.g. '5.3.2.1'" },
+                    },
+                    required: ["question", "model_answer", "clause_reference"],
+                  },
+                },
+              },
+              required: ["questions"],
+              additionalProperties: false,
+            },
+          },
+        }],
+        tool_choice: { type: "function", function: { name: "return_questions" } },
+      }, OPENAI_API_KEY, { temperature: 0.1, max_tokens: 3000 });
+
+      if (!aiResponse.ok) return await aiError(aiResponse);
+
+      const aiData = await aiResponse.json();
+      const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
+      if (!toolCall) throw new Error("No questions generated");
+      const { questions } = JSON.parse(toolCall.function.arguments);
+
+      try { await supabase.from("capstone_usage").insert({ user_id: user.id }); } catch (_) {}
+      return new Response(JSON.stringify({ questions: questions.map((q: any) => ({ ...q, marks: 2 })) }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ── GRADE SHORT ANSWER ──
+    if (action === "grade_short_answer") {
+      if (!questionText || !modelAnswer || !correctClause) throw new Error("Missing grading data");
+
+      const aiResponse = await callAI({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You are marking a TAFE electrical capstone exam (Section B). Marking rules:
+- Award 2 marks: answer is substantially correct AND clause reference matches the correct clause
+- Award 1 mark: answer is correct but clause reference is wrong or missing
+- Award 0 marks: answer is wrong or insufficient
+Be strict but fair. Accept minor wording differences if the meaning is correct. Always give specific feedback on what was right or wrong.`,
+          },
+          {
+            role: "user",
+            content: `Question: ${questionText}\n\nModel answer: ${modelAnswer}\nCorrect clause: ${correctClause}\n\nStudent's answer: ${userAnswer || "(no answer provided)"}\nStudent's clause reference: ${userClauseRef || "(none provided)"}\n\nGrade this response.`,
+          },
+        ],
+        tools: [{
+          type: "function",
+          function: {
+            name: "return_grade",
+            description: "Return the grade and feedback",
+            parameters: {
+              type: "object",
+              properties: {
+                marks_awarded: { type: "number", description: "0, 1, or 2" },
+                answer_correct: { type: "boolean" },
+                clause_correct: { type: "boolean" },
+                feedback: { type: "string", description: "Brief feedback (1–2 sentences) on what was right/wrong" },
+              },
+              required: ["marks_awarded", "answer_correct", "clause_correct", "feedback"],
+              additionalProperties: false,
+            },
+          },
+        }],
+        tool_choice: { type: "function", function: { name: "return_grade" } },
+      }, OPENAI_API_KEY, { temperature: 0.1, max_tokens: 1000 });
+
+      if (!aiResponse.ok) return await aiError(aiResponse);
+
+      const aiData = await aiResponse.json();
+      const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
+      if (!toolCall) throw new Error("Grading failed");
+      const result = JSON.parse(toolCall.function.arguments);
+
+      return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     throw new Error(`Unknown action: ${action}`);

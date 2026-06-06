@@ -1,12 +1,16 @@
-const ALLOWED_ORIGINS = (Deno.env.get("ALLOWED_ORIGIN") || "http://localhost:8080")
-  .split(",").map((o: string) => o.trim());
+const PRODUCTION_ORIGINS = [
+  "https://standaid-9mas.vercel.app",
+  "https://standaid.com.au",
+];
+
+const ENV_ORIGINS = (Deno.env.get("ALLOWED_ORIGIN") || "")
+  .split(",").map((o: string) => o.trim()).filter(Boolean);
+
+const ALLOWED_ORIGINS = [...new Set([...PRODUCTION_ORIGINS, ...ENV_ORIGINS])];
 
 export function getAllowedOrigin(origin: string): string {
   if (ALLOWED_ORIGINS.includes(origin)) return origin;
-  if (
-    origin.endsWith(".lovable.app") ||
-    origin.endsWith(".lovableproject.com") ||
-    origin.startsWith("http://localhost")
-  ) return origin;
+  // Allow any localhost port for local development
+  if (/^http:\/\/localhost(:\d+)?$/.test(origin)) return origin;
   return ALLOWED_ORIGINS[0];
 }

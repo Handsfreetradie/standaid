@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Mic, ThumbsUp, ThumbsDown, HelpCircle, Check } from "lucide-react";
+import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Mic, ThumbsUp, ThumbsDown, HelpCircle, Check, FileText } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import VoiceMode from "@/components/VoiceMode";
 import { PDFViewerModal } from "@/components/PDFViewerModal";
@@ -26,6 +26,7 @@ interface ImageRef {
   table_number?: string;
   caption?: string;
   standard_code?: string;
+  standard_id?: string;
   page_number?: number;
   image_url?: string;
 }
@@ -151,13 +152,13 @@ const Chat = () => {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
-  const [pdfViewer, setPdfViewer] = useState<{ clauseNumber: string; standardCode: string } | null>(null);
+  const [pdfViewer, setPdfViewer] = useState<{ clauseNumber: string; standardCode?: string; standardId?: string; pageNumber?: number } | null>(null);
   const { session } = useAuth();
   const { data: profile } = useProfile();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const queriesRemaining = profile
-    ? 5 - (profile.daily_query_count || 0)
+    ? Math.max(0, 5 - (profile.daily_query_count || 0))
     : 5;
 
   const scrollToBottom = useCallback(() => {
@@ -249,8 +250,8 @@ const Chat = () => {
                   content: finalAnswer,
                   isTyping: false,
                   citations: event.citations || [],
-                  figures_referenced: (event.figures_referenced || []).filter((f: ImageRef) => f.image_url),
-                  tables_referenced: (event.tables_referenced || []).filter((t: ImageRef) => t.image_url),
+                  figures_referenced: (event.figures_referenced || []).filter((f: ImageRef) => f.image_url || (f.standard_id && f.page_number)),
+                  tables_referenced: (event.tables_referenced || []).filter((t: ImageRef) => t.image_url || (t.standard_id && t.page_number)),
                   safety_critical: event.safety_critical || false,
                   safety_message: event.safety_message,
                   confidence: event.confidence,
@@ -437,45 +438,69 @@ const Chat = () => {
                     </div>
                   )}
 
-                  {/* Figure images */}
+                  {/* Figures */}
                   {!msg.isTyping && msg.figures_referenced && msg.figures_referenced.length > 0 && (
-                    <div className="mt-3 space-y-3">
-                      {msg.figures_referenced.map((fig, idx) => (
-                        <div key={idx} className="rounded-lg overflow-hidden border border-border">
-                          <img
-                            src={fig.image_url}
-                            alt={fig.caption || `Figure ${fig.figure_number}`}
-                            className="w-full h-auto"
-                            loading="lazy"
-                          />
-                          {(fig.caption || fig.figure_number) && (
-                            <p className="text-[10px] text-muted-foreground px-3 py-1.5 bg-muted/30">
-                              Figure {fig.figure_number}{fig.caption ? ` — ${fig.caption}` : ""}{fig.standard_code ? ` (${fig.standard_code})` : ""}
-                            </p>
-                          )}
-                        </div>
-                      ))}
+                    <div className="mt-3 space-y-2">
+                      {msg.figures_referenced.map((fig, idx) =>
+                        fig.image_url ? (
+                          <div key={idx} className="rounded-lg overflow-hidden border border-border">
+                            <img
+                              src={fig.image_url}
+                              alt={fig.caption || `Figure ${fig.figure_number}`}
+                              className="w-full h-auto"
+                              loading="lazy"
+                            />
+                            {(fig.caption || fig.figure_number) && (
+                              <p className="text-[10px] text-muted-foreground px-3 py-1.5 bg-muted/30">
+                                Figure {fig.figure_number}{fig.caption ? ` — ${fig.caption}` : ""}
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <button
+                            key={idx}
+                            onClick={() => setPdfViewer({ clauseNumber: `Figure ${fig.figure_number}`, standardId: fig.standard_id, pageNumber: fig.page_number })}
+                            className="flex items-center gap-2 w-full text-left rounded-lg border border-border px-3 py-2.5 text-xs text-primary hover:bg-primary/5 active:scale-[0.99] transition-all"
+                          >
+                            <FileText className="h-4 w-4 flex-shrink-0" />
+                            <span className="flex-1 font-medium">Open Figure {fig.figure_number}{fig.caption ? ` — ${fig.caption}` : ""}</span>
+                            <span className="text-muted-foreground text-[10px]">p.{fig.page_number}</span>
+                          </button>
+                        )
+                      )}
                     </div>
                   )}
 
-                  {/* Table images */}
+                  {/* Tables */}
                   {!msg.isTyping && msg.tables_referenced && msg.tables_referenced.length > 0 && (
-                    <div className="mt-3 space-y-3">
-                      {msg.tables_referenced.map((tbl, idx) => (
-                        <div key={idx} className="rounded-lg overflow-hidden border border-border">
-                          <img
-                            src={tbl.image_url}
-                            alt={tbl.caption || `Table ${tbl.table_number}`}
-                            className="w-full h-auto"
-                            loading="lazy"
-                          />
-                          {(tbl.caption || tbl.table_number) && (
-                            <p className="text-[10px] text-muted-foreground px-3 py-1.5 bg-muted/30">
-                              Table {tbl.table_number}{tbl.caption ? ` — ${tbl.caption}` : ""}{tbl.standard_code ? ` (${tbl.standard_code})` : ""}
-                            </p>
-                          )}
-                        </div>
-                      ))}
+                    <div className="mt-3 space-y-2">
+                      {msg.tables_referenced.map((tbl, idx) =>
+                        tbl.image_url ? (
+                          <div key={idx} className="rounded-lg overflow-hidden border border-border">
+                            <img
+                              src={tbl.image_url}
+                              alt={tbl.caption || `Table ${tbl.table_number}`}
+                              className="w-full h-auto"
+                              loading="lazy"
+                            />
+                            {(tbl.caption || tbl.table_number) && (
+                              <p className="text-[10px] text-muted-foreground px-3 py-1.5 bg-muted/30">
+                                Table {tbl.table_number}{tbl.caption ? ` — ${tbl.caption}` : ""}
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <button
+                            key={idx}
+                            onClick={() => setPdfViewer({ clauseNumber: `Table ${tbl.table_number}`, standardId: tbl.standard_id, pageNumber: tbl.page_number })}
+                            className="flex items-center gap-2 w-full text-left rounded-lg border border-border px-3 py-2.5 text-xs text-primary hover:bg-primary/5 active:scale-[0.99] transition-all"
+                          >
+                            <FileText className="h-4 w-4 flex-shrink-0" />
+                            <span className="flex-1 font-medium">Open Table {tbl.table_number}{tbl.caption ? ` — ${tbl.caption}` : ""}</span>
+                            <span className="text-muted-foreground text-[10px]">p.{tbl.page_number}</span>
+                          </button>
+                        )
+                      )}
                     </div>
                   )}
 
@@ -560,6 +585,7 @@ const Chat = () => {
             size="icon"
             variant="ghost"
             className="h-10 w-10 flex-shrink-0 text-muted-foreground"
+            onClick={() => toast.info("Photo analysis — coming soon!")}
           >
             <Camera className="h-5 w-5" />
           </Button>
@@ -609,6 +635,8 @@ const Chat = () => {
           onClose={() => setPdfViewer(null)}
           clauseNumber={pdfViewer.clauseNumber}
           standardCode={pdfViewer.standardCode}
+          standardId={pdfViewer.standardId}
+          pageNumber={pdfViewer.pageNumber}
         />
       )}
     </div>

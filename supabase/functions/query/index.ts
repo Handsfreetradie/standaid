@@ -205,28 +205,56 @@ serve(async (req) => {
           return `[Source ${i + 1} — ${std?.standard_code || "Unknown"} ${std?.version || ""} Clause ${chunk.clause_number || "N/A"} (Page ${chunk.page_number || "N/A"})]
 ${chunk.content}`;
         }).join("\n\n")
-      : "No uploaded standard extracts matched this query. You MUST answer from your expert training knowledge of Australian Standards. Give the actual requirement, value, or rule — do NOT say the question is not covered or deflect to checking the standard. Prefix your answer with: \"General knowledge (verify against your standard) —\" and then answer fully in plain English.";
+      : null;
+
+    // No-chunks fallback — refuse to fabricate, tell user to check their uploads
+    if (contextChunks === null) {
+      const noChunksPayload = {
+        done: true,
+        answer: "I couldn't find relevant content in your uploaded standards for this query. Please check that the relevant standard has been uploaded and fully processed, or try rephrasing your question.",
+        answer_found: false,
+        citations: [],
+        figures_referenced: [],
+        tables_referenced: [],
+        safety_critical: false,
+        confidence: "low",
+        low_confidence: true,
+        queries_remaining: tier === "free" ? 5 - todayCount : null,
+      };
+      return new Response(
+        `data: ${JSON.stringify(noChunksPayload)}\n\n`,
+        { headers: { ...corsHeaders, "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } }
+      );
+    }
 
     const systemPrompt = buildSystemPrompt(trade, contextChunks, matchedPhrases);
     const queryId = crypto.randomUUID();
     const isLowConfidence = topSimilarity < 0.80;
 
-    // Call OpenAI with streaming
-    const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        temperature: 0.1,
-        max_tokens: 2000,
-        stream: true,
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...history,
-          { role: "user", content: question },
-        ],
-      }),
-    });
+    // Call OpenAI with streaming (30-second timeout)
+    const aiController = new AbortController();
+    const aiTimeout = setTimeout(() => aiController.abort(), 30000);
+    let aiResponse: Response;
+    try {
+      aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          temperature: 0.1,
+          max_tokens: 2000,
+          stream: true,
+          messages: [
+            { role: "system", content: systemPrompt },
+            ...history,
+            { role: "user", content: question },
+          ],
+        }),
+        signal: aiController.signal,
+      });
+    } finally {
+      clearTimeout(aiTimeout);
+    }
 
     if (!aiResponse.ok) {
       const errBody = await aiResponse.json().catch(() => null);
@@ -384,22 +412,39 @@ ${chunk.content}`;
         if (figNums.length > 0 || tblNums.length > 0) {
           const [figRows, tblRows] = await Promise.all([
             figNums.length > 0
-              ? supabase.from("standard_figures").select("figure_number, image_url, caption, page_number")
+              ? supabase.from("standard_figures").select("figure_number, image_url, caption, page_number, standard_id")
                   .eq("user_id", userId).in("figure_number", figNums)
               : Promise.resolve({ data: [] }),
             tblNums.length > 0
-              ? supabase.from("standard_tables").select("table_number, image_url, caption, page_number")
+              ? supabase.from("standard_tables").select("table_number, image_url, caption, page_number, standard_id")
                   .eq("user_id", userId).in("table_number", tblNums)
               : Promise.resolve({ data: [] }),
           ]);
           const figMap = new Map((figRows.data || []).map((r: any) => [r.figure_number, r]));
           const tblMap = new Map((tblRows.data || []).map((r: any) => [r.table_number, r]));
-          parsedResponse.figures_referenced = aiFigures
-            .map((f: any) => { const row = figMap.get(f.figure_number); return row ? { ...f, image_url: row.image_url, caption: f.caption || row.caption, page_number: row.page_number } : f; })
-            .filter((f: any) => f.image_url);
-          parsedResponse.tables_referenced = aiTables
-            .map((t: any) => { const row = tblMap.get(t.table_number); return row ? { ...t, image_url: row.image_url, caption: t.caption || row.caption, page_number: row.page_number } : t; })
-            .filter((t: any) => t.image_url);
+
+          // For refs without an image, find the page from matched chunks so we can open the PDF
+          const findPageInChunks = (label: string, num: string) => {
+            const pat = new RegExp(`\\b${label}\\s+${num.replace(/\./g, "\\.")}\\b`, "i");
+            const hit = matchedChunks.find((c: any) =>
+              pat.test(c.content) || (c.clause_number || "").toUpperCase() === `${label.toUpperCase()} ${num}`
+            );
+            return hit ? { page_number: hit.page_number, standard_id: hit.standard_id } : null;
+          };
+
+          parsedResponse.figures_referenced = aiFigures.map((f: any) => {
+            const row = figMap.get(f.figure_number);
+            if (row?.image_url) return { ...f, image_url: row.image_url, caption: f.caption || row.caption, page_number: row.page_number, standard_id: row.standard_id };
+            const pi = findPageInChunks("Figure", f.figure_number);
+            return pi ? { ...f, page_number: pi.page_number, standard_id: pi.standard_id } : null;
+          }).filter(Boolean);
+
+          parsedResponse.tables_referenced = aiTables.map((t: any) => {
+            const row = tblMap.get(t.table_number);
+            if (row?.image_url) return { ...t, image_url: row.image_url, caption: t.caption || row.caption, page_number: row.page_number, standard_id: row.standard_id };
+            const pi = findPageInChunks("Table", t.table_number);
+            return pi ? { ...t, page_number: pi.page_number, standard_id: pi.standard_id } : null;
+          }).filter(Boolean);
         } else {
           parsedResponse.figures_referenced = [];
           parsedResponse.tables_referenced = [];
@@ -489,6 +534,22 @@ ${chunk.content}`;
               };
             });
             await supabase.from("citations").insert(citationRecords);
+          }
+
+          // Increment daily_query_count on profiles (best-effort, never crashes the response)
+          try {
+            const { data: profileRow } = await supabase
+              .from("profiles")
+              .select("daily_query_count")
+              .eq("user_id", userId)
+              .single();
+            const currentCount: number = profileRow?.daily_query_count ?? 0;
+            await supabase
+              .from("profiles")
+              .update({ daily_query_count: currentCount + 1 })
+              .eq("user_id", userId);
+          } catch (countErr) {
+            console.error("[query] Failed to increment daily_query_count:", countErr);
           }
         })().catch(console.error);
 

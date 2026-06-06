@@ -8,7 +8,6 @@ interface FeedbackRequestBody {
   queryId: string;
   rating: FeedbackRating;
   userComment?: string;
-  userId?: string;
 }
 
 serve(async (req: Request) => {
@@ -23,10 +22,12 @@ serve(async (req: Request) => {
   if (req.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405, corsHeaders);
 
   try {
-    const body = (await req.json()) as FeedbackRequestBody;
-
-    const validationError = validateFeedbackBody(body);
-    if (validationError) return jsonResponse({ error: validationError }, 400, corsHeaders);
+    // --- Auth check ---
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return jsonResponse({ error: "Unauthorized" }, 401, corsHeaders);
+    }
+    const token = authHeader.replace("Bearer ", "");
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -37,13 +38,25 @@ serve(async (req: Request) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !user) {
+      return jsonResponse({ error: "Unauthorized" }, 401, corsHeaders);
+    }
+    const userId = user.id;
+    // --- End auth check ---
+
+    const body = (await req.json()) as FeedbackRequestBody;
+
+    const validationError = validateFeedbackBody(body);
+    if (validationError) return jsonResponse({ error: validationError }, 400, corsHeaders);
+
     const { data, error } = await supabase
       .from("query_feedback")
       .insert({
         query_id: body.queryId,
         rating: body.rating,
         user_comment: body.userComment ?? null,
-        user_id: body.userId ?? null,
+        user_id: userId,
         created_at: new Date().toISOString(),
       })
       .select("id")
