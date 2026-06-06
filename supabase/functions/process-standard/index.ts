@@ -32,6 +32,34 @@ const SCANNED_PAGE_THRESHOLD = 15;
 const SCANNED_DOC_RATIO = 0.85;
 const AI_EXTRACTION_SIZE_LIMIT = 10 * 1024 * 1024;
 
+// Detect encoding corruption common in SAI Global / licensed PDFs.
+// Symptoms: Ω glyph swallows adjacent digits → "0.5 Ω" becomes "0. "
+// and custom fonts drop characters like "AS" from "AS/NZS".
+function hasGoodTextQuality(text: string): boolean {
+  if (text.length < 300) return false;
+
+  const digits = (text.match(/\d/g) || []).length;
+  const letters = (text.match(/[a-zA-Z]/g) || []).length;
+  if (letters === 0) return false;
+
+  // Technical standards should have at least 3% digit density vs letters
+  if (digits / letters < 0.03) return false;
+
+  // Count truncated decimals: digit followed by period then whitespace/end-of-line
+  // e.g. "0. " or "3.\n" — these indicate a digit was swallowed by a glyph
+  const truncated = (text.match(/\d\.(?:\s|$)/gm) || []).length;
+  const normal = (text.match(/\d\.\d/g) || []).length;
+  const totalDecimals = truncated + normal;
+
+  // If >25% of decimal-point sequences look truncated, the extraction is corrupted
+  if (totalDecimals > 4 && truncated / totalDecimals > 0.25) {
+    console.log(`Text quality check FAILED: ${truncated}/${totalDecimals} decimal sequences appear truncated`);
+    return false;
+  }
+
+  return true;
+}
+
 // Mark jobs as failed if processing exceeds this — must be under Supabase's 150s limit.
 const PROCESSING_TIMEOUT_MS = 110_000;
 
@@ -134,7 +162,7 @@ Transcribe completely and accurately. Do not summarise or skip any technical con
             ],
           },
         ],
-        max_tokens: 16000,
+        max_tokens: 32000,
       }),
     });
 
@@ -202,41 +230,30 @@ async function extractTextFromPdf(
     console.log(`Pages: ${totalPages} total, ${contentPages.length} with content, ${scannedPages.length} scanned (ratio: ${scannedRatio.toFixed(2)})`);
 
     if (scannedRatio <= SCANNED_DOC_RATIO) {
-      // Mostly digital PDF — use unpdf output directly
+      // Mostly digital PDF — check text quality before accepting unpdf output
       const pages = pageTexts.map((t, i) => (t.trim().length > 0 ? t : ""));
       const fullText = pages
         .map((t, i) => (t.trim().length > 0 ? `\n[PAGE ${i + 1}]\n${t}` : ""))
         .join("")
         .trim();
 
-      console.log(`unpdf result accepted: ${fullText.length} chars, ${contentPages.length}/${totalPages} pages with content`);
-      return {
-        text: fullText,
-        pages,
-        totalPages,
-        pagesWithContent: contentPages.length,
-      };
-    }
+      if (hasGoodTextQuality(fullText)) {
+        console.log(`unpdf result accepted: ${fullText.length} chars, ${contentPages.length}/${totalPages} pages with content`);
+        return {
+          text: fullText,
+          pages,
+          totalPages,
+          pagesWithContent: contentPages.length,
+        };
+      }
 
-    console.log(`Scanned document (${Math.round(scannedRatio * 100)}% pages below threshold), falling back to AI OCR`);
-  }
-
-  // If unpdf gave us something useful, prefer it over Gemini to avoid quota issues
-  if (!unpdfFailed && pageTexts.length > 0) {
-    const fallbackText = pageTexts.join("\n\n").trim();
-    if (fallbackText.length > 50) {
-      console.log(`Using unpdf output (${fallbackText.length} chars) — skipping AI OCR`);
-      const pagesWithContent = pageTexts.filter(p => p.trim().length >= SCANNED_PAGE_THRESHOLD).length;
-      return {
-        text: fallbackText,
-        pages: pageTexts,
-        totalPages,
-        pagesWithContent,
-      };
+      console.log(`unpdf text quality check failed (likely SAI Global font encoding issue) — falling back to AI OCR`);
+    } else {
+      console.log(`Scanned document (${Math.round(scannedRatio * 100)}% pages below threshold), falling back to AI OCR`);
     }
   }
 
-  // Only try Gemini AI OCR if unpdf returned nothing at all (truly unreadable PDF)
+  // Only try AI OCR if unpdf failed or produced corrupted text
   if (fileBytes.length > AI_EXTRACTION_SIZE_LIMIT) {
     throw new Error("PDF too large for AI extraction and text extraction failed.");
   }
