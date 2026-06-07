@@ -498,84 +498,82 @@ function extractTableChunks(text: string, standardCode: string, version: string)
 
 function extractFigureChunks(text: string, standardCode: string, version: string): Chunk[] {
   const chunks: Chunk[] = [];
-  const lines = text.split("\n");
   const seenFigures = new Set<string>();
+  const label = `[${standardCode}${version ? ` ${version}` : ""}]`;
+  const lines = text.split("\n");
 
-  // Matches both:
-  //   "Figure 3.1 — Caption" (AI OCR format, same line)
-  //   "FIGURE 3.1" followed by caption on next line (some PDF layouts)
-  // Also handles markdown bold: "**Figure 3.1 — Caption**"
-  const figurePattern = /(?:\*{1,2})?FIGURE\s+(\d+(?:\.\d+)*)(?:\s*[—\-–:]\s*(.*?))?(?:\*{1,2})?$/i;
-
-  // Build a rough page map so we can assign page numbers
-  const pageOffsets: number[] = [];
-  let offset = 0;
-  for (const line of lines) {
-    pageOffsets.push(offset);
-    offset += line.length + 1;
-  }
-
-  // Track character positions to infer page numbers from [PAGE N] markers in text
+  // Build page map from [PAGE N] markers
   const pageMarkerRegex = /\[PAGE\s+(\d+)\]/gi;
   const pageMap: { charPos: number; page: number }[] = [];
   let pm: RegExpExecArray | null;
   while ((pm = pageMarkerRegex.exec(text)) !== null) {
     pageMap.push({ charPos: pm.index, page: parseInt(pm[1], 10) });
   }
-
-  function getPageForLineIndex(lineIdx: number): number {
+  const pageOffsets: number[] = [];
+  let off = 0;
+  for (const line of lines) { pageOffsets.push(off); off += line.length + 1; }
+  function getPage(lineIdx: number): number {
     const charPos = pageOffsets[lineIdx] || 0;
     let page = 1;
-    for (const entry of pageMap) {
-      if (entry.charPos <= charPos) page = entry.page;
-      else break;
-    }
+    for (const entry of pageMap) { if (entry.charPos <= charPos) page = entry.page; else break; }
     return page;
   }
 
+  // ── Pass 1: Find figures with captions on their own line ──────────────────
+  // e.g. "Figure 3.1 — Resistance test of main earthing conductor"
+  // e.g. "**Figure 3.1 — Caption**" (AI OCR markdown)
+  const captionLinePattern = /^(?:\*{0,2})FIGURE\s+(\d+(?:\.\d+)*)\s*(?:[—\-–:]\s*([^*\n]+))?(?:\*{0,2})$/i;
+
   for (let i = 0; i < lines.length; i++) {
-    const match = lines[i].match(figurePattern);
+    const line = lines[i].replace(/\r$/, "").trim();
+    const match = line.match(captionLinePattern);
     if (!match) continue;
-
-    const figureNumber = match[1].trim();
-
-    // Skip duplicates (e.g. "see Figure 3.1" inline references)
-    if (seenFigures.has(figureNumber)) continue;
-
-    // If caption not on same line, check next non-empty line
-    let caption = (match[2] || "").replace(/^[\s—\-–:*]+|[\s*]+$/g, "").trim();
-    if (!caption && i + 1 < lines.length) {
-      const nextLine = lines[i + 1].trim();
-      // Accept next line as caption if it looks like a title (not a clause, not empty)
-      if (nextLine && !/^\d+\.\d/.test(nextLine) && nextLine.length < 120) {
-        caption = nextLine.replace(/^[—\-–:]+\s*/, "").trim();
+    const figNum = match[1].trim();
+    if (seenFigures.has(figNum)) continue;
+    let caption = (match[2] || "").trim();
+    // If no caption on this line, try the next non-empty line
+    if (!caption) {
+      for (let j = i + 1; j < Math.min(i + 3, lines.length); j++) {
+        const next = lines[j].replace(/\r$/, "").trim();
+        if (next && !/^\d+\.\d/.test(next) && next.length < 120) {
+          caption = next.replace(/^[—\-–:]+\s*/, "").trim();
+          break;
+        }
       }
     }
-
-    seenFigures.add(figureNumber);
-    const pageNum = getPageForLineIndex(i);
-
-    // Grab up to ~300 chars of surrounding text (context before + after)
-    let surrounding = "";
-    let charCount = 0;
-    for (let j = i + 1; j < lines.length && charCount < 300; j++) {
-      surrounding += lines[j] + "\n";
-      charCount += lines[j].length + 1;
-    }
-
-    const label = `[${standardCode}${version ? ` ${version}` : ""}]`;
-    const content =
-      `${label} Figure ${figureNumber}${caption ? ` — ${caption}` : ""}\n\n` +
-      `This figure appears in the standard. A full description will be generated shortly.\n` +
-      `Refer to Figure ${figureNumber} in the standard for the visual diagram.\n\n` +
-      `Related context: ${surrounding.trim()}`;
-
+    seenFigures.add(figNum);
+    const surrounding = lines.slice(i + 1, i + 6).map(l => l.trim()).filter(Boolean).join(" ");
     chunks.push({
-      clause_number: `FIGURE ${figureNumber}`,
+      clause_number: `FIGURE ${figNum}`,
       clause_title: caption || null,
-      content,
-      page_number: pageNum,
-      chunk_index: 0, // will be reassigned after merge
+      content: `${label} Figure ${figNum}${caption ? ` — ${caption}` : ""}\n\nThis figure appears on page ${getPage(i)} of the standard. A visual description will be generated shortly.\n\nContext: ${surrounding}`,
+      page_number: getPage(i),
+      chunk_index: 0,
+    });
+  }
+
+  // ── Pass 2: Find figures referenced anywhere in the text ─────────────────
+  // e.g. "(a) Figure 3.3 for testing..." or "see Figure 3.21"
+  // Creates placeholder chunks for figures not found with a caption in Pass 1.
+  const refPattern = /\bFIGURE\s+(\d+(?:\.\d+)*)\b/gi;
+  let refMatch: RegExpExecArray | null;
+  while ((refMatch = refPattern.exec(text)) !== null) {
+    const figNum = refMatch[1].trim();
+    if (seenFigures.has(figNum)) continue;
+    seenFigures.add(figNum);
+    // Find which line this reference is on for page number
+    const charPos = refMatch.index;
+    let lineIdx = 0;
+    for (let j = pageOffsets.length - 1; j >= 0; j--) {
+      if (pageOffsets[j] <= charPos) { lineIdx = j; break; }
+    }
+    const context = text.slice(Math.max(0, charPos - 100), charPos + 200).replace(/\s+/g, " ").trim();
+    chunks.push({
+      clause_number: `FIGURE ${figNum}`,
+      clause_title: null,
+      content: `${label} Figure ${figNum}\n\nThis figure is referenced in the standard. A visual description will be generated shortly.\n\nContext: ${context}`,
+      page_number: getPage(lineIdx),
+      chunk_index: 0,
     });
   }
 
@@ -748,6 +746,14 @@ serve(async (req) => {
     const isPartial = tier === "free";
 
     const DB_BATCH_SIZE = 100;
+
+    // Delete stale chunks from previous extractions before inserting fresh ones
+    const { error: deleteError } = await supabaseAdmin
+      .from("standard_chunks")
+      .delete()
+      .eq("standard_id", standard_id);
+    if (deleteError) console.error(`Failed to delete old chunks for ${standard_id}:`, deleteError);
+    else console.log(`[${standard_id}] Deleted old chunks`);
 
     // Insert all chunks as text-only — embeddings are generated by embed-chunks separately
     for (let i = 0; i < allChunks.length; i += DB_BATCH_SIZE) {
