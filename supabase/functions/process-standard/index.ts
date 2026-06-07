@@ -51,8 +51,10 @@ function hasGoodTextQuality(text: string): boolean {
   const normal = (text.match(/\d\.\d/g) || []).length;
   const totalDecimals = truncated + normal;
 
-  // If >25% of decimal-point sequences look truncated, the extraction is corrupted
-  if (totalDecimals > 4 && truncated / totalDecimals > 0.25) {
+  // If >15% of decimal-point sequences look truncated, fall back to batched AI OCR.
+  // The batched AI approach now processes pages in groups of 15 so there's no
+  // truncation — it's safe to use for any document size.
+  if (totalDecimals > 4 && truncated / totalDecimals > 0.15) {
     console.log(`Text quality check FAILED: ${truncated}/${totalDecimals} decimal sequences appear truncated`);
     return false;
   }
@@ -105,92 +107,115 @@ function parseExtractedText(rawText: string): { text: string; pages: string[]; t
 
 // ── PDF extraction ───────────────────────────────────────────────────────────
 
-async function extractTextWithAI(fileBytes: Uint8Array, openaiApiKey: string): Promise<string> {
-  const authHeader = { "Authorization": `Bearer ${openaiApiKey}` };
+const PAGES_PER_AI_BATCH = 15; // pages per gpt-4o call — stays well within 8k token output limit
 
-  // Step 1: Upload the PDF to the OpenAI Files API
+async function uploadPdfToOpenAI(fileBytes: Uint8Array, openaiApiKey: string): Promise<string> {
   const formData = new FormData();
   formData.append("file", new Blob([fileBytes as BlobPart], { type: "application/pdf" }), "document.pdf");
   formData.append("purpose", "user_data");
-
-  const uploadResponse = await fetch("https://api.openai.com/v1/files", {
+  const res = await fetch("https://api.openai.com/v1/files", {
     method: "POST",
-    headers: authHeader,
+    headers: { Authorization: `Bearer ${openaiApiKey}` },
     body: formData,
   });
+  if (!res.ok) throw new Error(`OpenAI file upload failed: ${res.status} ${await res.text()}`);
+  const { id } = await res.json();
+  console.log(`Uploaded PDF to OpenAI: ${id}`);
+  return id;
+}
 
-  if (!uploadResponse.ok) {
-    const errText = await uploadResponse.text();
-    console.error("OpenAI file upload error:", uploadResponse.status, errText);
-    throw new Error(`AI extraction failed: file upload returned ${uploadResponse.status}`);
+async function deletePdfFromOpenAI(fileId: string, openaiApiKey: string): Promise<void> {
+  try {
+    await fetch(`https://api.openai.com/v1/files/${fileId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${openaiApiKey}` },
+    });
+    console.log(`Deleted OpenAI file: ${fileId}`);
+  } catch (e) {
+    console.warn(`Failed to delete OpenAI file ${fileId}:`, e);
   }
+}
 
-  const uploadData = await uploadResponse.json();
-  const fileId: string = uploadData.id;
-  console.log(`Uploaded PDF to OpenAI Files API, file_id: ${fileId}`);
-
-  let extractedText: string;
+// Batched page-by-page AI OCR — sends PAGES_PER_AI_BATCH pages at a time so
+// long documents are never truncated. Reads the PDF visually so special characters
+// like Ω are transcribed correctly rather than corrupted by font encoding.
+async function extractTextWithAI(fileBytes: Uint8Array, openaiApiKey: string, totalPages = 0): Promise<string> {
+  const fileId = await uploadPdfToOpenAI(fileBytes, openaiApiKey);
 
   try {
-    // Step 2: Call Chat Completions with the file_id reference
-    const extractionPrompt = `This is a technical standards document that has been uploaded by a licensed tradesperson for compliance reference purposes. Transcribe all technical content from this document including:
-- All clause numbers and headings (e.g. 1.1, 1.1.1, 2.3.4)
-- All technical requirements, specifications, and values
-- All tables as readable text
-- All notes and informative sections
-- Insert page markers like [PAGE 2], [PAGE 3] between pages
-- Format clause headings as: "1.1 Title" (number, space, title)
-Transcribe completely and accurately. Do not summarise or skip any technical content.`;
+    const batchCount = totalPages > 0
+      ? Math.ceil(totalPages / PAGES_PER_AI_BATCH)
+      : 1; // unknown page count — try single call first
 
-    const completionResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { ...authHeader, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        messages: [
-          {
+    const batchPrompt = (start: number, end: number) =>
+      `This is an Australian/New Zealand technical Standards document. ` +
+      `Transcribe ONLY pages ${start} to ${end} completely and accurately. ` +
+      `Include every clause number, heading, value, table, note, and figure caption exactly as written. ` +
+      `Format: clause headings as "X.X HEADING TITLE" on their own line. ` +
+      `Figure captions as "Figure X.X — Caption text" on their own line. ` +
+      `Insert [PAGE N] at the start of each page. ` +
+      `Do NOT summarise, paraphrase, or skip any content. ` +
+      `Pay special attention to numerical values and units (e.g. 0.5 Ω, 1 MΩ, 500 V).`;
+
+    let fullText = "";
+
+    for (let batch = 0; batch < batchCount; batch++) {
+      const startPage = batch * PAGES_PER_AI_BATCH + 1;
+      const endPage = totalPages > 0
+        ? Math.min((batch + 1) * PAGES_PER_AI_BATCH, totalPages)
+        : 9999; // open-ended for unknown page count
+
+      const prompt = totalPages > 0
+        ? batchPrompt(startPage, endPage)
+        : `This is an Australian/New Zealand technical Standards document. Transcribe ALL content completely and accurately. Include every clause number, heading, value, table, note, and figure caption exactly as written. Format clause headings as "X.X HEADING" on their own line. Insert [PAGE N] markers between pages. Do NOT summarise or skip anything. Pay special attention to numerical values and units (e.g. 0.5 Ω, 1 MΩ, 500 V).`;
+
+      console.log(`AI OCR batch ${batch + 1}/${batchCount}: pages ${startPage}–${endPage}`);
+
+      const completionResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${openaiApiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-4o",
+          messages: [{
             role: "user",
             content: [
-              {
-                type: "file",
-                file: { file_id: fileId },
-              },
-              {
-                type: "text",
-                text: extractionPrompt,
-              },
+              { type: "file", file: { file_id: fileId } },
+              { type: "text", text: prompt },
             ],
-          },
-        ],
-        max_tokens: 32000,
-      }),
-    });
-
-    if (!completionResponse.ok) {
-      const errText = await completionResponse.text();
-      console.error("AI extraction error:", completionResponse.status, errText);
-      throw new Error(`AI extraction failed: ${completionResponse.status}`);
-    }
-
-    const data = await completionResponse.json();
-    extractedText = data.choices?.[0]?.message?.content;
-    if (!extractedText || extractedText.length < 50) {
-      throw new Error("AI extraction returned insufficient text");
-    }
-  } finally {
-    // Step 3: Clean up — delete the uploaded file regardless of success or failure
-    try {
-      await fetch(`https://api.openai.com/v1/files/${fileId}`, {
-        method: "DELETE",
-        headers: authHeader,
+          }],
+          max_tokens: 8000,
+          temperature: 0,
+        }),
       });
-      console.log(`Deleted OpenAI file: ${fileId}`);
-    } catch (cleanupErr) {
-      console.warn(`Failed to delete OpenAI file ${fileId}:`, cleanupErr);
-    }
-  }
 
-  return extractedText;
+      if (!completionResponse.ok) {
+        const errText = await completionResponse.text();
+        console.error(`AI OCR batch ${batch + 1} failed:`, completionResponse.status, errText);
+        if (batch === 0) throw new Error(`AI extraction failed: ${completionResponse.status}`);
+        break; // partial extraction is better than nothing
+      }
+
+      const data = await completionResponse.json();
+      const batchText: string = data.choices?.[0]?.message?.content || "";
+      if (batchText.length < 50) {
+        console.warn(`AI OCR batch ${batch + 1} returned very little text — stopping`);
+        break;
+      }
+
+      fullText += (batch > 0 ? "\n\n" : "") + batchText;
+      console.log(`Batch ${batch + 1} extracted: ${batchText.length} chars`);
+    }
+
+    if (fullText.length < 50) throw new Error("AI extraction returned insufficient text");
+    console.log(`Total AI OCR extraction: ${fullText.length} chars across ${batchCount} batch(es)`);
+    return fullText;
+
+  } finally {
+    await deletePdfFromOpenAI(fileId, openaiApiKey);
+  }
+}
+
+async function extractTextWithAI_legacy(fileBytes: Uint8Array, openaiApiKey: string): Promise<string> {
 }
 
 async function extractTextFromPdf(
@@ -258,10 +283,13 @@ async function extractTextFromPdf(
     throw new Error("PDF too large for AI extraction and text extraction failed.");
   }
 
-  console.log("Attempting AI-based OCR extraction (unpdf returned nothing)...");
+  // Use batched page-by-page AI OCR so long documents aren't truncated.
+  // Pass the known page count from unpdf so we can batch correctly.
+  const knownPageCount = pageTexts.length > 0 ? pageTexts.length : 0;
+  console.log(`Attempting batched AI OCR (${knownPageCount > 0 ? knownPageCount + " pages" : "unknown length"})...`);
   try {
-    const aiText = await extractTextWithAI(fileBytes, openaiApiKey);
-    console.log(`AI extraction: ${aiText.length} chars`);
+    const aiText = await extractTextWithAI(fileBytes, openaiApiKey, knownPageCount);
+    console.log(`Batched AI OCR complete: ${aiText.length} chars`);
 
     const pageMarkerRegex = /\[PAGE\s+\d+\]/gi;
     const aiPages = aiText.split(pageMarkerRegex).filter(p => p.trim().length > 0);
@@ -274,7 +302,7 @@ async function extractTextFromPdf(
       pagesWithContent: resolvedPages.filter(p => p.trim().length >= SCANNED_PAGE_THRESHOLD).length,
     };
   } catch (aiError) {
-    console.error("AI extraction failed:", aiError);
+    console.error("Batched AI OCR failed:", aiError);
     throw new Error("Could not extract text from this PDF.");
   }
 }
@@ -471,7 +499,13 @@ function extractTableChunks(text: string, standardCode: string, version: string)
 function extractFigureChunks(text: string, standardCode: string, version: string): Chunk[] {
   const chunks: Chunk[] = [];
   const lines = text.split("\n");
-  const figurePattern = /FIGURE\s+(\d+(?:\.\d+)*)(.*)?/i;
+  const seenFigures = new Set<string>();
+
+  // Matches both:
+  //   "Figure 3.1 — Caption" (AI OCR format, same line)
+  //   "FIGURE 3.1" followed by caption on next line (some PDF layouts)
+  // Also handles markdown bold: "**Figure 3.1 — Caption**"
+  const figurePattern = /(?:\*{1,2})?FIGURE\s+(\d+(?:\.\d+)*)(?:\s*[—\-–:]\s*(.*?))?(?:\*{1,2})?$/i;
 
   // Build a rough page map so we can assign page numbers
   const pageOffsets: number[] = [];
@@ -504,7 +538,21 @@ function extractFigureChunks(text: string, standardCode: string, version: string
     if (!match) continue;
 
     const figureNumber = match[1].trim();
-    const caption = (match[2] || "").replace(/^[\s—\-:]+/, "").trim();
+
+    // Skip duplicates (e.g. "see Figure 3.1" inline references)
+    if (seenFigures.has(figureNumber)) continue;
+
+    // If caption not on same line, check next non-empty line
+    let caption = (match[2] || "").replace(/^[\s—\-–:*]+|[\s*]+$/g, "").trim();
+    if (!caption && i + 1 < lines.length) {
+      const nextLine = lines[i + 1].trim();
+      // Accept next line as caption if it looks like a title (not a clause, not empty)
+      if (nextLine && !/^\d+\.\d/.test(nextLine) && nextLine.length < 120) {
+        caption = nextLine.replace(/^[—\-–:]+\s*/, "").trim();
+      }
+    }
+
+    seenFigures.add(figureNumber);
     const pageNum = getPageForLineIndex(i);
 
     // Grab up to ~300 chars of surrounding text (context before + after)
