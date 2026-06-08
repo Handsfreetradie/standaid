@@ -185,6 +185,8 @@ serve(async (req) => {
           console.error(`Error processing figure chunk ${chunk.id}:`, figureErr);
         }
       }
+    } catch (e) {
+      console.error("[describe-figures] Error processing figures:", e);
     }
 
     const baseUrl = Deno.env.get("SUPABASE_URL");
