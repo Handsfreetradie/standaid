@@ -109,118 +109,88 @@ function parseExtractedText(rawText: string): { text: string; pages: string[]; t
 
 const PAGES_PER_AI_BATCH = 15; // pages per gpt-4o call — stays well within 8k token output limit
 
-async function uploadPdfToOpenAI(fileBytes: Uint8Array, openaiApiKey: string): Promise<string> {
-  const formData = new FormData();
-  formData.append("file", new Blob([fileBytes as BlobPart], { type: "application/pdf" }), "document.pdf");
-  formData.append("purpose", "user_data");
-  const res = await fetch("https://api.openai.com/v1/files", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${openaiApiKey}` },
-    body: formData,
-  });
-  if (!res.ok) throw new Error(`OpenAI file upload failed: ${res.status} ${await res.text()}`);
-  const { id } = await res.json();
-  console.log(`Uploaded PDF to OpenAI: ${id}`);
-  return id;
-}
-
-async function deletePdfFromOpenAI(fileId: string, openaiApiKey: string): Promise<void> {
-  try {
-    await fetch(`https://api.openai.com/v1/files/${fileId}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${openaiApiKey}` },
-    });
-    console.log(`Deleted OpenAI file: ${fileId}`);
-  } catch (e) {
-    console.warn(`Failed to delete OpenAI file ${fileId}:`, e);
-  }
+function convertPdfToBase64(fileBytes: Uint8Array): string {
+  const binary = String.fromCharCode(...fileBytes);
+  return btoa(binary);
 }
 
 // Batched page-by-page AI OCR — sends PAGES_PER_AI_BATCH pages at a time so
 // long documents are never truncated. Reads the PDF visually so special characters
 // like Ω are transcribed correctly rather than corrupted by font encoding.
-async function extractTextWithAI(fileBytes: Uint8Array, openaiApiKey: string, totalPages = 0): Promise<string> {
-  const fileId = await uploadPdfToOpenAI(fileBytes, openaiApiKey);
+async function extractTextWithAI(fileBytes: Uint8Array, anthropicApiKey: string, totalPages = 0): Promise<string> {
+  const base64Pdf = convertPdfToBase64(fileBytes);
 
-  try {
-    const batchCount = totalPages > 0
-      ? Math.ceil(totalPages / PAGES_PER_AI_BATCH)
-      : 1; // unknown page count — try single call first
+  const batchCount = totalPages > 0
+    ? Math.ceil(totalPages / PAGES_PER_AI_BATCH)
+    : 1; // unknown page count — try single call first
 
-    const batchPrompt = (start: number, end: number) =>
-      `This is an Australian/New Zealand technical Standards document. ` +
-      `Transcribe ONLY pages ${start} to ${end} completely and accurately. ` +
-      `Include every clause number, heading, value, table, note, and figure caption exactly as written. ` +
-      `Format: clause headings as "X.X HEADING TITLE" on their own line. ` +
-      `Figure captions as "Figure X.X — Caption text" on their own line. ` +
-      `Insert [PAGE N] at the start of each page. ` +
-      `Do NOT summarise, paraphrase, or skip any content. ` +
-      `Pay special attention to numerical values and units (e.g. 0.5 Ω, 1 MΩ, 500 V).`;
+  const batchPrompt = (start: number, end: number) =>
+    `This is an Australian/New Zealand technical Standards document. ` +
+    `Transcribe ONLY pages ${start} to ${end} completely and accurately. ` +
+    `Include every clause number, heading, value, table, note, and figure caption exactly as written. ` +
+    `Format: clause headings as "X.X HEADING TITLE" on their own line. ` +
+    `Figure captions as "Figure X.X — Caption text" on their own line. ` +
+    `Insert [PAGE N] at the start of each page. ` +
+    `Do NOT summarise, paraphrase, or skip any content. ` +
+    `Pay special attention to numerical values and units (e.g. 0.5 Ω, 1 MΩ, 500 V).`;
 
-    let fullText = "";
+  let fullText = "";
 
-    for (let batch = 0; batch < batchCount; batch++) {
-      const startPage = batch * PAGES_PER_AI_BATCH + 1;
-      const endPage = totalPages > 0
-        ? Math.min((batch + 1) * PAGES_PER_AI_BATCH, totalPages)
-        : 9999; // open-ended for unknown page count
+  for (let batch = 0; batch < batchCount; batch++) {
+    const startPage = batch * PAGES_PER_AI_BATCH + 1;
+    const endPage = totalPages > 0
+      ? Math.min((batch + 1) * PAGES_PER_AI_BATCH, totalPages)
+      : 9999; // open-ended for unknown page count
 
-      const prompt = totalPages > 0
-        ? batchPrompt(startPage, endPage)
-        : `This is an Australian/New Zealand technical Standards document. Transcribe ALL content completely and accurately. Include every clause number, heading, value, table, note, and figure caption exactly as written. Format clause headings as "X.X HEADING" on their own line. Insert [PAGE N] markers between pages. Do NOT summarise or skip anything. Pay special attention to numerical values and units (e.g. 0.5 Ω, 1 MΩ, 500 V).`;
+    const prompt = totalPages > 0
+      ? batchPrompt(startPage, endPage)
+      : `This is an Australian/New Zealand technical Standards document. Transcribe ALL content completely and accurately. Include every clause number, heading, value, table, note, and figure caption exactly as written. Format clause headings as "X.X HEADING" on their own line. Insert [PAGE N] markers between pages. Do NOT summarise or skip anything. Pay special attention to numerical values and units (e.g. 0.5 Ω, 1 MΩ, 500 V).`;
 
-      console.log(`AI OCR batch ${batch + 1}/${batchCount}: pages ${startPage}–${endPage}`);
+    console.log(`AI OCR batch ${batch + 1}/${batchCount}: pages ${startPage}–${endPage}`);
 
-      const completionResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${openaiApiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "gpt-4o",
-          messages: [{
-            role: "user",
-            content: [
-              { type: "file", file: { file_id: fileId } },
-              { type: "text", text: prompt },
-            ],
-          }],
-          max_tokens: 8000,
-          temperature: 0,
-        }),
-      });
+    const completionResponse = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": anthropicApiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model: "claude-opus-4-8",
+        max_tokens: 8000,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64Pdf } },
+            { type: "text", text: prompt },
+          ],
+        }],
+      }),
+    });
 
-      if (!completionResponse.ok) {
-        const errText = await completionResponse.text();
-        console.error(`AI OCR batch ${batch + 1} failed:`, completionResponse.status, errText);
-        if (batch === 0) throw new Error(`AI extraction failed: ${completionResponse.status}`);
-        break; // partial extraction is better than nothing
-      }
-
-      const data = await completionResponse.json();
-      const batchText: string = data.choices?.[0]?.message?.content || "";
-      if (batchText.length < 50) {
-        console.warn(`AI OCR batch ${batch + 1} returned very little text — stopping`);
-        break;
-      }
-
-      fullText += (batch > 0 ? "\n\n" : "") + batchText;
-      console.log(`Batch ${batch + 1} extracted: ${batchText.length} chars`);
+    if (!completionResponse.ok) {
+      const errText = await completionResponse.text();
+      console.error(`AI OCR batch ${batch + 1} failed:`, completionResponse.status, errText);
+      if (batch === 0) throw new Error(`AI extraction failed: ${completionResponse.status}`);
+      break; // partial extraction is better than nothing
     }
 
-    if (fullText.length < 50) throw new Error("AI extraction returned insufficient text");
-    console.log(`Total AI OCR extraction: ${fullText.length} chars across ${batchCount} batch(es)`);
-    return fullText;
+    const data = await completionResponse.json();
+    const batchText: string = data.content?.[0]?.text || "";
+    if (batchText.length < 50) {
+      console.warn(`AI OCR batch ${batch + 1} returned very little text — stopping`);
+      break;
+    }
 
-  } finally {
-    await deletePdfFromOpenAI(fileId, openaiApiKey);
+    fullText += (batch > 0 ? "\n\n" : "") + batchText;
+    console.log(`Batch ${batch + 1} extracted: ${batchText.length} chars`);
   }
+
+  if (fullText.length < 50) throw new Error("AI extraction returned insufficient text");
+  console.log(`Total AI OCR extraction: ${fullText.length} chars across ${batchCount} batch(es)`);
+  return fullText;
 }
 
-async function extractTextWithAI_legacy(fileBytes: Uint8Array, openaiApiKey: string): Promise<string> {
-}
 
 async function extractTextFromPdf(
   fileBytes: Uint8Array,
-  openaiApiKey: string
+  anthropicApiKey: string
 ): Promise<{ text: string; pages: string[]; totalPages: number; pagesWithContent: number }> {
   // Use unpdf to extract text page-by-page
   let pageTexts: string[] = [];
@@ -288,7 +258,7 @@ async function extractTextFromPdf(
   const knownPageCount = pageTexts.length > 0 ? pageTexts.length : 0;
   console.log(`Attempting batched AI OCR (${knownPageCount > 0 ? knownPageCount + " pages" : "unknown length"})...`);
   try {
-    const aiText = await extractTextWithAI(fileBytes, openaiApiKey, knownPageCount);
+    const aiText = await extractTextWithAI(fileBytes, anthropicApiKey, knownPageCount);
     console.log(`Batched AI OCR complete: ${aiText.length} chars`);
 
     const pageMarkerRegex = /\[PAGE\s+\d+\]/gi;
@@ -665,8 +635,8 @@ serve(async (req) => {
 
     const t0 = Date.now();
 
-    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
-    if (!OPENAI_API_KEY) {
+    const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+    if (!ANTHROPIC_API_KEY) {
       clearTimeout(timeoutHandle);
       await supabaseAdmin.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
       await supabaseAdmin.from("processing_jobs")
@@ -699,7 +669,7 @@ serve(async (req) => {
       const fileBytes = new Uint8Array(await fileData.arrayBuffer());
       console.log(`[${standard_id}] File size: ${fileBytes.length} bytes, starting extraction`);
       try {
-        extracted = await extractTextFromPdf(fileBytes, OPENAI_API_KEY);
+        extracted = await extractTextFromPdf(fileBytes, ANTHROPIC_API_KEY);
       } catch (e) {
         console.error("Text extraction failed:", e);
         clearTimeout(timeoutHandle);

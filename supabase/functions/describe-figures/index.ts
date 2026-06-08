@@ -36,18 +36,13 @@ serve(async (req) => {
       });
     }
 
-    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
-    if (!OPENAI_API_KEY) {
+    const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+    if (!ANTHROPIC_API_KEY) {
       return new Response(JSON.stringify({ error: "Service unavailable" }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
-    const openaiHeaders = {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    };
 
     // Fetch undescribed figure chunks (is_indexed = false means not yet described)
     const { data: figureChunks, error: fetchError } = await supabaseAdmin
@@ -105,33 +100,9 @@ serve(async (req) => {
     const fileBytes = new Uint8Array(await fileData.arrayBuffer());
     console.log(`[describe-figures] Downloaded PDF: ${fileBytes.length} bytes`);
 
-    // Upload PDF to OpenAI Files API
-    const formData = new FormData();
-    formData.append(
-      "file",
-      new Blob([fileBytes as BlobPart], { type: "application/pdf" }),
-      "document.pdf"
-    );
-    formData.append("purpose", "user_data");
-
-    const uploadResponse = await fetch("https://api.openai.com/v1/files", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
-      body: formData,
-    });
-
-    if (!uploadResponse.ok) {
-      const errText = await uploadResponse.text();
-      console.error("OpenAI file upload error:", uploadResponse.status, errText);
-      return new Response(JSON.stringify({ error: "Failed to upload PDF to OpenAI" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const uploadData = await uploadResponse.json();
-    const openaiFileId: string = uploadData.id;
-    console.log(`[describe-figures] Uploaded PDF to OpenAI, file_id: ${openaiFileId}`);
+    // Convert PDF to base64 for Claude
+    const base64Pdf = btoa(String.fromCharCode(...fileBytes));
+    console.log(`[describe-figures] Converted PDF to base64: ${base64Pdf.length} chars`);
 
     const t0 = Date.now();
     let described = 0;
@@ -158,21 +129,21 @@ serve(async (req) => {
             `3. Common mistakes or inspection points? (2-3 dot points)\n\n` +
             `Be practical. No jargon.`;
 
-          const completionResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+          const completionResponse = await fetch("https://api.anthropic.com/v1/messages", {
             method: "POST",
-            headers: openaiHeaders,
+            headers: { "x-api-key": ANTHROPIC_API_KEY, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
             body: JSON.stringify({
-              model: "gpt-4o",
+              model: "claude-opus-4-8",
+              max_tokens: 1000,
               messages: [
                 {
                   role: "user",
                   content: [
-                    { type: "file", file: { file_id: openaiFileId } },
+                    { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64Pdf } },
                     { type: "text", text: prompt },
                   ],
                 },
               ],
-              max_tokens: 1000,
             }),
           });
 
@@ -183,7 +154,7 @@ serve(async (req) => {
           }
 
           const completionData = await completionResponse.json();
-          const description: string = completionData.choices?.[0]?.message?.content || "";
+          const description: string = completionData.content?.[0]?.text || "";
 
           if (!description || description.length < 20) {
             console.warn(`Figure ${figureNumber}: description too short, skipping`);
@@ -213,16 +184,6 @@ serve(async (req) => {
         } catch (figureErr) {
           console.error(`Error processing figure chunk ${chunk.id}:`, figureErr);
         }
-      }
-    } finally {
-      try {
-        await fetch(`https://api.openai.com/v1/files/${openaiFileId}`, {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
-        });
-        console.log(`[describe-figures] Deleted OpenAI file: ${openaiFileId}`);
-      } catch (cleanupErr) {
-        console.warn(`Failed to delete OpenAI file ${openaiFileId}:`, cleanupErr);
       }
     }
 

@@ -48,6 +48,13 @@ serve(async (req) => {
       });
     }
 
+    const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+    if (!ANTHROPIC_API_KEY) {
+      return new Response(JSON.stringify({ error: "Service unavailable" }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
     if (!OPENAI_API_KEY) {
       return new Response(JSON.stringify({ error: "Service unavailable" }), {
@@ -231,21 +238,20 @@ ${chunk.content}`;
     const queryId = crypto.randomUUID();
     const isLowConfidence = topSimilarity < 0.80;
 
-    // Call OpenAI with streaming (30-second timeout)
+    // Call Claude with streaming (30-second timeout)
     const aiController = new AbortController();
     const aiTimeout = setTimeout(() => aiController.abort(), 30000);
     let aiResponse: Response;
     try {
-      aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+      aiResponse = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
+        headers: { "x-api-key": ANTHROPIC_API_KEY, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
         body: JSON.stringify({
-          model: "gpt-4o-mini",
-          temperature: 0.1,
+          model: "claude-opus-4-8",
           max_tokens: 2000,
           stream: true,
           messages: [
-            { role: "system", content: systemPrompt },
+            { role: "user", content: systemPrompt },
             ...history,
             { role: "user", content: question },
           ],
@@ -259,7 +265,7 @@ ${chunk.content}`;
     if (!aiResponse.ok) {
       const errBody = await aiResponse.json().catch(() => null);
       const errMsg = errBody?.error?.message || errBody?.error || `AI error ${aiResponse.status}`;
-      console.error(`[query] OpenAI error ${aiResponse.status}: ${JSON.stringify(errBody)}`);
+      console.error(`[query] Claude error ${aiResponse.status}: ${JSON.stringify(errBody)}`);
       return new Response(JSON.stringify({ error: errMsg }), {
         status: aiResponse.status, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -275,7 +281,7 @@ ${chunk.content}`;
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
     const writer = writable.getWriter();
 
-    // Process OpenAI stream and forward as SSE
+    // Process Claude stream and forward as SSE
     (async () => {
       try {
         let accumulated = "";
@@ -296,7 +302,8 @@ ${chunk.content}`;
             if (data === "[DONE]") continue;
             try {
               const parsed = JSON.parse(data);
-              const token = parsed.choices?.[0]?.delta?.content || "";
+              // Claude format: { type: "content_block_delta", delta: { type: "text_delta", text: "..." } }
+              const token = parsed.delta?.text || "";
               if (!token) continue;
               accumulated += token;
 

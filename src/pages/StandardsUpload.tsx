@@ -180,6 +180,7 @@ const StandardsUpload = () => {
   });
   const [result, setResult] = useState<{ totalChunks: number; indexedChunks: number; quality: number; figuresExtracted: number } | null>(null);
   const [licenceConfirmed, setLicenceConfirmed] = useState(false);
+  const [canBackground, setCanBackground] = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const { session } = useAuth();
@@ -272,7 +273,7 @@ const StandardsUpload = () => {
 
       // Poll for text processing completion
       const standardId = data.standard_id;
-      const pollResult = await pollProcessing(standardId, (pct) => {
+      const pollResult = await pollProcessing(standardId, session.user.id, (pct) => {
         setProgress({ stage: "storing", percent: 60 + pct * 0.30, message: STAGE_LABELS.storing });
       });
 
@@ -295,6 +296,7 @@ const StandardsUpload = () => {
       queryClient.invalidateQueries({ queryKey: ["standards"] });
       setStep("success");
     } catch (e: any) {
+      if (e.message === "backgrounded") return; // navigated away gracefully
       toast.error(e.message || "Processing failed");
       setStep("naming");
     }
@@ -302,14 +304,18 @@ const StandardsUpload = () => {
 
   const pollProcessing = async (
     standardId: string,
+    userId: string,
     onProgress: (fraction: number) => void
   ): Promise<{ totalChunks: number; indexedChunks: number; quality: number }> => {
-    const maxAttempts = 100; // 5 min max
+    const maxAttempts = 300; // 15 min max (3s × 300)
+    let stallKickTriggered = false;
 
     for (let i = 0; i < maxAttempts; i++) {
       await delay(3000);
 
-      // Check job status for accurate stage label
+      // After 2 min, show the "continue in background" button
+      if (i === 40) setCanBackground(true);
+
       const { data: job } = await (supabase as any)
         .from("processing_jobs")
         .select("status")
@@ -324,7 +330,14 @@ const StandardsUpload = () => {
 
       if (!data) continue;
 
-      // Show appropriate stage label based on where processing is up to
+      // Stall detection: chunks created but none indexed after 3 min — kick embed-chunks
+      if (!stallKickTriggered && i >= 60 && (data.total_chunks ?? 0) > 0 && (data.indexed_chunks ?? 0) === 0) {
+        stallKickTriggered = true;
+        console.log("Stall detected — triggering embed-chunks manually");
+        supabase.functions.invoke("embed-chunks", { body: { standard_id: standardId, user_id: userId } })
+          .catch(e => console.warn("embed-chunks kick failed:", e));
+      }
+
       if ((job as any)?.status === "pending") {
         setProgress(prev => ({ ...prev, stage: "extracting", message: "Queued — waiting to start…" }));
       } else if (data.extraction_status === "processing" && (data.total_chunks ?? 0) > 0) {
@@ -346,17 +359,19 @@ const StandardsUpload = () => {
         throw new Error("Processing failed. Try a different file.");
       }
 
-      // Estimate progress — once total_chunks is set, track indexed_chunks ratio
       if (data.total_chunks && data.total_chunks > 0) {
         const indexedRatio = (data.indexed_chunks || 0) / data.total_chunks;
-        // Map to 0.5–1.0 range (first 50% is extraction/chunking phase)
         onProgress(0.5 + indexedRatio * 0.5);
       } else {
         onProgress(Math.min(i / 20, 0.45));
       }
     }
 
-    throw new Error("Processing timed out. Check your standards library.");
+    // Timed out — navigate away gracefully instead of showing an error
+    queryClient.invalidateQueries({ queryKey: ["standards"] });
+    toast.info("Still processing in the background — check your library in a few minutes.");
+    navigate("/standards");
+    throw new Error("backgrounded");
   };
 
   const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -554,8 +569,24 @@ const StandardsUpload = () => {
         </div>
 
         <p className="text-xs text-muted-foreground text-center mt-8">
-          This may take a minute depending on document size.
+          {canBackground
+            ? "Large documents take longer — it's safe to leave this running."
+            : "This may take a minute depending on document size."}
         </p>
+
+        {canBackground && (
+          <Button
+            variant="outline"
+            className="w-full h-11 mt-4 font-semibold rounded-xl gap-2"
+            onClick={() => {
+              queryClient.invalidateQueries({ queryKey: ["standards"] });
+              toast.info("Still processing — check your library in a few minutes.");
+              navigate("/standards");
+            }}
+          >
+            Continue in background → View my library
+          </Button>
+        )}
       </div>
     );
   }

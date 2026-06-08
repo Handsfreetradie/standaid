@@ -124,20 +124,21 @@ async function getChunksWithRecovery(
 
 async function callAI(
   body: Record<string, unknown>,
-  openAiKey: string,
+  anthropicKey: string,
   options: { temperature?: number; max_tokens?: number } = {},
 ): Promise<Response> {
   const payload: Record<string, unknown> = { ...body };
-  if (!("temperature" in payload)) payload.temperature = options.temperature ?? 0.1;
   if (!("max_tokens" in payload)) payload.max_tokens = options.max_tokens ?? 1000;
+  // Claude doesn't use temperature; remove if present
+  delete payload.temperature;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
   let res: Response;
   try {
-    res = await fetch("https://api.openai.com/v1/chat/completions", {
+    res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: { Authorization: `Bearer ${openAiKey}`, "Content-Type": "application/json" },
+      headers: { "x-api-key": anthropicKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
@@ -146,7 +147,7 @@ async function callAI(
   }
   if (!res.ok) {
     const errText = await res.clone().text();
-    console.error(`[capstone] OpenAI error (${res.status}): ${errText}`);
+    console.error(`[capstone] Claude error (${res.status}): ${errText}`);
   }
   return res;
 }
@@ -173,8 +174,8 @@ serve(async (req) => {
     if (authError || !user) throw new Error("Unauthorized");
 
     const { action, standardId, topic, difficulty, questionCount, examId, questionId, userAnswer, imageBase64, chunkId, examTopics, examPdfText, sectionFilter, userClauseRef, modelAnswer, correctClause, questionText } = await req.json();
-    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
-    if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY not configured");
+    const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+    if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
 
     const aiError = async (res: Response): Promise<Response> => {
       const body = await res.json().catch(() => null);
@@ -219,7 +220,7 @@ serve(async (req) => {
       const topicFilter = topic ? `Focus on the topic: ${topic}.` : "";
 
       const aiResponse = await callAI({
-          model: "gpt-4o-mini",
+          model: "claude-opus-4-8",
           messages: [
             { role: "system", content: `You are an exam question generator for trade apprentices studying ${standard?.title || "industry standards"}. Generate practical, scenario-based multiple-choice questions ONLY from the provided standard content. Never invent facts. Frame questions as real on-site situations — e.g. "You are wiring a bathroom and...", "A customer asks you to install...", "On a job site you find...". Do NOT ask "What does Clause X.X say?" or "According to Clause X.X..." — test understanding and application, not clause memorisation. CRITICAL: Never mention any clause number in the question text. Clause numbers belong only in the explanation field.` },
             { role: "user", content: `Generate ${count} ${diff}-difficulty multiple-choice questions from this standard content. ${topicFilter}\n\nStandard: ${standard?.standard_code || standard?.title}\n\nContent:\n${allChunks.map((c) => `[${c.clause_number || ""}] ${c.content}`).join("\n\n")}` },
@@ -254,7 +255,7 @@ serve(async (req) => {
             },
           }],
           tool_choice: { type: "function", function: { name: "return_questions" } },
-      }, OPENAI_API_KEY, { temperature: 0.1, max_tokens: 3000 });
+      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 3000 });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
 
@@ -293,7 +294,7 @@ serve(async (req) => {
       const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
 
       const aiResponse = await callAI({
-          model: "gpt-4o-mini",
+          model: "claude-opus-4-8",
           messages: [
             {
               role: "system",
@@ -320,7 +321,7 @@ Rules:
               ],
             },
           ],
-      }, OPENAI_API_KEY, { temperature: 0.1, max_tokens: 1500 });
+      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 1500 });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
 
@@ -359,7 +360,7 @@ Rules:
       }
 
       const aiResponse = await callAI({
-          model: "gpt-4o-mini",
+          model: "claude-opus-4-8",
           messages: [
             {
               role: "system",
@@ -376,7 +377,7 @@ Rules:
               content: `Explain this standard clause in apprentice-friendly language:\n\n[${chunk.clause_number || ""}${chunk.clause_title ? " — " + chunk.clause_title : ""}]\n${chunk.content}`,
             },
           ],
-      }, OPENAI_API_KEY, { temperature: 0.1, max_tokens: 1000 });
+      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 1000 });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
 
@@ -497,12 +498,12 @@ Rules:
         : "";
 
       const aiResponse = await callAI({
-          model: "gpt-4o-mini",
+          model: "claude-opus-4-8",
           messages: [
             { role: "system", content: `You are an expert trade educator. Create concise, apprentice-friendly study guides from standard content. Use clear headings, bullet points, and highlight key clause numbers. Only use information from the provided content.${figureNote}` },
             { role: "user", content: `Create a comprehensive study guide for apprentices from this standard. ${focusNote}\n\nStandard: ${standard?.standard_code || standard?.title}${sectionLabel}\n\nContent:\n${allChunks.map((c) => `[${c.clause_number || ""}${c.clause_title ? " - " + c.clause_title : ""}] ${c.content}`).join("\n\n")}` },
           ],
-      }, OPENAI_API_KEY, { temperature: 0.1, max_tokens: 3000 });
+      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 3000 });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
 
@@ -566,7 +567,7 @@ Rules:
       const fullContext = contextParts.join("\n\n") + standardContext;
 
       const aiResponse = await callAI({
-          model: "gpt-4o-mini",
+          model: "claude-opus-4-8",
           messages: [
             {
               role: "system",
@@ -620,7 +621,7 @@ Rules:
             },
           }],
           tool_choice: { type: "function", function: { name: "return_exam_prep" } },
-      }, OPENAI_API_KEY, { temperature: 0.1, max_tokens: 4000 });
+      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 4000 });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
 
@@ -679,7 +680,7 @@ Voltage drop limit: 5% of supply voltage (AS/NZS 3000 Clause 3.6)`;
       ].filter(Boolean).join("\n\n---\n\n");
 
       const aiResponse = await callAI({
-        model: "gpt-4o-mini",
+        model: "claude-opus-4-8",
         messages: [
           {
             role: "system",
@@ -727,7 +728,7 @@ Use realistic Australian values. Show clear step-by-step working in the model so
           },
         }],
         tool_choice: { type: "function", function: { name: "return_calculation" } },
-      }, OPENAI_API_KEY, { temperature: 0.1, max_tokens: 2000 });
+      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 2000 });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
       const aiData = await aiResponse.json();
@@ -745,7 +746,7 @@ Use realistic Australian values. Show clear step-by-step working in the model so
       if (!questionText || !modelAnswer) throw new Error("Missing grading data");
 
       const aiResponse = await callAI({
-        model: "gpt-4o-mini",
+        model: "claude-opus-4-8",
         messages: [
           {
             role: "system",
@@ -777,7 +778,7 @@ Give specific, helpful feedback.`,
           },
         }],
         tool_choice: { type: "function", function: { name: "return_grade" } },
-      }, OPENAI_API_KEY, { temperature: 0.1, max_tokens: 1000 });
+      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 1000 });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
       const aiData = await aiResponse.json();
@@ -800,7 +801,7 @@ Give specific, helpful feedback.`,
       const count = questionCount || 5;
 
       const aiResponse = await callAI({
-        model: "gpt-4o-mini",
+        model: "claude-opus-4-8",
         messages: [
           {
             role: "system",
@@ -845,7 +846,7 @@ CRITICAL: Never mention any clause number in the question text itself. Clause nu
           },
         }],
         tool_choice: { type: "function", function: { name: "return_questions" } },
-      }, OPENAI_API_KEY, { temperature: 0.1, max_tokens: 3000 });
+      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 3000 });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
 
@@ -865,7 +866,7 @@ CRITICAL: Never mention any clause number in the question text itself. Clause nu
       if (!questionText || !modelAnswer || !correctClause) throw new Error("Missing grading data");
 
       const aiResponse = await callAI({
-        model: "gpt-4o-mini",
+        model: "claude-opus-4-8",
         messages: [
           {
             role: "system",
@@ -899,7 +900,7 @@ Be strict but fair. Accept minor wording differences if the meaning is correct. 
           },
         }],
         tool_choice: { type: "function", function: { name: "return_grade" } },
-      }, OPENAI_API_KEY, { temperature: 0.1, max_tokens: 1000 });
+      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 1000 });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
 

@@ -10,6 +10,7 @@ interface PDFViewerModalProps {
   clauseNumber: string;
   standardCode?: string;
   standardId?: string;
+  pageNumber?: number;
 }
 
 interface PDFMeta {
@@ -21,7 +22,7 @@ interface PDFMeta {
   standard_id: string | null;
 }
 
-export function PDFViewerModal({ isOpen, onClose, clauseNumber, standardCode, standardId }: PDFViewerModalProps) {
+export function PDFViewerModal({ isOpen, onClose, clauseNumber, standardCode, standardId, pageNumber }: PDFViewerModalProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [meta, setMeta] = useState<PDFMeta | null>(null);
@@ -45,7 +46,7 @@ export function PDFViewerModal({ isOpen, onClose, clauseNumber, standardCode, st
     setSearchError(null);
 
     supabase.functions.invoke("fetch-pdf", {
-      body: { standard_id: standardId, standard_code: standardCode, clause_number: clauseNumber },
+      body: { standard_id: standardId, standard_code: standardCode, clause_number: clauseNumber, page_number: pageNumber },
     }).then(({ data, error: fnError }) => {
       if (fnError || !data?.signed_url) {
         setError("Could not load PDF. Please try again.");
@@ -57,7 +58,7 @@ export function PDFViewerModal({ isOpen, onClose, clauseNumber, standardCode, st
       loadPdf(data.signed_url, data.page_number ?? 1);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, clauseNumber, standardCode, standardId]);
+  }, [isOpen, clauseNumber, standardCode, standardId, pageNumber]);
 
   const loadPdf = async (url: string, startPage: number) => {
     try {
@@ -158,7 +159,10 @@ export function PDFViewerModal({ isOpen, onClose, clauseNumber, standardCode, st
   if (!isOpen) return null;
 
   const resolvedStandardCode = meta?.standard_code ?? standardCode ?? "Standard";
-  const title = clauseNumber ? `${resolvedStandardCode} — Clause ${clauseNumber}` : resolvedStandardCode;
+  const clauseLabel = clauseNumber
+    ? /^\d/.test(clauseNumber) ? `Clause ${clauseNumber}` : clauseNumber
+    : pageNumber ? `Page ${pageNumber}` : null;
+  const title = clauseLabel ? `${resolvedStandardCode} — ${clauseLabel}` : resolvedStandardCode;
 
   return (
     <>
