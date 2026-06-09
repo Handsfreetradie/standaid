@@ -1,0 +1,626 @@
+{
+  "metadata": {
+    "standard_code": "AS/NZS 3000",
+    "version": "2018",
+    "title": "Electrical Installations (known as the Australian/New Zealand Wiring Rules)",
+    "extraction_date": "2026-05-04T06:53:04.463884+00:00",
+    "extraction_quality": 80.0,
+    "total_pages": 611,
+    "fallback_pages": 0
+  },
+  "sections": [],
+  "clauses": [
+    {
+      "number": "2.10.3.5",
+      "title": "Screw-in fuses",
+      "content": "Fuses using screw-in carriers shall be connected so that the centre contact\n            is on the supply side of the fuse base.                               \n            These fuses include IEC 60269-3 System A Type D.",
+      "page": 149,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "IEC 60269-3"
+        ],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.4",
+      "title": "Bars",
+      "content": "",
+      "page": 149,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.4.1",
+      "title": "General",
+      "content": "Bars shall be provided with facilities for securely terminating conductors in\n            accordance with Clause 3.7.                                           \n             NOTE: Bars that comply with the relevant requirements of AS/NZS 5112 are\n             deemed to comply with this Clause (2.10.4).",
+      "page": 149,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 5112"
+        ],
+        "other_clauses": [
+          "3.7",
+          "2.10.4"
+        ]
+      }
+    },
+    {
+      "number": "2.10.4.2",
+      "title": "Tunnel-type terminals",
+      "content": "All screws that are in direct contact with conductors in tunnel-type terminals\n            shall be of the type designed not to cut the conductor.               \n                                                                                  \n            Where tunnel-type terminals having clamping screws that are in direct \n            contact with the conductors are provided for connection of\u2014           \n            (a) the main incoming neutral conductor;                              \n                                                                                  \n            (b) the main earthing conductor;                                      \n            (c) the connection between the main earthing terminal/connection or bar\n                                                                                  \n                and the neutral bar (MEN connection); or                          \n            (d) a neutral conductor used as a combined protective earthing and    \n                neutral (PEN) conductor for protective earthing of any portion of an\n                electrical installation,                                          \n                                                                                  \n                the terminal shall be of a type having\u2014                           \n                (i) two screws; or                                                \n                                                                                  \n                (ii) one screw with an outside diameter not less than 80% of the  \n                    tunnel diameter.                                              \n                NOTE: This requirement does not apply to connections arranged so that the\n                conductor is clamped by suitable ferrules or plates in direct contact with the\n                conductor.                                                        \n                                                                                  \n                                                                                  \n                                                                                  \n                                     COPYRIGHT                                    \n  .dettimrep                                                                      \n  stnemucod                                                                       \n  esu                                                                             \n  lanretni                                                                        \n  rof                                                                             \n  ylno                                                                            \n  %05                                                                             \n  fo                                                                              \n  gniypoC                                                                         \n  .sesnecil                                                                       \n  krowten                                                                         \n  resu                                                                            \n  tnerrucnoc                                                                      \n  3                                                                               \n  .8102-nuJ-72                                                                    \n  no                                                                              \n  dtL                                                                             \n  ytP                                                                             \n  ecivreS                                                                         \n  lacirtcelE                                                                      \n  smailliW                                                                        \n  ot                                                                              \n  desneciL                                                                        \n   gnisnecil/moc.labolgias.www                                                    \n   noitacilbup                                                                    \n   siht                                                                           \n   krowten                                                                        \n   ro                                                                             \n   morf                                                                           \n   ypoc                                                                           \n   ot                                                                             \n   noissimrep                                                                     \n   teG\nAS/NZS 3000:2018                146                                       \n                                                                                  \n            Tunnel-type terminals that comply with AS/NZS 5112 are deemed to comply\n            with the above requirements.",
+      "page": 149,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.4.3",
+      "title": "Neutral bar",
+      "content": "Every switchboard, to which a neutral conductor is connected, shall be\n            provided with a neutral bar that is\u2014                                  \n                                                                                  \n            (a) of adequate current-carrying capacity;                            \n                NOTE: The current-carrying capacity of the incoming neutral conductor may\n                be used as a guide.                                               \n                                                                                  \n            (b) located in an accessible position to allow all conductors to be safely\n                connected without moving other cables or isolating the supply to the\n                switchboard;                                                      \n            (c) designed such that the incoming neutral conductor cannot be       \n                inadvertently disconnected from the bar or link; and              \n                                                                                  \n            (d) provided with a separate terminal for\u2014                            \n                (i) the incoming neutral conductor terminating at the switchboard;\n                    and                                                           \n                                                                                  \n                (ii) the neutral conductor(s) associated with each outgoing circuit\n                    originating at the switchboard.                               \n                                                                                  \n            Where tunnel-type terminals are provided, the provisions of Clause 2.10.4.2\n            shall apply.                                                          \n            A neutral conductor or busbar connection may be used between the neutral\n            bar and a number of multi-pole devices mounted on the switchboard. Where\n            such an arrangement is used, the connection device shall comply with  \n            Clause 2.10.4.1 and, where appropriate, Clause 2.10.4.2.              \n                                                                                  \n            Where a cable is used as the neutral conductor, and is looped between \n            devices on the line side, the connection to each device shall be such that\n            continuity remains when the device is removed. Twisting of conductors is\n            not adequate.                                                         \n                                                                                  \n            Exception: Where the connection is made at a terminal of switchgear in\n            accordance with the manufacturer\u2019s specifications, the provisions of  \n            Clauses 2.10.4.1 and 2.10.4.2 need not apply.",
+      "page": 150,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "2.10.4.2",
+          "2.10.4.1"
+        ]
+      }
+    },
+    {
+      "number": "2.10.5",
+      "title": "Equipment identification",
+      "content": "",
+      "page": 150,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.5.1",
+      "title": "General",
+      "content": "All equipment installed on a switchboard shall be legibly and indelibly\n            identified in the English language in accordance with the requirements\n            of Clauses 2.10.5.2 to 2.10.5.6.                                      \n             NOTE: See Clauses 2.3.3 and 2.3.4 for the marking requirements for main\n             switches and additional isolating switches.                          \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                     COPYRIGHT                                    \n  .dettimrep                                                                      \n  stnemucod                                                                       \n  esu                                                                             \n  lanretni                                                                        \n  rof                                                                             \n  ylno                                                                            \n  %05                                                                             \n  fo                                                                              \n  gniypoC                                                                         \n  .sesnecil                                                                       \n  krowten                                                                         \n  resu                                                                            \n  tnerrucnoc                                                                      \n  3                                                                               \n  .8102-nuJ-72                                                                    \n  no                                                                              \n  dtL                                                                             \n  ytP                                                                             \n  ecivreS                                                                         \n  lacirtcelE                                                                      \n  smailliW                                                                        \n  ot                                                                              \n  desneciL                                                                        \n   gnisnecil/moc.labolgias.www                                                    \n   noitacilbup                                                                    \n   siht                                                                           \n   krowten                                                                        \n   ro                                                                             \n   morf                                                                           \n   ypoc                                                                           \n   ot                                                                             \n   noissimrep                                                                     \n   teG\n147                    AS/NZS 3000:2018",
+      "page": 150,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.5.2",
+      "title": "Relationship of electrical equipment",
+      "content": "The relationship of switches, circuit-breakers, fuses, RCDs and similar\n            electrical equipment to the various sections of the electrical installation\n            shall be marked on or adjacent to the switchboard.                    \n            The means  of identification shall enable persons to readily identify \n            equipment supplied and the corresponding circuit protective device.",
+      "page": 151,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.5.3",
+      "title": "Bars",
+      "content": "Bars shall be identified to indicate whether they are active, neutral or earth.\n                                                                                  \n            Exception: Bars need not be identified at switchboards where the colour of\n            the basic insulation of the conductors connected is visible and clearly\n            indicates the nature of the bar.",
+      "page": 151,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.5.4",
+      "title": "Terminals of switchboard equipment",
+      "content": "Terminals of bars, circuit-breakers, fuses and other electrical equipment\n            mounted on a switchboard shall be marked or arranged to identify the  \n            corresponding active and neutral connection for each circuit.         \n                                                                                  \n            The terminals for the connection of the MEN connection and for the main\n            neutral conductor shall be legibly and indelibly marked at the main neutral\n            bar.                                                                  \n                                                                                  \n            Exceptions: This marking need not apply to the following:             \n            1   Where the MEN connection is made at a terminal at one extremity of\n                the bar.                                                          \n                                                                                  \n            2   Where the main neutral conductor is connected to the next adjacent\n                terminal of the bar.                                              \n            Where the MEN  connection is made at another location, such as a      \n            substation, in accordance with Clause 5.3.5.1, the location of the    \n            connection shall be legibly and indelibly marked at the main switchboard.\n                                                                                  \n            Compliance with AS/NZS 5112 satisfies the above requirements.",
+      "page": 151,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 5112"
+        ],
+        "other_clauses": [
+          "5.3.5.1"
+        ]
+      }
+    },
+    {
+      "number": "2.10.5.5",
+      "title": "Common neutral",
+      "content": "Where a common neutral is used for two or more different circuits it shall be\n            legibly and permanently marked to identify the associated active      \n            conductors.                                                           \n                                                                                  \n             NOTE: The requirements of Clause 2.2.1.2 also apply to the use of a common\n             neutral conductor.",
+      "page": 151,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "2.2.1.2"
+        ]
+      }
+    },
+    {
+      "number": "2.10.5.6",
+      "title": "Fuse",
+      "content": "Where the marking of the fuse base does not correctly indicate the rating of\n            the associated fuse-element, the rating of the fuse-element shall be marked\n            either on an exposed non-detachable portion of the fuse or on its enclosing\n            case, or on the switchboard adjacent to the fuse.                     \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                     COPYRIGHT                                    \n  .dettimrep                                                                      \n  stnemucod                                                                       \n  esu                                                                             \n  lanretni                                                                        \n  rof                                                                             \n  ylno                                                                            \n  %05                                                                             \n  fo                                                                              \n  gniypoC                                                                         \n  .sesnecil                                                                       \n  krowten                                                                         \n  resu                                                                            \n  tnerrucnoc                                                                      \n  3                                                                               \n  .8102-nuJ-72                                                                    \n  no                                                                              \n  dtL                                                                             \n  ytP                                                                             \n  ecivreS                                                                         \n  lacirtcelE                                                                      \n  smailliW                                                                        \n  ot                                                                              \n  desneciL                                                                        \n   gnisnecil/moc.labolgias.www                                                    \n   noitacilbup                                                                    \n   siht                                                                           \n   krowten                                                                        \n   ro                                                                             \n   morf                                                                           \n   ypoc                                                                           \n   ot                                                                             \n   noissimrep                                                                     \n   teG\nAS/NZS 3000:2018                148                                       \n                                                                                  \n            A number of fuses may be marked as a group, instead of independent    \n            marking adjacent to each fuse, where\u2014                                 \n                                                                                  \n            (a) each fuse-element is of identical rating; and                     \n            (b) the fuses are mounted adjacent to each other.",
+      "page": 151,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.6",
+      "title": "Wiring",
+      "content": "Switchboard wiring shall be designed and installed to withstand any thermal\n            and magnetic effects on the conductors.                               \n                                                                                  \n            Where provision is made to hinge or remove switchboard panels, all    \n            conductors connected to electrical equipment on the switchboard panel \n            shall be\u2014                                                             \n                                                                                  \n            (a) provided with sufficient free length to allow the panel to be moved into\n                a position to enable work to be carried out;                      \n            (b) suitably fixed or otherwise retained in position to avoid undue   \n                movement or stress at terminals of electrical equipment when the  \n                panel is moved or is fixed in position; and                       \n                                                                                  \n            (c) arranged to prevent undue pressure on electrical equipment mounted\n                behind the panel.",
+      "page": 152,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.7",
+      "title": "Fire-protective measures",
+      "content": "Wiring associated with switchboards shall be installed in such a manner\n            that, in the event of fire originating at the switchboard, the spread of fire will\n            be kept to a minimum.                                                 \n                                                                                  \n            Where a switchboard is enclosed in a case or surround, any wiring systems\n            entering the switchboard enclosure shall pass through openings that   \n            provide a close fit.                                                  \n             NOTES:                                                               \n             1  See also Clause 2.10.2.5(h) regarding restricted location of switchboards in\n                or near egress paths or fire exits and Clause 3.9.9 regarding requirements to\n                prevent the spread of fire.                                       \n                                                                                  \n             2  There is a very high risk that wiring enclosures, especially those that enter at\n                the top or sides of a switchboard, will contribute to the spread of fire and for\n                this reason care needs to be taken to ensure that these wiring systems are\n                provided with close-fitting entries. In some cases internal sealing should be\n                provided.                                                         \n             3  An opening with less than 5 mm diameter of free space is considered to be a\n                close fit. Therefore, any opening of 5 mm diameter or greater requires\n                sealing with a fire-retardant sealant.                            \n             4  Wiring enclosures, such as conduits, having an internal free space of greater\n                than 5 mm diameter also require sealing to stop any draft effect that could\n                allow the spread of fire.                                         \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                     COPYRIGHT                                    \n  .dettimrep                                                                      \n  stnemucod                                                                       \n  esu                                                                             \n  lanretni                                                                        \n  rof                                                                             \n  ylno                                                                            \n  %05                                                                             \n  fo                                                                              \n  gniypoC                                                                         \n  .sesnecil                                                                       \n  krowten                                                                         \n  resu                                                                            \n  tnerrucnoc                                                                      \n  3                                                                               \n  .8102-nuJ-72                                                                    \n  no                                                                              \n  dtL                                                                             \n  ytP                                                                             \n  ecivreS                                                                         \n  lacirtcelE                                                                      \n  smailliW                                                                        \n  ot                                                                              \n  desneciL                                                                        \n   gnisnecil/moc.labolgias.www                                                    \n   noitacilbup                                                                    \n   siht                                                                           \n   krowten                                                                        \n   ro                                                                             \n   morf                                                                           \n   ypoc                                                                           \n   ot                                                                             \n   noissimrep                                                                     \n   teG\n149                    AS/NZS 3000:2018   \n                                                                                  \n                                                                                  \n                                                                                  \n                    S E C T I O N 3    S E L E C T I O N A N D                    \n               I N S T A L L A T I O N O F W I R I N G S Y S T E M S",
+      "page": 152,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "2.10.2.5",
+          "3.9.9"
+        ]
+      }
+    },
+    {
+      "number": "3.1",
+      "title": "GENERAL",
+      "content": "",
+      "page": 153,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.1.1",
+      "title": "Application",
+      "content": "This Section specifies the minimum requirements for the selection and \n            installation of wiring systems that shall be achieved to satisfy Part 1\n            of this Standard.",
+      "page": 153,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.1.2",
+      "title": "Selection and installation",
+      "content": "Wiring systems shall be selected and installed to perform the         \n            following functions or have the following features:                   \n            (a) Protect against physical contact with live parts by durable       \n                insulation materials or by placing live parts out of reach.       \n                                                                                  \n            (b) Satisfy current-carrying capacity, voltage drop and other         \n                minimum size requirements for conductors.                         \n            (c) Provide reliability and electrical continuity of connections, joints\n                and terminations.                                                 \n                                                                                  \n            (d) Provide adequate strength of supports, suspensions and fixings.   \n                                                                                  \n            (e) Suit intended use, including applications requiring a particular  \n                type of wiring system, e.g. fire-resistance, explosion protection,\n                safety services.                                                  \n            (f) Protect against mechanical damage, environmental and other        \n                external influences by enclosure or other means.                  \n                                                                                  \n            (g) Installed in accordance with the requirements of this Section and \n                the additional requirements as specified in the manufacturer\u2019s    \n                instructions.                                                     \n                                                                                  \n            Characteristics of wiring systems that shall be considered include conductor\n            materials, core identification, insulation properties, temperature rise,\n            bending and tension limitations.",
+      "page": 153,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.2",
+      "title": "TYPES OF WIRING SYSTEMS",
+      "content": "The type of wiring system and method of installation used shall either\u2014\n                                                                                  \n            (a) comply with Table 3.1; or                                         \n            (b) have a degree of safety equivalent to that given in Table 3.1.    \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                     COPYRIGHT                                    \n  .dettimrep                                                                      \n  stnemucod                                                                       \n  esu                                                                             \n  lanretni                                                                        \n  rof                                                                             \n  ylno                                                                            \n  %05                                                                             \n  fo                                                                              \n  gniypoC                                                                         \n  .sesnecil                                                                       \n  krowten                                                                         \n  resu                                                                            \n  tnerrucnoc                                                                      \n  3                                                                               \n  .8102-nuJ-72                                                                    \n  no                                                                              \n  dtL                                                                             \n  ytP                                                                             \n  ecivreS                                                                         \n  lacirtcelE                                                                      \n  smailliW                                                                        \n  ot                                                                              \n  desneciL                                                                        \n   gnisnecil/moc.labolgias.www                                                    \n   noitacilbup                                                                    \n   siht                                                                           \n   krowten                                                                        \n   ro                                                                             \n   morf                                                                           \n   ypoc                                                                           \n   ot                                                                             \n   noissimrep                                                                     \n   teG\nAS/NZS 3000:2018                150",
+      "page": 153,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [
+          "3.1"
+        ],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3",
+      "title": "EXTERNAL INFLUENCES",
+      "content": "",
+      "page": 154,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.1",
+      "title": "General",
+      "content": "Wiring systems shall be able to operate safely and shall function     \n            properly in the conditions to which they are likely to be exposed at the\n            point of installation.                                                \n            To effectively protect against the presence and extent of relevant    \n            environmental and other influences, characteristics of wiring systems may\n            comprise\u2014                                                             \n                                                                                  \n            (a) suitable design and construction of the wiring system; or         \n            (b) additional means, provided as part of the electrical installation, that do\n                                                                                  \n                not adversely affect their operation.                             \n             NOTE: AS 60529 provides an IP classification and marking system for electrical\n             equipment and enclosures that provide different degrees of protection against\n             the entry of water and solid objects (see Appendix G for illustrations).",
+      "page": 154,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS 60529"
+        ],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.2",
+      "title": "Particular influences",
+      "content": "",
+      "page": 154,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.2.1",
+      "title": "Ambient temperature",
+      "content": "Wiring systems shall be selected and installed so as to be suitable for the\n            highest and lowest local ambient temperatures.                        \n                                                                                  \n            Where materials subject to temperature limitations are used above 60\u00b0C, or\n            below 0\u00b0C, manufacturer\u2019s instructions shall be followed.             \n                                                                                  \n            Allowance shall be made for expansion of materials because of         \n            temperature variations that may occur in normal conditions of use.    \n            Where current-carrying capacity is selected in accordance with the    \n            AS/NZS 3008.1 series, the reference ambient temperatures shall be as  \n            follows:                                                              \n                                                                                  \n            (a) For cables in air, irrespective of the method of installation\u2014    \n                (i) for Australia, 40\u00b0C; and                            A         \n                                                                                  \n                (ii) for New Zealand, 30\u00b0C.                             NZ        \n                                                                                  \n            (b) For cables buried direct in the ground or installed in underground\n                enclosures\u2014                                                       \n                (i) for Australia, 25\u00b0C; and                            A         \n                                                                                  \n                (ii) for New Zealand, 15\u00b0C.                             NZ        \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                     COPYRIGHT                                    \n  .dettimrep                                                                      \n  stnemucod                                                                       \n  esu                                                                             \n  lanretni                                                                        \n  rof                                                                             \n  ylno                                                                            \n  %05                                                                             \n  fo                                                                              \n  gniypoC                                                                         \n  .sesnecil                                                                       \n  krowten                                                                         \n  resu                                                                            \n  tnerrucnoc                                                                      \n  3 .8102-nuJ-72                                                                  \n  no                                                                              \n  dtL                                                                             \n  ytP                                                                             \n  ecivreS                                                                         \n  lacirtcelE                                                                      \n  smailliW                                                                        \n  ot                                                                              \n  desneciL                                                                        \n   gnisnecil/moc.labolgias.www                                                    \n   noitacilbup                                                                    \n   siht                                                                           \n   krowten                                                                        \n   ro                                                                             \n   morf                                                                           \n   ypoc                                                                           \n   ot                                                                             \n   noissimrep                                                                     \n   teG\nCOPYRIGHT                                                                                                    \n                                                                                                                    \n                                                                                                                    \n                                                                                                                    \n                                                                                                                    \n                                                                                                                    \n                                                                                                                    \n                                                                                                                    \n                                                                                                                    \n                                                                                                                    \n                                                                                                                    \n                                                                                                                    \n                                                                                                                    \n                                                                                                            AS/NZS  \n                                                                                                                    \n                                                                                                                    \n                                                                                                            3000:2018\n                                                                                                             151    \n                                                     TABLE  3.1                                                     \n                                CABLE TYPES  AND THEIR APPLICATION IN WIRING SYSTEMS                                \n                   Installation method               Description                   Typical cable types              \n                                                  On a surface (including cable tray                                \n                                                  or ladder)                                                        \n                                                                              Insulated and sheathed                \n                                                                              Screened or armoured                  \n                                                                              Mineral insulated, metal              \n                                                  On a surface partly surrounded by thermal sheathed (MIMS)         \n                                       Unenclosed                                                                   \n                                                  insulation                  Earthing conductors                   \n                                                  Fully surrounded by thermal insulation                            \n                                                                              Insulated and sheathed,               \n                                                  Buried direct in the ground, subject to the                       \n                                                                              screened or armoured, earthing        \n                                                  requirements of Clause 3.11                                       \n                                                                              conductors                            \n                                                                                             (continued)            \n  .dettimrep                                                                                                        \n  stnemucod                                                                                                         \n  esu                                                                                                               \n  lanretni                                                                                                          \n  rof                                                                                                               \n  ylno                                                                                                              \n  %05                                                                                                               \n  fo                                                                                                                \n  gniypoC                                                                                                           \n  .sesnecil                                                                                                         \n  krowten                                                                                                           \n  resu                                                                                                              \n  tnerrucnoc                                                                                                        \n  3                                                                                                                 \n  .8102-nuJ-72                                                                                                      \n  no                                                                                                                \n  dtL                                                                                                               \n  ytP                                                                                                               \n  ecivreS                                                                                                           \n  lacirtcelE                                                                                                        \n  smailliW                                                                                                          \n  ot                                                                                                                \n  desneciL                                                                                                          \n   gnisnecil/moc.labolgias.www                                                                                      \n   noitacilbup                                                                                                      \n   siht                                                                                                             \n   krowten                                                                                                          \n   ro morf                                                                                                          \n   ypoc                                                                                                             \n   ot                                                                                                               \n   noissimrep                                                                                                       \n   teG\nCOPYRIGHT                                                                                                   \n                                                                                                             AS/NZS \n                                                                                                             3000:2018\n                                                                                                             152    \n                                              TABLE  3.1 (continued)                                                \n                   Installation method               Description                   Typical cable types              \n                                                  On a surface (including cable trunking)                           \n                                                                              Insulated, unsheathed                 \n                                                                              Insulated and sheathed                \n                                                                              Screened or armoured                  \n                                                                              MIMS                                  \n                                                  On a surface and partly surrounded by In an enclosure             \n                                                  thermal insulation          Earthing conductors                   \n                                                  Fully surrounded by thermal insulation                            \n                                                                              Insulated, unsheathed                 \n                                                  Underground, subject to the requirements Insulated and sheathed   \n                                                  of Clause 3.11              Screened or armoured                  \n                                                                              Earthing conductors                   \n                                                                              Insulated and sheathed                \n                                              Supported on a catenary system  Screened or armoured                  \n                                                                              Earthing conductors                   \n                                                                              Aerial conductors                     \n                                                 Supported on insulators                                            \n                                                                              Earthing conductors                   \n  .dettimrep                                                                                                        \n  stnemucod                                                                                                         \n  esu                                                                                                               \n  lanretni                                                                                                          \n  rof                                                                                                               \n  ylno                                                                                                              \n  %05                                                                                                               \n  fo                                                                                                                \n  gniypoC                                                                                                           \n  .sesnecil                                                                                                         \n  krowten                                                                                                           \n  resu                                                                                                              \n  tnerrucnoc                                                                                                        \n  3                                                                                                                 \n  .8102-nuJ-72                                                                                                      \n  no                                                                                                                \n  dtL                                                                                                               \n  ytP                                                                                                               \n  ecivreS                                                                                                           \n  lacirtcelE                                                                                                        \n  smailliW                                                                                                          \n  ot                                                                                                                \n  desneciL                                                                                                          \n   gnisnecil/moc.labolgias.www                                                                                      \n   noitacilbup                                                                                                      \n   siht                                                                                                             \n   krowten                                                                                                          \n   ro                                                                                                               \n   morf                                                                                                             \n   ypoc                                                                                                             \n   ot                                                                                                               \n   noissimrep                                                                                                       \n   teG\n153                    AS/NZS 3000:2018",
+      "page": 154,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 3008.1"
+        ],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.2.2",
+      "title": "External heat sources",
+      "content": "Wiring systems shall be protected against the effects of heat from external\n            sources, including solar gain, by one or more of the following methods:\n                                                                                  \n            (a) Shielding.                                                        \n            (b) Placing sufficiently far from the source of heat.                 \n                                                                                  \n            (c) Selecting a system with due regard for the additional temperature rise\n                that may occur.                                                   \n            (d) Limiting the current to be carried by the cable so as to reduce its\n                operating temperature.                                            \n                                                                                  \n            (e) Local reinforcement or substitution of insulating material.       \n            (f) A method equivalent to one or more of those listed in Items (a) to (e).\n                                                                                  \n            Parts of a cable or flexible cord within an accessory, appliance or luminaire\n            shall be suitable for the temperatures likely to be encountered, or shall be\n            provided with additional insulation suitable for those temperatures.",
+      "page": 157,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.2.3",
+      "title": "Water or high humidity",
+      "content": "Wiring systems shall be selected and installed so that high humidity or the\n            entry of water does not cause damage.                                 \n                                                                                  \n            Where water may collect or condensation may form in a wiring system, to\n            the extent that it creates a hazard, provision shall be made for its harmless\n            escape through suitably located drainage points.                      \n                                                                                  \n            Where a wiring system may be subjected to wave action (water), protection\n            against excessive flexing and mechanical damage shall be provided in  \n            accordance with Clauses 3.3.2.6, 3.3.2.7 and 3.3.2.8.",
+      "page": 157,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.2.4",
+      "title": "Solid foreign bodies",
+      "content": "Wiring systems shall be selected and installed so as to minimize the entry\n            of solid foreign bodies during installation, use and maintenance.     \n            In a location where dust or any other substance, in significant quantity, may\n            be present, additional precautions shall be taken to prevent its      \n                                                                                  \n            accumulation in quantities that could adversely affect the heat dissipation\n            from the wiring system.",
+      "page": 157,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.2.5",
+      "title": "Corrosive or polluting substances",
+      "content": "Where the presence of corrosive or polluting substances is likely to cause\n            corrosion or deterioration, those parts of the wiring system likely to be\n            affected shall be suitably protected or manufactured from materials   \n            resistant to such substances.                                         \n            Dissimilar metals liable to initiate galvanic action shall not be placed in\n                                                                                  \n            contact with each other.                                              \n            Materials liable to cause mutual or individual deterioration, or hazardous\n            degradation, shall not be placed in contact with each other.          \n                                                                                  \n                                                                                  \n                                     COPYRIGHT                                    \n  .dettimrep                                                                      \n  stnemucod                                                                       \n  esu                                                                             \n  lanretni                                                                        \n  rof                                                                             \n  ylno                                                                            \n  %05                                                                             \n  fo                                                                              \n  gniypoC                                                                         \n  .sesnecil                                                                       \n  krowten                                                                         \n  resu                                                                            \n  tnerrucnoc                                                                      \n  3                                                                               \n  .8102-nuJ-72                                                                    \n  no                                                                              \n  dtL                                                                             \n  ytP                                                                             \n  ecivreS                                                                         \n  lacirtcelE                                                                      \n  smailliW                                                                        \n  ot                                                                              \n  desneciL                                                                        \n   gnisnecil/moc.labolgias.www                                                    \n   noitacilbup                                                                    \n   siht                                                                           \n   krowten                                                                        \n   ro                                                                             \n   morf                                                                           \n   ypoc                                                                           \n   ot                                                                             \n   noissimrep                                                                     \n   teG\nAS/NZS 3000:2018                154                                       \n                                                                                  \n             NOTE: The effect of substances, such as esters, ketones, ethers, and aromatic\n             and chlorinated hydrocarbons, should be considered when using insulating\n             conduit, enclosures, cables or equipment.",
+      "page": 157,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.2.6",
+      "title": "Mechanical damage",
+      "content": "Wiring systems shall be selected and installed so as to minimize the risk of\n            mechanical damage.                                                    \n                                                                                  \n            Protection against mechanical damage shall be provided by one or any  \n            combination of the following:                                         \n            (a) Mechanical characteristics of the wiring system.                  \n                                                                                  \n            (b) Location selected.                                                \n            (c) Provision of additional local or general mechanical protection.   \n                                                                                  \n             NOTE: Guide to adequacy and WS classification is provided in Appendix H.",
+      "page": 158,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.2.7",
+      "title": "Vibration",
+      "content": "Wiring systems subject to vibration that is likely to cause damage to the\n            wiring system, including all cables, fixings and connections, shall be\n            suitable for the conditions.",
+      "page": 158,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.2.8",
+      "title": "Other mechanical stresses",
+      "content": "Wiring systems shall be selected and installed so as to minimize damage to\n            the cable insulation, sheathing and connections during installation,  \n            operation and maintenance.                                            \n                                                                                  \n            Measures undertaken to minimize damage may include the following:     \n            (a) Provision of supports, continuous or at appropriate intervals suitable\n                for the mass of the cable.                                        \n                                                                                  \n            (b) Use of suitable fixings for the cable size and type that hold the cable in\n                position without damage.                                          \n            (c) Use of suitable connections for the cable size and type that reduce\n                mechanical strain at joints and terminations.                     \n                                                                                  \n            (d) Attention to minimum bending radius limits of cables.             \n            (e) Provision of flexibility to accommodate any movement or tension   \n                                                                                  \n                stresses.",
+      "page": 158,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.2.9",
+      "title": "Flora",
+      "content": "Where the presence of flora is expected to constitute a hazard, either the\n            wiring system shall be selected accordingly, or special protective measures\n            shall be adopted.",
+      "page": 158,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.2.10",
+      "title": "Fauna",
+      "content": "Where the presence of fauna is expected to constitute a hazard, either the\n            wiring system shall be selected accordingly, or special protective measures\n            shall be adopted.                                                     \n                                                                                  \n                                                                                  \n                                                                                  \n                                     COPYRIGHT                                    \n  .dettimrep                                                                      \n  stnemucod                                                                       \n  esu                                                                             \n  lanretni                                                                        \n  rof                                                                             \n  ylno                                                                            \n  %05                                                                             \n  fo                                                                              \n  gniypoC                                                                         \n  .sesnecil                                                                       \n  krowten                                                                         \n  resu                                                                            \n  tnerrucnoc                                                                      \n  3                                                                               \n  .8102-nuJ-72                                                                    \n  no                                                                              \n  dtL                                                                             \n  ytP                                                                             \n  ecivreS                                                                         \n  lacirtcelE                                                                      \n  smailliW                                                                        \n  ot                                                                              \n  desneciL                                                                        \n   gnisnecil/moc.labolgias.www                                                    \n   noitacilbup                                                                    \n   siht                                                                           \n   krowten                                                                        \n   ro                                                                             \n   morf                                                                           \n   ypoc                                                                           \n   ot                                                                             \n   noissimrep                                                                     \n   teG\n155                    AS/NZS 3000:2018",
+      "page": 158,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.2.11",
+      "title": "Solar radiation (direct sunlight)",
+      "content": "Where a wiring system is, or may be, exposed to direct sunlight, either a\n            wiring system suitable for the conditions shall be selected and installed, or\n            adequate shielding shall be provided, in accordance with Clause 3.3.2.2.\n             NOTES:                                                               \n             1  Sheathed cables exposed to direct sunlight do not require further protection\n                from UV radiation, unless otherwise advised by the manufacturer, as the\n                sheath is considered to provide the necessary protection.         \n                Black insulated unsheathed cables, e.g. aerial conductors, with UV-resistant\n                insulation complying with AS/NZS 3808, do not require further protection.\n                                                                                  \n                For insulated unsheathed cables with insulation colours other than black, the\n                manufacturer\u2019s recommendation should be sought, or the cable should be\n                provided with a physical barrier to prevent exposure to direct sunlight.\n             2  Guidance on the effect of direct sunlight on the current-carrying capacity of\n                cables is given in the AS/NZS 3008.1 series. A correction factor for a\n                temperature 20\u00b0C higher than the ambient air temperature may be applied.",
+      "page": 159,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 3808",
+          "AS/NZS 3008.1"
+        ],
+        "other_clauses": [
+          "3.3.2.2"
+        ]
+      }
+    },
+    {
+      "number": "3.3.2.12",
+      "title": "Hazardous areas",
+      "content": "Wiring systems installed in areas subject to explosive gas atmospheres and\n            explosive dust atmospheres shall be selected and installed in accordance\n            with Clause 7.7.",
+      "page": 159,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "7.7"
+        ]
+      }
+    },
+    {
+      "number": "3.3.2.13",
+      "title": "Thermal insulation",
+      "content": "Where cables pass through bulk thermal insulation they shall be rated for\n            current-carrying capacity, in accordance with the AS/NZS 3008.1 series, by\n            length of cable passing through insulation, as follows:               \n                                                                                  \n            (a) \uf0a3150 mm\u2014using the \u2018in air touching a surface\u2019 rating.             \n            (b) >150 mm to 400 mm\u2014using the \u2018partially surrounded\u2019 rating.        \n                                                                                  \n            (c) >400 mm\u2014using the \u2018completely surrounded\u2019 rating.                 \n             NOTE: In New Zealand, attention is drawn to the requirements of NZECP 55 for NZ\n             wiring and fittings located near conductive thermal insulation.",
+      "page": 159,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 3008.1"
+        ],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.4",
+      "title": "CURRENT-CARRYING  CAPACITY",
+      "content": "",
+      "page": 159,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.4.1",
+      "title": "General",
+      "content": "Every conductor shall have a current-carrying capacity in accordance  \n            with the AS/NZS 3008.1 series, not less than the current to be carried\n                                                                                  \n            by the conductor.                                                     \n            In determining the required current-carrying capacity, provision shall be\n            made for reasonably foreseeable changes to external influences, such as\n            the installation of thermal insulation in ceiling spaces and walls.   \n                                                                                  \n         *  Wiring systems in domestic installations shall be installed on the    \n            assumption that thermal insulation in ceilings, walls and under floors, if not\n            currently installed, will be installed in the future.                 \n                                                                                  \n                                                                                  \n                                                                                  \n                                     COPYRIGHT                                    \n  .dettimrep                                                                      \n  stnemucod                                                                       \n  esu                                                                             \n  lanretni                                                                        \n  rof                                                                             \n  ylno                                                                            \n  %05                                                                             \n  fo                                                                              \n  gniypoC                                                                         \n  .sesnecil                                                                       \n  krowten                                                                         \n  resu                                                                            \n  tnerrucnoc                                                                      \n  3                                                                               \n  .8102-nuJ-72                                                                    \n  no                                                                              \n  dtL                                                                             \n  ytP                                                                             \n  ecivreS                                                                         \n  lacirtcelE                                                                      \n  smailliW                                                                        \n  ot                                                                              \n  desneciL                                                                        \n   gnisnecil/moc.labolgias.www                                                    \n   noitacilbup                                                                    \n   siht                                                                           \n   krowten                                                                        \n   ro                                                                             \n   morf                                                                           \n   ypoc                                                                           \n   ot                                                                             \n   noissimrep                                                                     \n   teG\nAS/NZS 3000:2018                156                                       \n                                                                                  \n             NOTES:                                                               \n             1  Appendix C, Paragraph C3 provides a set of current ratings that may be\n                assigned to circuits in typical simple installations as an alternative to\n                compliance with the AS/NZS 3008.1 series. The ratings assign cable\n                current-carrying capacities that are aligned with the current rating of\n                protective devices.                                               \n             2  National building codes contain mandatory requirements for the thermal\n                insulation of ceilings and walls in certain situations.           \n                                                                                  \n             3  The AS/NZS 5000 series of cable standards provide higher operating\n                temperature materials for some cable insulation than was the case with their\n                predecessors.                                                     \n             4  Current-carrying capacities for busbars and busways should be obtained\n                from the manufacturer. Information relating to busways is given in\n                AS/NZS 3439.2 or AS/NZS 61439.6.",
+      "page": 159,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 3008.1"
+        ],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.4.2",
+      "title": "Operating temperature limits",
+      "content": "The operating temperatures of conductors shall not exceed the limits given\n            in Table 3.2.                                                         \n                                                                                  \n            Polymeric cables with normal use temperatures below 75\u00b0C (see Notes to\n            Table 3.2) are deemed not suitable for Australian or New Zealand      \n            conditions.                                                           \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                                                                  \n                                     COPYRIGHT                                    \n  .dettimrep                                                                      \n  stnemucod                                                                       \n  esu                                                                             \n  lanretni                                                                        \n  rof                                                                             \n  ylno                                                                            \n  %05                                                                             \n  fo                                                                              \n  gniypoC                                                                         \n  .sesnecil                                                                       \n  krowten                                                                         \n  resu                                                                            \n  tnerrucnoc                                                                      \n  3                                                                               \n  .8102-nuJ-72                                                                    \n  no                                                                              \n  dtL                                                                             \n  ytP                                                                             \n  ecivreS                                                                         \n  lacirtcelE                                                                      \n  smailliW                                                                        \n  ot                                                                              \n  desneciL                                                                        \n   gnisnecil/moc.labolgias.www                                                    \n   noitacilbup                                                                    \n   siht                                                                           \n   krowten                                                                        \n   ro                                                                             \n   morf                                                                           \n   ypoc                                                                           \n   ot                                                                             \n   noissimrep                                                                     \n   teG",
+      "page": 160,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [
+          "3.2"
+        ],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    }
+  ],
+  "tables": [
+    {
+      "columns": [
+        "",
+        "Description",
+        ""
+      ],
+      "data": [
+        {
+          "": "On a surface (including cable tray\nor ladder)",
+          "Description": "Unenclosed"
+        },
+        {
+          "": "",
+          "Description": ""
+        },
+        {
+          "": "On a surface partly surrounded by thermal\ninsulation",
+          "Description": ""
+        },
+        {
+          "": "Fully surrounded by thermal insulation",
+          "Description": ""
+        },
+        {
+          "": "Buried direct in the ground, subject to the\nrequirements of Clause 3.11",
+          "Description": ""
+        }
+      ],
+      "page": 155,
+      "number": "3.1",
+      "title": "CABLE TYPES  AND THEIR APPLICATION IN WIRING SYSTEMS"
+    }
+  ],
+  "figures": [],
+  "cross_references": {
+    "IEC 60269-3": [
+      "2.10.3.5"
+    ],
+    "AS/NZS 5112": [
+      "2.10.4.1",
+      "2.10.5.4"
+    ],
+    "AS 60529": [
+      "3.3.1"
+    ],
+    "AS/NZS 3008.1": [
+      "3.3.2.1",
+      "3.3.2.11",
+      "3.3.2.13",
+      "3.4.1"
+    ],
+    "AS/NZS 3808": [
+      "3.3.2.11"
+    ]
+  }
+}

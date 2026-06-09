@@ -1,0 +1,3307 @@
+{
+  "metadata": {
+    "standard_code": "AS/NZS 3000",
+    "version": "2018",
+    "title": "Electrical Installations (known as the Australian/New Zealand Wiring Rules)",
+    "extraction_date": "2026-05-04T02:28:24.307617",
+    "extraction_quality": 60.0,
+    "total_pages": 611
+  },
+  "sections": [],
+  "clauses": [
+    {
+      "number": "2.10.3.5",
+      "title": "Screw-in fuses",
+      "content": "Fuses using screw-in carriers shall be connected so that the centre contact is on the supply side of the fuse base. These fuses include IEC 60269-3 System A Type D.",
+      "page": 149,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "IEC 60269-3"
+        ],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.4",
+      "title": "Bars",
+      "content": "",
+      "page": 149,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.4.1",
+      "title": "General",
+      "content": "Bars shall be provided with facilities for securely terminating conductors in accordance with Clause 3.7.",
+      "page": 149,
+      "notes": [
+        "Bars that comply with the relevant requirements of AS/NZS 5112 are deemed to comply with this Clause (2.10.4)."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 5112"
+        ],
+        "other_clauses": [
+          "3.7",
+          "2.10.4"
+        ]
+      }
+    },
+    {
+      "number": "2.10.4.2",
+      "title": "Tunnel-type terminals",
+      "content": "All screws that are in direct contact with conductors in tunnel-type terminals shall be of the type designed not to cut the conductor. Where tunnel-type terminals having clamping screws that are in direct contact with the conductors are provided for connection of\u2014 (a) the main incoming neutral conductor; (b) the main earthing conductor; (c) the connection between the main earthing terminal/connection or bar and the neutral bar (MEN connection); or (d) a neutral conductor used as a combined protective earthing and neutral (PEN) conductor for protective earthing of any portion of an electrical installation, the terminal shall be of a type having\u2014 (i) two screws; or (ii) one screw with an outside diameter not less than 80% of the tunnel diameter.",
+      "page": 149,
+      "notes": [
+        "This requirement does not apply to connections arranged so that the conductor is clamped by suitable ferrules or plates in direct contact with the conductor."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.4.3",
+      "title": "Neutral bar",
+      "content": "Every switchboard, to which a neutral conductor is connected, shall be provided with a neutral bar that is\u2014\n(a) of adequate current-carrying capacity;\n(b) located in an accessible position to allow all conductors to be safely connected without moving other cables or isolating the supply to the switchboard;\n(c) designed such that the incoming neutral conductor cannot be inadvertently disconnected from the bar or link; and\n(d) provided with a separate terminal for\u2014\n(i) the incoming neutral conductor terminating at the switchboard; and\n(ii) the neutral conductor(s) associated with each outgoing circuit originating at the switchboard.\nWhere tunnel-type terminals are provided, the provisions of Clause 2.10.4.2 shall apply.\nA neutral conductor or busbar connection may be used between the neutral bar and a number of multi-pole devices mounted on the switchboard. Where such an arrangement is used, the connection device shall comply with Clause 2.10.4.1 and, where appropriate, Clause 2.10.4.2.\nWhere a cable is used as the neutral conductor, and is looped between devices on the line side, the connection to each device shall be such that continuity remains when the device is removed. Twisting of conductors is not adequate.",
+      "page": 150,
+      "notes": [
+        "The current-carrying capacity of the incoming neutral conductor may be used as a guide.",
+        "Tunnel-type terminals that comply with AS/NZS 5112 are deemed to comply with the above requirements."
+      ],
+      "exceptions": [
+        "Where the connection is made at a terminal of switchgear in accordance with the manufacturer's specifications, the provisions of Clauses 2.10.4.1 and 2.10.4.2 need not apply."
+      ],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 5112"
+        ],
+        "other_clauses": [
+          "2.10.4.2",
+          "2.10.4.1"
+        ]
+      }
+    },
+    {
+      "number": "2.10.5",
+      "title": "Equipment identification",
+      "content": "",
+      "page": 150,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.5.1",
+      "title": "General",
+      "content": "All equipment installed on a switchboard shall be legibly and indelibly identified in the English language in accordance with the requirements of Clauses 2.10.5.2 to 2.10.5.6.",
+      "page": 150,
+      "notes": [
+        "See Clauses 2.3.3 and 2.3.4 for the marking requirements for main switches and additional isolating switches."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "2.10.5.2",
+          "2.10.5.6",
+          "2.3.3",
+          "2.3.4"
+        ]
+      }
+    },
+    {
+      "number": "2.10.5.2",
+      "title": "Relationship of electrical equipment",
+      "content": "The relationship of switches, circuit-breakers, fuses, RCDs and similar electrical equipment to the various sections of the electrical installation shall be marked on or adjacent to the switchboard. The means of identification shall enable persons to readily identify equipment supplied and the corresponding circuit protective device.",
+      "page": 151,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.5.3",
+      "title": "Bars",
+      "content": "Bars shall be identified to indicate whether they are active, neutral or earth.",
+      "page": 151,
+      "notes": [],
+      "exceptions": [
+        "Bars need not be identified at switchboards where the colour of the basic insulation of the conductors connected is visible and clearly indicates the nature of the bar."
+      ],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.5.4",
+      "title": "Terminals of switchboard equipment",
+      "content": "Terminals of bars, circuit-breakers, fuses and other electrical equipment mounted on a switchboard shall be marked or arranged to identify the corresponding active and neutral connection for each circuit. The terminals for the connection of the MEN connection and for the main neutral conductor shall be legibly and indelibly marked at the main neutral bar. Where the MEN connection is made at another location, such as a substation, in accordance with Clause 5.3.5.1, the location of the connection shall be legibly and indelibly marked at the main switchboard. Compliance with AS/NZS 5112 satisfies the above requirements.",
+      "page": 151,
+      "notes": [],
+      "exceptions": [
+        "Where the MEN connection is made at a terminal at one extremity of the bar.",
+        "Where the main neutral conductor is connected to the next adjacent terminal of the bar."
+      ],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 5112"
+        ],
+        "other_clauses": [
+          "5.3.5.1"
+        ]
+      }
+    },
+    {
+      "number": "2.10.5.5",
+      "title": "Common neutral",
+      "content": "Where a common neutral is used for two or more different circuits it shall be legibly and permanently marked to identify the associated active conductors.",
+      "page": 151,
+      "notes": [
+        "The requirements of Clause 2.2.1.2 also apply to the use of a common neutral conductor."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "2.2.1.2"
+        ]
+      }
+    },
+    {
+      "number": "2.10.5.6",
+      "title": "Fuse",
+      "content": "Where the marking of the fuse base does not correctly indicate the rating of the associated fuse-element, the rating of the fuse-element shall be marked either on an exposed non-detachable portion of the fuse or on its enclosing case, or on the switchboard adjacent to the fuse.",
+      "page": 151,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.6",
+      "title": "Wiring",
+      "content": "Switchboard wiring shall be designed and installed to withstand any thermal and magnetic effects on the conductors.\n\nWhere provision is made to hinge or remove switchboard panels, all conductors connected to electrical equipment on the switchboard panel shall be\u2014\n\n(a) provided with sufficient free length to allow the panel to be moved into a position to enable work to be carried out;\n(b) suitably fixed or otherwise retained in position to avoid undue movement or stress at terminals of electrical equipment when the panel is moved or is fixed in position; and\n(c) arranged to prevent undue pressure on electrical equipment mounted behind the panel.",
+      "page": 152,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.7",
+      "title": "Fire-protective measures",
+      "content": "Wiring associated with switchboards shall be installed in such a manner that, in the event of fire originating at the switchboard, the spread of fire will be kept to a minimum.\n\nWhere a switchboard is enclosed in a case or surround, any wiring systems entering the switchboard enclosure shall pass through openings that provide a close fit.",
+      "page": 152,
+      "notes": [
+        "See also Clause 2.10.2.5(h) regarding restricted location of switchboards in or near egress paths or fire exits and Clause 3.9.9 regarding requirements to prevent the spread of fire.",
+        "There is a very high risk that wiring enclosures, especially those that enter at the top or sides of a switchboard, will contribute to the spread of fire and for this reason care needs to be taken to ensure that these wiring systems are provided with close-fitting entries. In some cases internal sealing should be provided.",
+        "An opening with less than 5 mm diameter of free space is considered to be a close fit. Therefore, any opening of 5 mm diameter or greater requires sealing with a fire-retardant sealant.",
+        "Wiring enclosures, such as conduits, having an internal free space of greater than 5 mm diameter also require sealing to stop any draft effect that could allow the spread of fire."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "2.10.2.5(h)",
+          "3.9.9"
+        ]
+      }
+    },
+    {
+      "number": "3.1",
+      "title": "GENERAL",
+      "content": "",
+      "page": 153,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.1.1",
+      "title": "Application",
+      "content": "This Section specifies the minimum requirements for the selection and installation of wiring systems that shall be achieved to satisfy Part 1 of this Standard.",
+      "page": 153,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "Part 1"
+        ]
+      }
+    },
+    {
+      "number": "3.1.2",
+      "title": "Selection and installation",
+      "content": "Wiring systems shall be selected and installed to perform the following functions or have the following features:\n(a) Protect against physical contact with live parts by durable insulation materials or by placing live parts out of reach.\n(b) Satisfy current-carrying capacity, voltage drop and other minimum size requirements for conductors.\n(c) Provide reliability and electrical continuity of connections, joints and terminations.\n(d) Provide adequate strength of supports, suspensions and fixings.\n(e) Suit intended use, including applications requiring a particular type of wiring system, e.g. fire-resistance, explosion protection, safety services.\n(f) Protect against mechanical damage, environmental and other external influences by enclosure or other means.\n(g) Installed in accordance with the requirements of this Section and the additional requirements as specified in the manufacturer's instructions.\n\nCharacteristics of wiring systems that shall be considered include conductor materials, core identification, insulation properties, temperature rise, bending and tension limitations.",
+      "page": 153,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.2",
+      "title": "TYPES OF WIRING SYSTEMS",
+      "content": "The type of wiring system and method of installation used shall either\u2014\n(a) comply with Table 3.1; or\n(b) have a degree of safety equivalent to that given in Table 3.1.",
+      "page": 153,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [
+          "Table 3.1"
+        ],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3",
+      "title": "EXTERNAL INFLUENCES",
+      "content": "",
+      "page": 154,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.1",
+      "title": "General",
+      "content": "Wiring systems shall be able to operate safely and shall function properly in the conditions to which they are likely to be exposed at the point of installation. To effectively protect against the presence and extent of relevant environmental and other influences, characteristics of wiring systems may comprise\u2014 (a) suitable design and construction of the wiring system; or (b) additional means, provided as part of the electrical installation, that do not adversely affect their operation.",
+      "page": 154,
+      "notes": [
+        "AS 60529 provides an IP classification and marking system for electrical equipment and enclosures that provide different degrees of protection against the entry of water and solid objects (see Appendix G for illustrations)."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS 60529"
+        ],
+        "other_clauses": [
+          "Appendix G"
+        ]
+      }
+    },
+    {
+      "number": "3.3.2",
+      "title": "Particular influences",
+      "content": "",
+      "page": 154,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.2.1",
+      "title": "Ambient temperature",
+      "content": "Wiring systems shall be selected and installed so as to be suitable for the highest and lowest local ambient temperatures. Where materials subject to temperature limitations are used above 60\u00b0C, or below 0\u00b0C, manufacturer's instructions shall be followed. Allowance shall be made for expansion of materials because of temperature variations that may occur in normal conditions of use. Where current-carrying capacity is selected in accordance with the AS/NZS 3008.1 series, the reference ambient temperatures shall be as follows: (a) For cables in air, irrespective of the method of installation\u2014 (i) for Australia, 40\u00b0C; and (ii) for New Zealand, 30\u00b0C. (b) For cables buried direct in the ground or installed in underground enclosures\u2014 (i) for Australia, 25\u00b0C; and (ii) for New Zealand, 15\u00b0C.",
+      "page": 154,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 3008.1 series"
+        ],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.2.2",
+      "title": "External heat sources",
+      "content": "Wiring systems shall be protected against the effects of heat from external sources, including solar gain, by one or more of the following methods:\n(a) Shielding.\n(b) Placing sufficiently far from the source of heat.\n(c) Selecting a system with due regard for the additional temperature rise that may occur.\n(d) Limiting the current to be carried by the cable so as to reduce its operating temperature.\n(e) Local reinforcement or substitution of insulating material.\n(f) A method equivalent to one or more of those listed in Items (a) to (e).\nParts of a cable or flexible cord within an accessory, appliance or luminaire shall be suitable for the temperatures likely to be encountered, or shall be provided with additional insulation suitable for those temperatures.",
+      "page": 157,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.2.3",
+      "title": "Water or high humidity",
+      "content": "Wiring systems shall be selected and installed so that high humidity or the entry of water does not cause damage.\nWhere water may collect or condensation may form in a wiring system, to the extent that it creates a hazard, provision shall be made for its harmless escape through suitably located drainage points.\nWhere a wiring system may be subjected to wave action (water), protection against excessive flexing and mechanical damage shall be provided in accordance with Clauses 3.3.2.6, 3.3.2.7 and 3.3.2.8.",
+      "page": 157,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "3.3.2.6",
+          "3.3.2.7",
+          "3.3.2.8"
+        ]
+      }
+    },
+    {
+      "number": "3.3.2.4",
+      "title": "Solid foreign bodies",
+      "content": "Wiring systems shall be selected and installed so as to minimize the entry of solid foreign bodies during installation, use and maintenance.\nIn a location where dust or any other substance, in significant quantity, may be present, additional precautions shall be taken to prevent its accumulation in quantities that could adversely affect the heat dissipation from the wiring system.",
+      "page": 157,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.2.5",
+      "title": "Corrosive or polluting substances",
+      "content": "Where the presence of corrosive or polluting substances is likely to cause corrosion or deterioration, those parts of the wiring system likely to be affected shall be suitably protected or manufactured from materials resistant to such substances.\nDissimilar metals liable to initiate galvanic action shall not be placed in contact with each other.\nMaterials liable to cause mutual or individual deterioration, or hazardous degradation, shall not be placed in contact with each other.",
+      "page": 157,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.2.6",
+      "title": "Mechanical damage",
+      "content": "Wiring systems shall be selected and installed so as to minimize the risk of mechanical damage.\n\nProtection against mechanical damage shall be provided by one or any combination of the following:\n(a) Mechanical characteristics of the wiring system.\n(b) Location selected.\n(c) Provision of additional local or general mechanical protection.",
+      "page": 158,
+      "notes": [
+        "The effect of substances, such as esters, ketones, ethers, and aromatic and chlorinated hydrocarbons, should be considered when using insulating conduit, enclosures, cables or equipment.",
+        "Guide to adequacy and WS classification is provided in Appendix H."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "Appendix H"
+        ]
+      }
+    },
+    {
+      "number": "3.3.2.7",
+      "title": "Vibration",
+      "content": "Wiring systems subject to vibration that is likely to cause damage to the wiring system, including all cables, fixings and connections, shall be suitable for the conditions.",
+      "page": 158,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.2.8",
+      "title": "Other mechanical stresses",
+      "content": "Wiring systems shall be selected and installed so as to minimize damage to the cable insulation, sheathing and connections during installation, operation and maintenance.\n\nMeasures undertaken to minimize damage may include the following:\n(a) Provision of supports, continuous or at appropriate intervals suitable for the mass of the cable.\n(b) Use of suitable fixings for the cable size and type that hold the cable in position without damage.\n(c) Use of suitable connections for the cable size and type that reduce mechanical strain at joints and terminations.\n(d) Attention to minimum bending radius limits of cables.\n(e) Provision of flexibility to accommodate any movement or tension stresses.",
+      "page": 158,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.2.9",
+      "title": "Flora",
+      "content": "Where the presence of flora is expected to constitute a hazard, either the wiring system shall be selected accordingly, or special protective measures shall be adopted.",
+      "page": 158,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.2.10",
+      "title": "Fauna",
+      "content": "Where the presence of fauna is expected to constitute a hazard, either the wiring system shall be selected accordingly, or special protective measures shall be adopted.",
+      "page": 158,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.3.2.11",
+      "title": "Solar radiation (direct sunlight)",
+      "content": "Where a wiring system is, or may be, exposed to direct sunlight, either a wiring system suitable for the conditions shall be selected and installed, or adequate shielding shall be provided, in accordance with Clause 3.3.2.2.",
+      "page": 159,
+      "notes": [
+        "Sheathed cables exposed to direct sunlight do not require further protection from UV radiation, unless otherwise advised by the manufacturer, as the sheath is considered to provide the necessary protection. Black insulated unsheathed cables, e.g. aerial conductors, with UV-resistant insulation complying with AS/NZS 3808, do not require further protection. For insulated unsheathed cables with insulation colours other than black, the manufacturer's recommendation should be sought, or the cable should be provided with a physical barrier to prevent exposure to direct sunlight.",
+        "Guidance on the effect of direct sunlight on the current-carrying capacity of cables is given in the AS/NZS 3008.1 series. A correction factor for a temperature 20\u00b0C higher than the ambient air temperature may be applied."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 3808",
+          "AS/NZS 3008.1 series"
+        ],
+        "other_clauses": [
+          "3.3.2.2"
+        ]
+      }
+    },
+    {
+      "number": "3.3.2.12",
+      "title": "Hazardous areas",
+      "content": "Wiring systems installed in areas subject to explosive gas atmospheres and explosive dust atmospheres shall be selected and installed in accordance with Clause 7.7.",
+      "page": 159,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "7.7"
+        ]
+      }
+    },
+    {
+      "number": "3.3.2.13",
+      "title": "Thermal insulation",
+      "content": "Where cables pass through bulk thermal insulation they shall be rated for current-carrying capacity, in accordance with the AS/NZS 3008.1 series, by length of cable passing through insulation, as follows:\n(a) 150 mm\u2014using the 'in air touching a surface' rating.\n(b) >150 mm to 400 mm\u2014using the 'partially surrounded' rating.\n(c) >400 mm\u2014using the 'completely surrounded' rating.",
+      "page": 159,
+      "notes": [
+        "In New Zealand, attention is drawn to the requirements of NZECP 55 for NZ wiring and fittings located near conductive thermal insulation."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 3008.1 series",
+          "NZECP 55"
+        ],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.4",
+      "title": "CURRENT-CARRYING CAPACITY",
+      "content": "",
+      "page": 159,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.4.1",
+      "title": "General",
+      "content": "Every conductor shall have a current-carrying capacity in accordance with the AS/NZS 3008.1 series, not less than the current to be carried by the conductor.\nIn determining the required current-carrying capacity, provision shall be made for reasonably foreseeable changes to external influences, such as the installation of thermal insulation in ceiling spaces and walls.\nWiring systems in domestic installations shall be installed on the assumption that thermal insulation in ceilings, walls and under floors, if not currently installed, will be installed in the future.",
+      "page": 159,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 3008.1 series"
+        ],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.4.2",
+      "title": "Operating temperature limits",
+      "content": "The operating temperatures of conductors shall not exceed the limits given in Table 3.2. Polymeric cables with normal use temperatures below 75\u00b0C (see Notes to Table 3.2) are deemed not suitable for Australian or New Zealand conditions.",
+      "page": 160,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [
+          "Table 3.2"
+        ],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.4.3",
+      "title": "Conductors in parallel",
+      "content": "Current-carrying capacities for circuits comprising parallel multi-core cables or groups of single-core cables may be determined from the sum of the current-carrying capacity of the various cables connected in parallel provided that the following requirements are met:\n(a) Cables shall be not less than 4 mm\u00b2.\n(b) Grouping of cables shall not affect the cooling of each parallel cable, or group, by the ambient air or the ground.\n(c) The load current sharing between each parallel cable or group shall be sufficient to prevent overheating of any cable or group.\n\nExample:\nEqual load current sharing may be achieved by the selection and installation of cables to give the same impedance for each cable in the group. This condition is satisfied when\u2014\n(i) conductors are of the same material and cross-sectional area with a minimum size of 4 mm\u00b2;\n(ii) cables follow the same route and achieve the same length;",
+      "page": 162,
+      "notes": [
+        "V-90 and V-90HT insulated cables may be operated up to the maximum permissible temperatures of 90\u00b0C and 105\u00b0C, provided that the cable is installed in a manner that is not subject to, or is protected against, severe mechanical damage for temperatures higher than 75\u00b0C. Such applications also allow for cables to be installed in\u2014 (a) locations where the ambient temperature exceeds 40\u00b0C, e.g. equipment wiring in luminaires and heating appliances, or in roof spaces affected by high summer temperatures; and (b) locations affected by bulk thermal insulation that restricts the dissipation of heat from the cable.",
+        "The current-carrying capacities for MIMS cables are based on an operating temperature of 100\u00b0C for the external surface of either bare metal-sheathed cables or served cables. Higher continuous operating temperatures are permissible for bare metal-sheathed cables, dependent on factors such as the following: (a) The suitability of the cable terminations and mountings. (b) The location of the cable away from combustible materials. (c) The location of the cable away from areas where there is a reasonable chance of persons touching the exposed surface. (d) Other environmental and external influences.",
+        "The minimum ambient temperature of use for MIMS cables depends on the cable seal used and manufacturer's recommendations should be followed.",
+        "Current-carrying capacities determined in accordance with the AS/NZS 3008.1 series do not take into account the effect of temperature rise on the terminals of electrical equipment that can result in the temperature limits of the insulation of cables in the vicinity of the terminals exceeding the limits specified in Table 3.2. In such cases reference should be made to warnings given in the electrical equipment Standards."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [
+          "Table 3.2"
+        ],
+        "figures": [],
+        "standards": [
+          "AS/NZS 3008.1"
+        ],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.4.4",
+      "title": "Coordination between conductors and protective devices",
+      "content": "In accordance with Clause 2.5.3, the continuous current-carrying capacity of the cables shall be coordinated with the current for which the circuit is designed and the type and current rating of the overload protective device. Taking into account the different overload operating characteristics for fuses and circuit-breakers, one of the relevant following conditions shall be satisfied: (a) The current rating of circuit-breakers shall not be greater than the cable current-carrying capacity (IB \u2264 IN \u2264 IZ; see Clause 2.5.3.1). (b) The current rating of HRC fuses shall not be greater than 90% of the cable current-carrying capacity (IB \u2264 IN \u2264 0.9 IZ; see Clause 2.5.3.1).",
+      "page": 163,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "2.5.3",
+          "2.5.3.1"
+        ]
+      }
+    },
+    {
+      "number": "3.5",
+      "title": "CONDUCTOR SIZE",
+      "content": "",
+      "page": 163,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.5.1",
+      "title": "General",
+      "content": "The nominal cross-sectional area of conductors shall be not less than the values given in Table 3.3.",
+      "page": 163,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [
+          "3.3"
+        ],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.5.2",
+      "title": "Neutral conductor",
+      "content": "The minimum size of the neutral conductor shall be as follows:\n(a) Single-phase two-wire circuit The neutral conductor or conductors of a single-phase consumer main, submain or final subcircuit shall have a current-carrying capacity not less than\u2014\n(i) the current-carrying capacity of the associated active conductor; or\n(ii) the total current to be carried, where there is more than one active conductor.\n(b) Multiphase circuit The current-carrying capacity of the neutral conductor of a multiphase circuit shall not be less than that determined in accordance with the following:\n(i) Harmonic currents Where a consumer main, submain or final subcircuit supplies a substantial load that generates harmonic currents, e.g. fluorescent lighting, computers, soft starters, variable speed devices or other electronic devices, the third and any higher order harmonic current generated in the equipment",
+      "page": 164,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": null,
+      "title": null,
+      "content": "shall be added to the maximum out-of-balance load to determine the current to be carried by the neutral conductor. For this purpose the third and any higher order harmonic current in the neutral conductor shall be taken as 100% of the highest load-generating harmonic currents on any phase.",
+      "page": 165,
+      "notes": [
+        {
+          "number": 1,
+          "text": "A harmonic current load that constitutes not less than 40% of the total load on any single-phase is regarded as substantial."
+        },
+        {
+          "number": 2,
+          "text": "The third harmonic currents (and odd multiples thereof) are additive to the normal 50 Hz current to be carried. Therefore, it may be necessary for the capacity of a neutral conductor to be greater than that of the associated active conductors. Further information can be obtained from a number of sources including IEC 60364-5-52."
+        }
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "IEC 60364-5-52"
+        ],
+        "other_clauses": []
+      },
+      "review_flag": true
+    },
+    {
+      "number": null,
+      "title": "Consumer mains, submains and final subcircuits",
+      "content": "(ii) Consumer mains, submains and final subcircuits The current-carrying capacity of the neutral conductor of multiphase consumer mains, submains or final subcircuit shall be not less than that of the current-carrying capacity of the largest associated active conductor.",
+      "page": 165,
+      "notes": [
+        {
+          "text": "Where more than one active conductor is connected to the one phase, the associated active conductor, for the purposes of this Clause, is the sum of the cross-sectional areas of all conductors connected to any one phase, e.g. conductors connected in parallel or separately metered portions of consumer mains operating on the same phase."
+        }
+      ],
+      "exceptions": [
+        {
+          "number": 1,
+          "text": "Out-of-balance currents that may arise from the operation of protective devices and other similar abnormal conditions need not be considered."
+        },
+        {
+          "number": 2,
+          "text": "The neutral conductor of a multiphase circuit may have a current-carrying capacity lower than that determined by this Clause, provided that a detection device is fitted and arranged so that the neutral current cannot exceed the current-carrying capacity of the neutral conductor."
+        },
+        {
+          "number": 3,
+          "text": "The neutral conductor of a multiphase circuit may have a current-carrying capacity less than that of the largest associated active conductor, provided that the predominant load consists of multiphase equipment and the current-carrying capacity is not less than the maximum out-of-balance current, including any harmonic component."
+        }
+      ],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      },
+      "review_flag": true
+    },
+    {
+      "number": "3.5.3",
+      "title": "Earthing conductor",
+      "content": "The size of an earthing conductor shall be determined in accordance with Clause 5.3.3.",
+      "page": 166,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "5.3.3"
+        ]
+      }
+    },
+    {
+      "number": "3.6",
+      "title": "VOLTAGE DROP",
+      "content": "",
+      "page": 166,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.6.1",
+      "title": "General",
+      "content": "Under normal service conditions, the voltage at the terminals of any power-consuming electrical equipment shall be not less than the lower limit specified in the relevant electrical equipment Standard. Where the electrical equipment concerned is not covered by a Standard, the voltage at the terminals shall be such as not to impair the safe functioning of the electrical equipment.",
+      "page": 166,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.6.2",
+      "title": "Value",
+      "content": "The cross-sectional area of every current-carrying conductor shall be such that the voltage drop between the point of supply for the low voltage electrical installation and any point in that electrical installation does not exceed 5% of the nominal voltage at the point of supply. The value of current used for the calculation of voltage drop on a circuit need not exceed the\u2014 (a) total of the connected load supplied through the circuit; (b) maximum demand of the circuit; or (c) current rating of the circuit protective device.",
+      "page": 166,
+      "notes": [
+        "Motor-starting, solenoid-closing and other similar applications which may cause high transient currents, causing an increased transient voltage drop are excluded from consideration.",
+        "A simplified method of estimating voltage drop is provided in Appendix C. Detailed information on choosing conductor sizes, taking into account voltage drop, is given in the AS/NZS 3008.1 series.",
+        "For voltage rise (reverse voltage drop) in grid connected inverters, refer to AS/NZS 4777.1."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 3008.1",
+          "AS/NZS 4777.1"
+        ],
+        "other_clauses": [
+          "Appendix C"
+        ]
+      }
+    },
+    {
+      "number": null,
+      "title": null,
+      "content": "Exceptions:",
+      "page": 167,
+      "notes": [],
+      "exceptions": [
+        "For final subcircuits, with the load distributed over the whole of the length of the circuit (such as socket-outlets or lighting points), half the current rating of the protective device may be used as the value of current.",
+        "This Clause does not apply to high voltage or extra-low voltage circuits (see Clauses 7.6 and 7.5 respectively).",
+        "Where the point of supply is the low voltage terminals of a substation located on the premises containing the electrical installation and dedicated to the installation, the permissible voltage drop may be increased to 7%.",
+        "The 5% voltage drop limitation need not apply to stand-alone systems, in accordance with Clause 7.3, that are designed such that the combination of the output voltage from the source, together with the voltage drop within the installation, does not result in the utilization voltage, at equipment and appliances intended to operate at low voltage, falling more than a total of 11% below the nominal supply voltage under normal operating conditions."
+      ],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "7.6",
+          "7.5",
+          "7.3"
+        ]
+      },
+      "review_flag": true
+    },
+    {
+      "number": "3.6.3",
+      "title": "Conductors in parallel",
+      "content": "The voltage drop for a circuit in which conductors are connected in parallel shall be taken as the voltage drop in one of the conductors when that conductor is carrying the current determined by dividing the value of the current of the circuit determined in accordance with Clause 3.6.2 by the number of conductors in parallel.",
+      "page": 167,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "3.6.2"
+        ]
+      }
+    },
+    {
+      "number": "3.7",
+      "title": "ELECTRICAL CONNECTIONS",
+      "content": "",
+      "page": 167,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.7.1",
+      "title": "General",
+      "content": "Connections between conductors and between conductors and other electrical equipment shall provide electrical continuity, an appropriate level of insulation and adequate mechanical strength. The method of joining or connecting cables shall be suitable for the application and ensure that the conductivity of the joint or connection is not less than that of the conductor. All cables and conductors shall be installed so that there is no undue mechanical stress on any connection.",
+      "page": 167,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.7.2",
+      "title": "Connection methods",
+      "content": "",
+      "page": 167,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.7.2.1",
+      "title": "General",
+      "content": "",
+      "page": 167,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.7.2.1.1",
+      "title": "Common requirements",
+      "content": "The selection of the method of connection shall take account of the following factors, as appropriate: (a) Material of the conductor and its insulation.",
+      "page": 167,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.7.2.1.2",
+      "title": "Aluminium conductors",
+      "content": "Connections to, and joints in, aluminium conductors shall be made using components specifically designed for the connection of aluminium conductors and techniques specified by the manufacturer. When connecting aluminium conductors, the following special factors associated with aluminium should be considered: (a) Removal of the aluminium oxide film from the conductors. (b) The relative softness of aluminium. (c) The different coefficient of linear expansion of aluminium and other metals. (d) Avoiding contact with dissimilar metals that may initiate galvanic action.",
+      "page": 168,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.7.2.2",
+      "title": "Preparation for connection",
+      "content": "The insulation on a conductor shall not be removed any further than is necessary to make the connection. For connections between insulated conductors, the connection shall be insulated to provide a degree of insulation not inferior to that of the conductors. Any damaged insulation shall be reinstated.",
+      "page": 168,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.7.2.3",
+      "title": "Loosening of connections",
+      "content": "",
+      "page": 168,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.7.2.3.1",
+      "title": "General",
+      "content": "Connections shall be made so that no loosening is likely because of vibration, alteration of materials or temperature variations to which the connections are likely to be subjected in normal service.",
+      "page": 168,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.7.2.3.2",
+      "title": "Crimp joints (compression joints)",
+      "content": "Conductors joined or terminated by means of a crimp (compression) connection shall be securely retained within a suitable crimping device. The connection shall be made using a tool designed for the purpose and techniques specified by the manufacturer.",
+      "page": 168,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.7.2.4",
+      "title": "Mechanical connection devices",
+      "content": "Mechanical connection devices that meet the following criteria may be used for the connection of conductors. Such devices shall\u2014\n(a) comply with an appropriate Standard;\n(b) not be dependent upon compression of insulating material for an effective electrical connection;\n(c) have a short-circuit rating suitable for the application;\n(d) have a long-term current-carrying capacity not less than that of the conductors they are designed to connect;\n(e) if capable of being re-used, suffer no deterioration in performance when re-used;\n(f) include manufacturer's information regarding their correct use or re-use for users when supplied; and\n(g) be installed using the techniques specified by the manufacturer for the application.",
+      "page": 169,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.7.2.5",
+      "title": "Retention of stranded conductors",
+      "content": "The ends of stranded conductors shall be secured by suitable means, so as to prevent the spreading or escape of individual strands. They shall not be soft-soldered before clamping under a screw or between metal surfaces.",
+      "page": 169,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.7.2.6",
+      "title": "Mechanical stress",
+      "content": "All cables and conductors shall be installed so that there is no undue mechanical stress on any connection.",
+      "page": 169,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.7.2.7",
+      "title": "Soldered connections",
+      "content": "Where a soldered connection is used, the design shall take account of creep, mechanical stress and temperature rise under fault conditions. Soft-soldered connections shall not be clamped under a screw or between metal surfaces.",
+      "page": 169,
+      "notes": [
+        "Soldered connections are not permitted for aerial conductors in tension. (See Clause 3.7.2.9.1.)"
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "3.7.2.9.1"
+        ]
+      }
+    },
+    {
+      "number": "3.7.2.8",
+      "title": "Flexible cords",
+      "content": "Joints in flexible cords used as installation wiring shall be made in accordance with the requirements of Clauses 3.7.2.2 to 3.7.2.7 or by means of suitable cable couplers. Connections between a flexible cord used as equipment wiring to installation wiring shall be made in a purpose-made device containing suitable screwed or crimped terminals.",
+      "page": 169,
+      "notes": [
+        "Requirements for conductor identification are detailed in 3.8.1."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "3.7.2.2",
+          "3.7.2.3",
+          "3.7.2.4",
+          "3.7.2.5",
+          "3.7.2.6",
+          "3.7.2.7",
+          "3.8.1"
+        ]
+      }
+    },
+    {
+      "number": null,
+      "title": null,
+      "content": "Any flexible cord shall be installed so that undue stress on its connections because of a pull on the cord is alleviated by a pillar, post, grip, tortuous path, or other effective means. Knotting of the flexible cord shall not be acceptable for this purpose.",
+      "page": 170,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      },
+      "review_flag": true
+    },
+    {
+      "number": "3.7.2.9",
+      "title": "Aerial conductors",
+      "content": "",
+      "page": 170,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.7.2.9.1",
+      "title": "Joints and connections",
+      "content": "The following limitations and additional requirements apply to joints and connections in aerial conductors: (a) Connections or joints in aerial conductors in tension shall be made without soldering. (b) Connections to aerial conductors shall be reliable and adequately protected against the effects of movement, exposure to direct sunlight and entry of moisture, and shall be as short as practicable. (c) Where conductors of dissimilar metals are joined, means shall be taken to prevent galvanic action by the use of appropriate connecting devices.",
+      "page": 170,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.7.2.9.2",
+      "title": "Prohibited joints",
+      "content": "Joints shall not be made in the following types of cable, when in tension: (a) Parallel-webbed or insulated twisted aerial cables. (b) Neutral-screened cables. (c) Multi-core cables. (d) Conductors of different metals.",
+      "page": 170,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.7.2.10",
+      "title": "Underground cables",
+      "content": "Connections in underground wiring shall be sealed to prevent the entry of moisture.",
+      "page": 170,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.7.2.11",
+      "title": "Earthing conductors",
+      "content": "(a) Soldered connections Where soldering is used for the jointing or connection of earthing conductors, the earthing conductors shall be retained in position by acceptable means independently of the solder. (b) Tunnel-type connections All screws that are in direct contact with conductors in tunnel-type terminals shall be of the type designed not to cut the conductor. To maintain effective clamping of conductors, tunnel terminals shall be of a type having\u2014 (i) two screws; (ii) one screw with an outside diameter not less than 80% of the tunnel diameter; or",
+      "page": 170,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.7.3",
+      "title": "Joints in cables",
+      "content": "Joints in cables shall be enclosed, e.g. in a junction box, to provide adequate protection against relevant external influences.",
+      "page": 171,
+      "notes": [],
+      "exceptions": [
+        "Joints in cables need not be enclosed, provided that the joint\u2014 (a) is not subjected to any undue strain; (b) is made in accordance with the requirements of Clause 3.7.2; (c) has any mechanical protection that was removed or damaged reinstated; and (d) is insulated and sheathed to provide the equivalent of the original cable insulation and sheathing, including the requirements in Clause 3.10.1.2."
+      ],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "3.7.2",
+          "3.10.1.2"
+        ]
+      }
+    },
+    {
+      "number": "3.7.4",
+      "title": "Installation couplers",
+      "content": "An installation coupler, enclosed or unenclosed, complying with the requirements of AS/NZS 61535, is a suitable method for the electrical connection of cables, including flexible cords, flexible cables and rigid (solid or stranded) cables.",
+      "page": 171,
+      "notes": [
+        "Installation couplers are intended for permanent connection between sections of wiring, particularly in 'soft' wiring systems, and are considered equivalent to a junction box.",
+        "Installation couplers require a deliberate act to disengage the latching mechanism and are not intended to be engaged or disconnected under load or to be used as socket-outlets."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 61535"
+        ],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.8",
+      "title": "IDENTIFICATION",
+      "content": "",
+      "page": 171,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.8.1",
+      "title": "General",
+      "content": "Installation wiring conductors shall be clearly identified to indicate their intended function as active, neutral, earthing or equipotential bonding conductors. Where identification is achieved using the colour of the conductor insulation, the colours specified in Table 3.4 shall be used.",
+      "page": 171,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [
+          "3.4"
+        ],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": null,
+      "title": null,
+      "content": "Conductors with green, yellow or green/yellow combination coloured insulation or sheathing shall not be used as active or neutral conductors in installation wiring. In New Zealand, use of these colours is restricted for conductors but not for sheathing.",
+      "page": 172,
+      "notes": [
+        "In New Zealand, there is no restriction on sheathing colour.",
+        "Internal wiring of equipment is not regarded as installation wiring but may be subject to particular equipment standards.",
+        "Switchboard wiring is not regarded as installation wiring but the AS/NZS 3439 series and AS/NZS 61439 series restrict the green/yellow combination to the identification of earthing conductors."
+      ],
+      "exceptions": [
+        "The colour identification provisions of Table 3.4 need not apply to the special applications listed in Clause 3.8.3."
+      ],
+      "references": {
+        "tables": [
+          "3.4"
+        ],
+        "figures": [],
+        "standards": [
+          "AS/NZS 3439 series",
+          "AS/NZS 61439 series"
+        ],
+        "other_clauses": [
+          "3.8.3"
+        ]
+      },
+      "review_flag": true
+    },
+    {
+      "number": "3.8.2",
+      "title": "Colour identification",
+      "content": "",
+      "page": 172,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.8.2.1",
+      "title": "Colour identification by sleeving or other means",
+      "content": "Colour identification by sleeving or other means, using colours corresponding to those listed in Table 3.4 at each termination, may be used as a means of identification for the following purposes: (a) Conductors with black or light blue insulation used as active conductors.",
+      "page": 172,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [
+          "3.4"
+        ],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": null,
+      "title": null,
+      "content": "(b) Conductors with other than green, yellow, green/yellow, black or light blue insulation used as neutral conductors.\n\nor\n\n(c) Conductors within multi-core cables with other than green, yellow or green/yellow insulation used as earthing conductors.\n\nColour identification shall be of colour-fast, non-conductive material that is compatible with the cable and its location.\n\nSingle-core cables with other than green, yellow or green/yellow insulation, used as earthing conductors, shall be identified continuously along their entire length.\n\nColour identification shall not be used at terminations or along the entire length, to identify a green, yellow or green/yellow colour-insulated conductor as an active or neutral conductor.",
+      "page": 173,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      },
+      "review_flag": true
+    },
+    {
+      "number": "3.8.2.2",
+      "title": "Sleeving of existing earthing and bonding conductors",
+      "content": "In electrical installations where earthing or bonding conductors have been previously installed using bare or green conductors, complying with previous editions of this Standard, such earthing or bonding conductors may remain.\n\nWhen alterations or repairs are carried out that result in new terminations or junctions to those existing bare or green conductors, such bare or green coloured conductors shall be sleeved with green/yellow sleeving within each of those new cable junctions or terminations.",
+      "page": 173,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.8.2.3",
+      "title": "Sleeving of existing live conductors",
+      "content": "In electrical installations where conductors with yellow insulation have been previously installed as live conductors, complying with previous editions of this Standard, such conductors with yellow insulation may remain.\n\nWhen alterations or repairs are carried out that result in new terminations or junctions to those existing live conductors with yellow insulation, such live conductors with yellow insulation shall be sleeved with white sleeving within each of those new cable junctions or terminations.",
+      "page": 173,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.8.3",
+      "title": "Exceptions and special applications",
+      "content": "",
+      "page": 173,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.8.3.1",
+      "title": "General",
+      "content": "The colour identification provisions of Table 3.4 need not apply to the applications described in Clauses 3.8.3.2 to 3.8.3.5.",
+      "page": 173,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [
+          "Table 3.4"
+        ],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "3.8.3.2",
+          "3.8.3.3",
+          "3.8.3.4",
+          "3.8.3.5"
+        ]
+      }
+    },
+    {
+      "number": "3.8.3.2",
+      "title": "Protective earthing and equipotential conductors",
+      "content": "An earthing conductor need not be coloured green/yellow in the following situations:\n\n(a) A bare or aerial conductor used as a protective earthing conductor.",
+      "page": 173,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.8.3.3",
+      "title": "Active and neutral conductors",
+      "content": "An active or neutral conductor need not be coloured in accordance with the colours specified in Table 3.4 where\u2014\n(a) insulated conductors within a multi-core cable, provided they are not yellow, have each core clearly identifiable by means of numbering, lettering or equivalent means;\n(b) conductors of flexible cords and flexible cables, provided they are not yellow, are identified by alternative colours in accordance with Clause 3.8.3.4; or\n(c) the neutral conductor of an insulated aerial conductor is identified by multiple longitudinal ribs around the circumference and length that clearly distinguish it from the other conductors.",
+      "page": 174,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [
+          "Table 3.4"
+        ],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "3.8.3.4"
+        ]
+      }
+    },
+    {
+      "number": "3.8.3.4",
+      "title": "Alternative and European cable identification colours",
+      "content": "Figure 3.1 demonstrates the coordination of conductor insulation colours of single-phase cables manufactured to current and superseded Australian and New Zealand Standards and typical European practices. Figures 3.2 demonstrates the coordination of conductor insulation colours of multiphase cables manufactured to current Australian and New Zealand Standards and typical European practices.",
+      "page": 174,
+      "notes": [
+        "Effective March 2006, British wiring practices were harmonized with Europe in relation to installation wiring and equipment wiring.",
+        "Care should be exercised when connecting imported equipment that does not use AS/NZS conductor colour codes. Detailed testing should be performed to verify the function and connection of wiring within the equipment."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [
+          "Figure 3.1",
+          "Figure 3.2"
+        ],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.8.3.5",
+      "title": "Aerial earthing conductors",
+      "content": "Aerial earthing conductors shall be identified immediately adjacent to their termination at each end of the run either by the letter 'E' or by the earthing symbol.",
+      "page": 175,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9",
+      "title": "INSTALLATION REQUIREMENTS",
+      "content": "",
+      "page": 175,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.1",
+      "title": "General",
+      "content": "Wiring systems shall be installed in accordance with the generally accepted principles of safe and sound practice, using methods that will protect the electrical installation against mechanical or electrical failure under ordinary use, wear and tear, and any abnormal conditions that may reasonably be anticipated.",
+      "page": 175,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.2",
+      "title": "Methods of installation",
+      "content": "Installation methods for typical types of wiring systems are depicted in Table 3.1. The effect of external influences at the installation shall be considered in accordance with Clause 3.3 and manufacturer's instructions. Installation methods and wiring systems that are not depicted in Table 3.1 may be used provided that compliance is maintained with the general requirements of this Section.",
+      "page": 176,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [
+          "3.1"
+        ],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "3.3"
+        ]
+      }
+    },
+    {
+      "number": "3.9.3",
+      "title": "Support and fixing",
+      "content": "",
+      "page": 176,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.3.1",
+      "title": "General",
+      "content": "Wiring systems shall be supported by suitable means to comply with Clause 3.3.2.8. Wiring systems shall be fixed in position by suitable clips, saddles or clamps or by means that will not damage the wiring system and that will not be affected by the wiring system material or any external influences. For wiring systems installed in building elements, the positioning and size of openings and checks shall not reduce the structural strength of those building elements below the levels required by national building codes. Where a wiring system consisting of sheathed cables is installed through metallic structural members, any aperture through which the cable passes shall be bushed or shaped to minimize abrasion of the cable. Where likely to be disturbed, the cable shall be fixed in position at a point adjacent to the aperture.",
+      "page": 176,
+      "notes": [
+        "Limits for the size of openings and checks made in structural members are contained in national building codes.",
+        "In New Zealand, this information may also be found in NZS 3604.",
+        "Fixing of individual cores of a cable may be required where the risk of contact with conductive structural building materials exists (see Clause 5.4.6)."
+      ],
+      "exceptions": [
+        "Where a wiring system is resting on an immovable continuous surface, no further support is required.",
+        "Specific methods of fixing outlined in this Standard do not prohibit the use of alternative methods, provided that an equivalent degree of support and strength is maintained."
+      ],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "NZS 3604"
+        ],
+        "other_clauses": [
+          "3.3.2.8",
+          "5.4.6"
+        ]
+      }
+    },
+    {
+      "number": "3.9.3.2",
+      "title": "Suspended ceilings",
+      "content": "The following conditions apply to the installation of wiring systems in suspended ceilings: (a) Wiring systems may be supported by the suspended ceiling system unless this is not permitted by the suspended ceiling manufacturer.",
+      "page": 176,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.3.3",
+      "title": "Wiring systems likely to be disturbed",
+      "content": "",
+      "page": 177,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.3.3.1",
+      "title": "Location",
+      "content": "Wiring systems installed in the following locations are deemed likely to be disturbed: (a) On the surface of a wall or on the underside of a ceiling or roof. (b) In a space between a floor and the ground to which a person may gain entry. (c) In parts of a ceiling space where access is greater than 0.6 m in height. (d) Within 2.0 m of any access to any space to which a person may gain entry. (e) Below raised floors.",
+      "page": 177,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.3.3.2",
+      "title": "Support and protection",
+      "content": "Wiring systems installed in positions where they are likely to be disturbed shall be\u2014 (a) supported at suitable intervals to prevent the undue sagging of cables; and (b) supported to prevent accidental withdrawal of cables from electrical equipment exposing single-insulated conductors; and (c) protected from mechanical damage as specified in Clause 3.3.2.6. RCDs shall not be used in lieu of mechanical protection for wiring systems that are likely to be disturbed.",
+      "page": 177,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "3.3.2.6"
+        ]
+      }
+    },
+    {
+      "number": "3.9.4",
+      "title": "Protection against mechanical damage",
+      "content": "",
+      "page": 177,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.4.1",
+      "title": "General",
+      "content": "Wiring systems installed in positions where they may reasonably be expected to be subject to mechanical damage shall be adequately protected in accordance with Clause 3.3.2.6 and the applicable requirements of Clauses 3.9.4.2 to 3.9.4.4.",
+      "page": 177,
+      "notes": [
+        "Guide to adequacy and WS classification is provided in Appendix H."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "3.3.2.6",
+          "3.9.4.2",
+          "3.9.4.3",
+          "3.9.4.4"
+        ]
+      }
+    },
+    {
+      "number": "3.9.4.2",
+      "title": "Wiring systems near building surfaces",
+      "content": "Wiring systems that are fixed in position by fasteners, or held in position by thermal insulation, or by passing through an opening in a structural member, shall be protected by one of the methods outlined in Clause 3.9.4.4 if they are concealed within 50 mm from the surface of a wall, floor, ceiling or roof.",
+      "page": 178,
+      "notes": [
+        "Figures 3.3, 3.4 and 3.5 provide examples of protection of wiring systems near building surfaces."
+      ],
+      "exceptions": [
+        "This requirement need not apply to wiring systems that can move freely to a point not less than 50 mm from the surface in the event of a nail or screw penetrating the cavity at the location of the wiring system."
+      ],
+      "references": {
+        "tables": [],
+        "figures": [
+          "3.3",
+          "3.4",
+          "3.5"
+        ],
+        "standards": [],
+        "other_clauses": [
+          "3.9.4.4"
+        ]
+      }
+    },
+    {
+      "number": "3.9.4.3",
+      "title": "Wiring systems under wall lining or roofing material",
+      "content": "",
+      "page": 179,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.4.3.1",
+      "title": "Prohibited locations",
+      "content": "Wiring systems shall not be installed through any space formed between roofing or wall-lining material and its immediate supporting member (see Figure 3.6).",
+      "page": 179,
+      "notes": [
+        "Examples of these situations include those between tile battens and roofing tiles or between corrugated (or other profile) sheeting of a wall or roof and its supporting members. Examples are shown in Figures 3.6 and 3.7."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [
+          "3.6",
+          "3.7"
+        ],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.4.3.2",
+      "title": "Protection required",
+      "content": "Wiring systems shall be protected by one of the methods outlined in Clause 3.9.4.4 if they pass through a structural member, or are fixed in position, within 50 mm from the face of the supporting member to which the lining or roofing material is attached (see Figure 3.7).",
+      "page": 180,
+      "notes": [
+        "Protection referred to in Clause 3.9.4.4 is required if cables are fixed within 50 mm of the upper surface of the rafters or battens (excluding the outer roofing material itself) or within 50 mm of the lower surface of the ceiling, if any."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [
+          "3.7"
+        ],
+        "standards": [],
+        "other_clauses": [
+          "3.9.4.4"
+        ]
+      }
+    },
+    {
+      "number": "3.9.4.4",
+      "title": "Protection methods",
+      "content": "Where protection of a wiring system is required, in accordance with Clauses 3.9.4.2 and 3.9.4.3.2, the wiring system shall be\u2014\n(a) provided with adequate mechanical protection at a minimum of WSX3 to prevent damage (refer to Paragraph H5.4, Appendix H); or",
+      "page": 180,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "3.9.4.2",
+          "3.9.4.3.2",
+          "H5.4"
+        ]
+      }
+    },
+    {
+      "number": "3.9.5",
+      "title": "Wiring systems installed vertically",
+      "content": "Where wiring systems are installed vertically, they shall be installed in accordance with the requirements of Clauses 3.9.2 and 3.9.3 and in such a manner as to avoid damage to any part of the wiring system that may be caused by its own weight or method of support or fixing. Adequate provision shall be made for the support of cables enclosed in a wiring enclosure installed vertically. Cable supports shall be provided at intervals not exceeding 8 m or as recommended by the cable manufacturer.",
+      "page": 181,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "3.9.2",
+          "3.9.3"
+        ]
+      }
+    },
+    {
+      "number": "3.9.6",
+      "title": "Change of direction",
+      "content": "Where wiring systems change direction, the following requirements apply: (a) Bends shall not cause damage, or place undue stress on their sheathing, insulation or terminations. (b) The bending radius recommended by the cable manufacturer shall be observed. Where manufacturer's information is not available, the following minimum internal radii may be considered suitable: (i) Unarmoured sheathed cables ............. 6 times the cable diameter. or (ii) Armoured sheathed cables ............... 12 times the cable diameter. (c) Supports in contact with cables under pressure from changes in direction shall not have sharp edges.",
+      "page": 181,
+      "notes": [],
+      "exceptions": [
+        "These requirements need not apply where the cable has been otherwise protected at the pressure point."
+      ],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.7",
+      "title": "Particular installation requirements",
+      "content": "",
+      "page": 181,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.7.1",
+      "title": "Consumer mains",
+      "content": "",
+      "page": 181,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.7.1.1",
+      "title": "Protected",
+      "content": "Consumer mains protected on the supply side by a short-circuit protective device shall comply with the installation requirements of this Section relevant to the type of wiring system.",
+      "page": 181,
+      "notes": [
+        "The electricity distributor's service protective device(s) may provide short-circuit protection."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.7.1.2",
+      "title": "Unprotected",
+      "content": "Insulated, unsheathed cables enclosed in conductive wiring enclosures shall not be installed without short-circuit protection.\n\nConsumer mains not provided with short-circuit protection on the supply side, shall comply with the installation requirements of this Section relevant to the type of wiring system and shall be\u2014\n(a) constructed in such a manner as to reduce the risk of short-circuit to a minimum; and\n(b) installed in accordance with the relevant additional requirements of the electricity distributor.\n\nThe following wiring systems are deemed to reduce the risk of short-circuit to a minimum:\n(i) Insulated and sheathed cables enclosed in heavy-duty insulating conduit in accordance with either the AS/NZS 2053 series or the AS/NZS 61386 series.\n(ii) Insulated and sheathed cables installed in underground wiring enclosures.\n(iii) Aerial conductors consisting of XLPE cables type X-90UV in accordance with the AS/NZS 3560 series.\n(iv) Busways and busbar systems, including joints and switchboard busbars, having insulation up to the first protective device in accordance with the AS/NZS 3439 series or the AS/NZS 61439 series.",
+      "page": 182,
+      "notes": [
+        "Sheathing of cables is not required within conductive switchboard surrounds."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 2053 series",
+          "AS/NZS 61386 series",
+          "AS/NZS 3560 series",
+          "AS/NZS 3439 series",
+          "AS/NZS 61439 series"
+        ],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.7.2",
+      "title": "Insulated and sheathed cables",
+      "content": "The following applies to insulated and sheathed cables:\n(a) Armoured sheathed cables Armoured sheathed cables may be installed in concrete, plaster or cement render without protection of a wiring enclosure.\n(b) Unarmoured sheathed cables:\n(i) In concrete Unarmoured sheathed cables installed in concrete shall be contained within an appropriate wiring enclosure installed in accordance with Clauses 3.3.2.6 and 3.9.4.\n(ii) In plaster or cement render Unarmoured sheathed cables may be installed in plaster or cement render without protection of a wiring enclosure, provided that the cables are installed and protected in accordance with Clauses 3.3.2.6 and 3.9.4.",
+      "page": 182,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "3.3.2.6",
+          "3.9.4"
+        ]
+      }
+    },
+    {
+      "number": "3.9.7.3",
+      "title": "Mineral insulated metal sheathed (MIMS) cable",
+      "content": "MIMS cable shall comply with the following:\n(a) Protection against corrosion The type of MIMS cable shall be selected to suit the environmental conditions it is installed in where the cable is\u2014\n(i) buried in concrete or plaster containing corrosive agents;\n(ii) installed underground, in accordance with Clause 3.11; or\n(iii) in other locations where corrosion is likely to occur.\n(b) Protection against vibration Movement caused by vibration shall be provided for by introducing a loop in the cable immediately before the termination. The size of the loop shall be determined by the cable size and severity of the vibration.\n(c) Support and fixing MIMS cable shall be supported and, if necessary, fixed in position so as to provide adequate protection against damage. The supports and fixings shall be suitable for use at the highest temperature attained by the cable according to the circumstances of its use.",
+      "page": 183,
+      "notes": [
+        "See Clause 4.2.2.3 for requirements concerning the effect of elevated temperatures on adjacent materials."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "3.11",
+          "4.2.2.3"
+        ]
+      }
+    },
+    {
+      "number": "3.9.7.4",
+      "title": "Flexible cords used as installation wiring",
+      "content": "Flexible cords used as installation wiring shall be of the heavy-duty sheathed type and installed in the same manner as insulated and sheathed cables.\nFlexible cords installed as follows shall be regarded as installation wiring and shall comply with this Clause (3.9.7.4):\n(a) Permanently connected flexible cords, including flexible cords used as pendants for socket-outlets and those connected to an installation coupler.\n(b) Flexible cords not open to view.",
+      "page": 183,
+      "notes": [
+        "See Clause 3.10.1 for requirements for enclosure of cables."
+      ],
+      "exceptions": [
+        "Flexible cords need not be of the heavy-duty type if\u2014\n(a) used for the connection of pendant socket-outlets;\n(b) installed in a suitable wiring enclosure; or\n(c) installed for the connection of equipment, in accordance with the equipment wiring provisions of Clause 4.3."
+      ],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "3.10.1",
+          "4.3"
+        ]
+      }
+    },
+    {
+      "number": null,
+      "title": null,
+      "content": "Exceptions:\n1 Flexible cords used as pendants for lamps, luminaires or provided with, and permanently connected to, an appliance shall not be regarded as installation wiring.\n2 Flexible cords installed for the connection of a single appliance or luminaire shall not be regarded as installation wiring, provided that they\u2014\n\u2022 do not exceed 2.5 m in length; and\n\u2022 have a current-carrying capacity of not less than\u2014\n  \u2014 the current rating or setting of the circuit protective device; or\n  \u2014 the actual load of the appliance or luminaire, subject to the minimum cross-sectional area of any conductor being not less than 0.75 mm\u00b2.",
+      "page": 184,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      },
+      "review_flag": true
+    },
+    {
+      "number": "3.9.7.5",
+      "title": "Low voltage track systems",
+      "content": "(a) Open to view A low voltage track system shall be installed so that the complete system is open to view throughout its entire length but not necessarily from one position.\n(b) Position Track systems shall be installed so that the entry of dust or contamination is minimized.\n(c) Supports The supports for a suspended track system shall be\u2014\n(i) of appropriate design;\n(ii) spaced at intervals not more than 1.5 m apart or as permitted in manufacturer's installation instructions; and\n(iii) arranged so that the system is held securely in position without sagging or undue stress.",
+      "page": 184,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.7.6",
+      "title": "Under-carpet wiring systems",
+      "content": "(a) Position An under-carpet wiring system shall be installed only as a floor-mounted arrangement under carpet tiles of a size not greater than 1 m \u00d7 1 m.\n(b) Method of installation The under-carpet wiring system shall be installed as a total system, using specified component parts and installation tools, in accordance with the manufacturer's instructions. Under-carpet wiring systems of differing configurations shall not be interconnected, e.g. to ensure that there is no interconnection between a five-core and a three-core system, the five-core system shall only be connected to a dedicated circuit.",
+      "page": 184,
+      "notes": [],
+      "exceptions": [
+        "Where manufacturer's instructions permit such interconnection, this requirement need not apply."
+      ],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.8",
+      "title": "Prevention of mutual detrimental effects between services",
+      "content": "",
+      "page": 185,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.8.1",
+      "title": "General",
+      "content": "Wiring systems shall be selected and installed in accordance with Clauses 3.9.8.2 to 3.9.8.4 so as to avoid any detrimental effects arising from the installation and use of the wiring systems in the following situations: (a) Between different electrical installations. (b) Between different parts of the same electrical installation. (c) Between circuits of an electrical installation operating at different voltages, such as extra-low voltage and low voltage. (d) Between circuits of an electrical installation supplying different safety services. (e) Between safety services and the remainder of the electrical installation. (f) Between electrical installations and non-electrical installations, such as gas and water supply. (g) Between electrical installations and telecommunications and data cable installations.",
+      "page": 185,
+      "notes": [
+        "The regulations for safety services provide requirements for the segregation of such wiring systems from other wiring systems."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "3.9.8.2",
+          "3.9.8.3",
+          "3.9.8.4"
+        ]
+      }
+    },
+    {
+      "number": "3.9.8.2",
+      "title": "Different electrical installations",
+      "content": "",
+      "page": 185,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.8.2.1",
+      "title": "Common enclosure/cable",
+      "content": "Conductors for the following applications shall not be installed within the same pipe, tube, conduit or the same multi-core cable: (a) Conductors that form part of different electrical installations. or (b) Conductors that form part of individual occupancies of single or multiple electrical installations.",
+      "page": 185,
+      "notes": [
+        "Wiring enclosures such as ducts or cable trays, with removable covers or with no covers at all, where the cables can be accessed without cutting or destroying the enclosure, are deemed to comply with this Clause (3.9.8.2.1)."
+      ],
+      "exceptions": [
+        "These requirements need not apply to switchboards at which circuits are terminated."
+      ],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.8.2.2",
+      "title": "Segregation",
+      "content": "Where conductors for different electrical installations, or for individual occupancies forming part of single or multiple electrical installations are installed in a common enclosure, they shall be effectively segregated from each other within that enclosure.",
+      "page": 185,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": null,
+      "title": "Installation requirements for cables and other services",
+      "content": "(v) Cables without sheathing or further enclosure shall not be installed in enclosures where they are accessible to personal contact or where they may contact other services, such as water, gas, hydraulic or communications systems.",
+      "page": 187,
+      "notes": [
+        "Metal parts of other services may require bonding to the earthing system in order to provide protection against earth faults, in accordance with Clause 5.6.2.3."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "5.6.2.3"
+        ]
+      },
+      "review_flag": true
+    },
+    {
+      "number": null,
+      "title": "Gas and water services",
+      "content": "(b) Gas and water services Requirements for the separation of distributed gas and water systems from low voltage wiring systems are provided in the AS/NZS 5601 series for gas services and the AS/NZS 3500 series for water services. Wiring systems shall maintain a separation of not less than 25 mm from any above-ground gas or water piping. Separation from underground gas and water services shall be in accordance with Clause 3.11.5.",
+      "page": 187,
+      "notes": [],
+      "exceptions": [
+        "This requirement does not apply to the following: 1 An equipotential bonding conductor connected to the piping, in accordance with this or another Standard. 2 Heat trace cabling."
+      ],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 5601 series",
+          "AS/NZS 3500 series"
+        ],
+        "other_clauses": [
+          "3.11.5"
+        ]
+      },
+      "review_flag": true
+    },
+    {
+      "number": null,
+      "title": "Telecommunication services",
+      "content": "(c) Telecommunication services Requirements for the separation of telecommunications cables from low voltage and high voltage systems are provided\u2014 (i) for Australia, in AS/CA S009; and (ii) for New Zealand in the NZ Telecommunications Forum (TCF) NZ Premises Wiring Guidelines. Separation from telecommunications services shall be as shown in Figures 3.8 and 3.9.",
+      "page": 187,
+      "notes": [
+        "The documents listed in Item (c) contain distances and other measures for the separation of telecommunications cables from low voltage cables as follows: (a) On surfaces or concealed in walls, floors or ceilings, such as depicted in Figure 3.8. (b) Cables in common ducting. (c) In underground trenches, such as depicted in Figure 3.9. (d) Under-carpet wiring. (e) Aerial cables."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [
+          "3.8",
+          "3.9"
+        ],
+        "standards": [
+          "AS/CA S009",
+          "NZ Telecommunications Forum (TCF) NZ Premises Wiring Guidelines"
+        ],
+        "other_clauses": []
+      },
+      "review_flag": true
+    },
+    {
+      "number": "3.9.9",
+      "title": "Selection and installation to minimize the spread of fire",
+      "content": "",
+      "page": 188,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.9.1",
+      "title": "General",
+      "content": "(a) Precautions shall be taken to minimize the spread of fire by the selection of appropriate materials and installation methods.",
+      "page": 188,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": null,
+      "title": null,
+      "content": "(b) Wherever electrical equipment contains flammable liquid in significant quantity, precautions shall be taken to prevent burning liquid and the products of combustion of the liquid (flame, smoke, toxic gases) spreading to other parts of the building.",
+      "page": 189,
+      "notes": [
+        "Examples of such precautions are\u2014 (a) a drainage pit to collect leakages of liquid and ensure their extinction in the event of fire; or (b) installation of the equipment in a chamber of adequate fire-rating and the provision of sills or other means of preventing burning liquid spreading to other parts of the building, such a chamber being ventilated solely to the external atmosphere.",
+        "The generally accepted lower limit for a significant quantity is 25 L."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      },
+      "review_flag": true
+    },
+    {
+      "number": null,
+      "title": null,
+      "content": "(c) In structures of shape and dimensions that facilitate the spread of fire, precautions shall be taken to ensure that the electrical installation cannot propagate a fire, e.g. chimney effect.",
+      "page": 189,
+      "notes": [
+        "Fire detectors may be provided that ensure the implementation of measures for preventing propagation of fire, e.g. the closing of fireproof shutters in ducts, troughs or trunking."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      },
+      "review_flag": true
+    },
+    {
+      "number": "3.9.9.2",
+      "title": "Precautions",
+      "content": "(a) The risk of spread of fire shall be minimized by the selection of appropriate materials and installation. (b) Wiring systems shall be installed so that the general building structural performance and fire safety are not reduced. (c) Cables and products having the necessary fire-rating for wiring systems, in accordance with AS/NZS 3013, may be installed without special precautions. (d) Cables not having the necessary fire-rating for wiring systems shall be limited to short lengths for connection of appliances to permanent wiring systems and shall not pass from one fire-segregated compartment to another.",
+      "page": 189,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 3013"
+        ],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.9.3",
+      "title": "Penetration of fire barriers",
+      "content": "(a) Where a wiring system passes through elements of building construction, such as floors, walls, roofs, ceilings, partitions or cavity barriers that are required to be fire-rated\u2014 (i) the opening shall be close-fitting to the wiring system and at least 50 mm from any other service opening; (ii) the cross-sectional area of the opening shall be not greater than 500 mm\u00b2, i.e. if circular, 25 mm diameter; and",
+      "page": 189,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": null,
+      "title": "Fire-rated penetrations requirements (continued)",
+      "content": "(iii) the fire-rating of structures shall be reinstated where openings remain after passage of the wiring system, in accordance with the relevant provisions of national building codes.",
+      "page": 190,
+      "notes": [
+        "Guidance on materials suitable for restoring fire-rated constructions is given in national building codes."
+      ],
+      "exceptions": [
+        "The cross-sectional area of the opening may be increased up to a maximum of 2000 mm2 (50 mm diameter) for a single cable that leaves a gap of not more than 15 mm between the cable and the opening."
+      ],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      },
+      "review_flag": true
+    },
+    {
+      "number": null,
+      "title": "Fire-rated penetrations - internal sealing",
+      "content": "(b) Wiring systems, such as conduits, cable ducting, cable trunking, busbars or busbar trunking systems, and flush boxes that penetrate elements of building construction required to have a specified fire-rating shall be internally sealed to the degree of fire-rating of the respective element before penetration and externally sealed as required by Item (a)(iii).",
+      "page": 190,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      },
+      "review_flag": true
+    },
+    {
+      "number": null,
+      "title": "Fire-rated penetrations - conduit and trunking exemption",
+      "content": "(c) Conduit and trunking systems of material complying with the flame propagation test of AS/NZS 2053 series or AS/NZS 61386 series or AS/NZS 4296, as appropriate, and having a maximum internal cross-sectioned area of 710 mm2, i.e. 30 mm internal diameter, need not be internally sealed provided that\u2014 (i) the system satisfies the degree of protection IP33; and (ii) any termination of the system in one of the compartments separated by the building construction being penetrated satisfies the degree of protection IP33.",
+      "page": 190,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 2053 series",
+          "AS/NZS 61386 series",
+          "AS/NZS 4296"
+        ],
+        "other_clauses": []
+      },
+      "review_flag": true
+    },
+    {
+      "number": null,
+      "title": "Fire-rated penetrations - sealing arrangement requirements",
+      "content": "(d) All sealing arrangements used in accordance with Items (a) to (c) shall comply with the following requirements. Sealing arrangements shall\u2014 (i) be compatible with the materials of the wiring system with which they are in contact; (ii) permit thermal movement of the wiring system without reduction of the sealing quality; and (iii) be of adequate mechanical stability to withstand the stresses that may arise through damage to the support of the wiring system because of fire.",
+      "page": 190,
+      "notes": [
+        "This requirement may be satisfied if\u2014 (a) either cable clamps or cable supports are installed within 750 mm of the seal, and are able to withstand the mechanical loads expected following the collapse of the supports on the fire side of the seal to the extent that no strain is transferred to the seal; or (b) the design of the sealing system provides adequate support."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      },
+      "review_flag": true
+    },
+    {
+      "number": null,
+      "title": null,
+      "content": "(e) Sealing arrangements intended to satisfy Items (a) and (b) above shall resist external influences to the same degree as the wiring system with which they are used and, in addition, shall meet the following requirements: (i) They shall be resistant to the products of combustion to the same extent as the elements of building construction that have been penetrated. (ii) They shall provide the same degree of protection from water penetration as that required for the building construction element in which they have been installed. (iii) The seal and the wiring system shall be protected from dripping water that may travel along the wiring system, or that may otherwise collect around the seal, unless the materials used in the seal are all resistant to moisture when finally assembled for use.",
+      "page": 191,
+      "notes": [
+        "Materials and installation methods used for sealing will require the use of certified sealing products and installation methods."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      },
+      "review_flag": true
+    },
+    {
+      "number": "3.9.10",
+      "title": "Limitation of circulating and eddy currents",
+      "content": "",
+      "page": 191,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.10.1",
+      "title": "General",
+      "content": "Precautions shall be taken to limit circulating and eddy currents.",
+      "page": 191,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.10.2",
+      "title": "Cables for a.c. circuits\u2014Electromagnetic effects",
+      "content": "Single-core cables armoured with steel wire or tape shall not be used for a.c. circuits. Conductors of a.c. circuits installed in ferromagnetic enclosures shall be arranged so that the conductors of all phases and the neutral conductor (if any) and the appropriate protective earthing conductor of each circuit are contained in the same enclosure. Where such conductors enter a ferrous enclosure they shall be\u2014 (a) arranged so that the conductors are not individually surrounded by a ferrous material; or (b) provided with other means of limiting any excessive heating effects of eddy (induced) currents.",
+      "page": 191,
+      "notes": [
+        "Particular care needs to be taken where single-core cables carrying current in excess of 300 A pass through ferrous metal wall lining, switchboard surrounds, or similar ferrous enclosures.",
+        "The use of non-ferrous enclosures or gland plates or, where suitable, providing an air gap by slotting between individual core entries to break the magnetic circuit may be applied to eliminate this effect. A slot between individual core entries with a width of 20% of the individual core entries diameter is considered satisfactory."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.10.3",
+      "title": "Cables with non-ferrous metal sheathing",
+      "content": "Single-core cables enclosed in lead, copper, aluminium or other non-ferrous metal sheathing shall be used for alternating currents only where one of the following arrangements is employed:\n(a) Trefoil formation:\n(i) The cables shall be run in trefoil formation throughout their entire length.\n(ii) The sheaths of the cables shall be bonded at the point where the trefoil formation ceases, or at the switchboard termination, and the conductivity of the bonding conductor shall be not less than that of the cable sheath.\n(b) Other than trefoil formation:\n(i) The cables shall be placed as near as practicable to each other (they may be touching).\n(ii) The sheathing of the cables shall be bonded at both ends and at intervals not exceeding 30 m along the cable run. The conductivity of the bonding conductor shall be not less than that of the cable sheath.",
+      "page": 192,
+      "notes": [],
+      "exceptions": [
+        "A distance not exceeding two metres at each end to facilitate termination of the cables is permitted.",
+        "Where the sheathing of cables is provided by a serving, the bonding need only be carried out at both ends."
+      ],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.9.11",
+      "title": "Minimization of electromagnetic interference",
+      "content": "Certain types of electrical installations, e.g. those containing sensitive electronic equipment or systems, may require minimization of electromagnetic interference arising from magnetic fields developed from current flowing in cables. This may be addressed by\u2014\n(a) selection of cables designed for low magnetic field emissions;\n(b) installation of cables in enclosures that contain or shield magnetic fields; or\n(c) installation of cables in configurations that produce low magnetic fields.",
+      "page": 192,
+      "notes": [
+        "The AS/NZS 3008.1 series details circuit configurations for the installation of parallel single-core cables in groups that produce reduced levels of magnetic field in comparison with other electrically symmetrical configurations."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 3008.1"
+        ],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.10",
+      "title": "ENCLOSURE OF CABLES",
+      "content": "",
+      "page": 193,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.10.1",
+      "title": "General",
+      "content": "",
+      "page": 193,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.10.1.1",
+      "title": "Insulated, unsheathed cables",
+      "content": "Insulated, unsheathed cables shall be enclosed in a wiring enclosure throughout their entire length.",
+      "page": 193,
+      "notes": [
+        "This exception does not apply within a roof space."
+      ],
+      "exceptions": [
+        "Wiring enclosures need not be provided for insulated, unsheathed cables installed as follows: 1 As aerial conductors, in accordance with Clause 3.12. 2 In an enclosed wall cavity between an accessory and a wiring enclosure or sheathing terminated within 100 mm of the hole over or within which the accessory is mounted. 3 Within switchboards, metering and similar enclosures, provided that such cables are not exposed to touch during normal switching or meter-reading operations. 4 As earthing or equipotential bonding conductors installed in accordance with Section 5. 5 As an extra-low voltage circuit, in accordance with Clause 7.5."
+      ],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "3.12",
+          "5",
+          "7.5"
+        ]
+      }
+    },
+    {
+      "number": "3.10.1.2",
+      "title": "Insulated and sheathed cables",
+      "content": "Cables of a sheathed type need not be installed in a wiring enclosure. Where the sheath of a cable is removed, the exposed cores of the cable shall be enclosed in accordance with Clause 3.10.1.1.",
+      "page": 193,
+      "notes": [],
+      "exceptions": [
+        "Cables having insulation or sheath that does not meet the combustion propagation requirements of the AS/NZS 5000 series, e.g. polyethylene-insulated unsheathed cables, shall be installed in fire-rated enclosures."
+      ],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 5000 series"
+        ],
+        "other_clauses": [
+          "3.10.1.1"
+        ]
+      }
+    },
+    {
+      "number": "3.10.2",
+      "title": "Wiring enclosures",
+      "content": "",
+      "page": 193,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.10.2.1",
+      "title": "Types",
+      "content": "The following types of wiring enclosures may be used for the protection of cables requiring enclosure as specified in Clause 3.10.1: (a) Conduits in accordance with AS/NZS 2053 series or the AS/NZS 61386 series, including\u2014 (i) steel conduits or other metal tubing or conduit; (ii) flexible metal conduit; (iii) rigid and flexible insulating conduit; and (iv) corrugated insulating conduit.",
+      "page": 193,
+      "notes": [
+        "Refer to Appendix N for information on compatibility of conduit classifications in the AS/NZS 2053 series and AS/NZS 61386 series."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 2053 series",
+          "AS/NZS 61386 series"
+        ],
+        "other_clauses": [
+          "3.10.1"
+        ]
+      }
+    },
+    {
+      "number": "3.10.2.2",
+      "title": "Change of wiring enclosures",
+      "content": "Any change from one type of wiring enclosure to another shall be made\u2014\n(a) at a switchboard; or\n(b) by means of a suitable device that provides for the complete protection of the conductor insulation and for continuity of conductive wiring enclosures.",
+      "page": 194,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.10.2.3",
+      "title": "Entry of water",
+      "content": "Wiring enclosures shall be\u2014\n(a) installed in a manner that will prevent water from entering electrical equipment and enclosures; and\n(b) where exposed to the weather, provided with adequate means to prevent the entry of rain.",
+      "page": 194,
+      "notes": [
+        "The relationship between the height of each end of a wiring enclosure and the risk of entry of water should be considered, e.g. a conduit installed on a hill from an underground connection pit to a switchboard enclosure that is much lower than the connection pit."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.10.3",
+      "title": "Installation of wiring enclosures",
+      "content": "",
+      "page": 194,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.10.3.1",
+      "title": "General",
+      "content": "Wiring enclosures shall be installed in accordance with safe and sound practice and provide adequate protection as required by Clauses 3.3 and 3.10.3.2 to 3.10.3.9.\n\nWiring enclosures installed on roofing material shall not be installed in a manner that\u2014\n(a) obstructs the natural water drain paths; or\n(b) promotes the accumulation of debris.\n\nThis may be achieved by\u2014\n(i) installing the enclosure across the roofing material profile; or\n(ii) installing the enclosure within the valley or tray of the roofing material using supports that prevent the obstruction or water or accumulation of debris, e.g. standoff brackets or blocks.",
+      "page": 194,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "3.3",
+          "3.10.3.2",
+          "3.10.3.9"
+        ]
+      }
+    },
+    {
+      "number": "3.10.3.2",
+      "title": "Support",
+      "content": "Wiring enclosures shall be supported by suitable means to prevent damage to the enclosure or any associated cables.",
+      "page": 195,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.10.3.3",
+      "title": "Continuity",
+      "content": "Mechanical and electrical continuity of conductive enclosures shall be maintained.",
+      "page": 195,
+      "notes": [],
+      "exceptions": [
+        "Continuity of conductive enclosures need not be maintained where, in accordance with this Standard, the enclosure is not required to be earthed, e.g. the enclosure contains insulated and sheathed cables only."
+      ],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.10.3.4",
+      "title": "Bending",
+      "content": "The radius of every bend in a wiring system shall be such that conductors and cables will not suffer damage. Bends in rigid conduit shall be such that the internal diameter is not significantly reduced. Changes of direction in trunking, ducts or similar applications shall permit the bending of cables laid therein, so as to comply with the requirements of this Clause.",
+      "page": 195,
+      "notes": [
+        "See Clause 3.9.6 for cable-bending requirements."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "3.9.6"
+        ]
+      }
+    },
+    {
+      "number": "3.10.3.5",
+      "title": "Passage for conductors",
+      "content": "Where conductors or cables, including flexible cables and flexible cords, are to be threaded through conduits, tubes or channels, or passed through openings formed in metalwork, such tubes, channels, conduit ends or openings shall be of adequate size and shall\u2014 (a) be provided with bushes that are securely fixed in position; or (b) if not bushed, have no sharp angles or projecting edges that would be likely to damage a conductor or the insulation, braiding or sheathing of a cable.",
+      "page": 195,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.10.3.6",
+      "title": "Terminations",
+      "content": "Terminations shall be arranged so that wiring enclosures terminate in, and are supported on, electrical equipment in such a manner as to fully protect the enclosed cables as they pass into the electrical equipment. Each end of flexible conduit shall be securely anchored to the fixed conduit, structure or electrical equipment where it terminates.",
+      "page": 195,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.10.3.7",
+      "title": "Installation in direct sunlight",
+      "content": "Rigid insulating conduit, conduit fittings and cable trunking systems installed in direct sunlight shall be\u2014 (a) of a type designed for such use; or (b) painted with a light-coloured water-based acrylic paint.",
+      "page": 195,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.10.3.8",
+      "title": "Provision for expansion",
+      "content": "Provision for expansion shall be provided in runs of rigid insulating conduit.",
+      "page": 196,
+      "notes": [
+        "The thermal expansion of rigid insulating conduit for a 10\u00b0C temperature rise is approximately 1 mm for each 1 m of length."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.10.3.9",
+      "title": "Cable trunking",
+      "content": "Cable trunking installations shall be installed as follows:\n(a) Covers shall be able to be opened, where practicable.\n(b) Covers shall be continuous when passing through walls or floors.\n(c) Cable trunking shall be accessible through its entire length.\n(d) Cables installed in a trunking shall not rely on any readily removable cover for support.\n(e) Non-hygroscopic trunking shall be used to enclose insulated, unsheathed conductors.\n(f) Live parts of accessories mounted on cable trunking shall be arranged so that basic protection is provided, in accordance with Clause 1.5.4.",
+      "page": 196,
+      "notes": [
+        "See Clause 3.9.9.3 for requirements for penetration of fire-rated constructions.",
+        "AS/NZS 2053.1 and AS/NZS 61386.1 requires that conduits suitable for use in direct sunlight be marked with the letter 'T'.",
+        "AS/NZS 4296 recommends that cable trunking systems suitable for use in direct sunlight be marked with the letter 'T'."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 2053.1",
+          "AS/NZS 61386.1",
+          "AS/NZS 4296"
+        ],
+        "other_clauses": [
+          "1.5.4",
+          "3.9.9.3"
+        ]
+      }
+    },
+    {
+      "number": "3.11",
+      "title": "UNDERGROUND WIRING SYSTEMS",
+      "content": "",
+      "page": 196,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.11.1",
+      "title": "Suitability and protection",
+      "content": "Cables installed underground shall be\u2014\n(a) suitable for the environment in which they are placed;\n(b) provided with protection against inadvertent damage likely to be caused by manual or mechanical excavation work; and\n(c) provided with suitable warnings, marking or other means to minimize the risk of inadvertent damage likely to be caused by manual or mechanical excavation works.",
+      "page": 196,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.11.2",
+      "title": "Classification of wiring systems",
+      "content": "Underground wiring systems are classified as one of three categories. The type of cable and form of enclosure determine the category assigned to the underground wiring system.\n\nCategory A system\u2014where the wiring system is inherently suitable for installation below ground and no further mechanical protection is required.",
+      "page": 196,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.11.3",
+      "title": "Arrangements",
+      "content": "",
+      "page": 197,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.11.3.1",
+      "title": "Category A underground wiring systems",
+      "content": "Category A underground wiring systems recognized by this Standard comprise one of the following arrangements:\n(a) A system where cables are enclosed in heavy-duty insulating conduit without further mechanical protection.\n(b) A system where cables are enclosed in insulating wiring enclosures encased in concrete.\n(c) A system where sheathed cables are enclosed in galvanized steel pipe without further mechanical protection.\n(d) A system where armoured sheathed cables or neutral-screened cables are buried direct in the ground without mechanical protection.",
+      "page": 197,
+      "notes": [
+        "Metal conduits are not suitable for this purpose.",
+        "Examples of Category A underground wiring systems are given in Figures 3.10 to 3.12."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [
+          "3.10",
+          "3.11",
+          "3.12"
+        ],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.11.3.2",
+      "title": "Category B underground wiring systems",
+      "content": "Category B underground wiring systems recognized by this Standard comprise one of the following arrangements:\n(a) A system where cables are enclosed in medium-duty insulating conduit with additional mechanical protection.\n(b) A system where sheathed cables are buried direct in the ground with mechanical protection.",
+      "page": 197,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.11.3.3",
+      "title": "Category C underground wiring system",
+      "content": "Category C underground wiring systems recognized by this Standard comprise cables chased in rock and covered with concrete.",
+      "page": 198,
+      "notes": [
+        "A Category A underground wiring system laid in a channel chased in rock, in accordance with Category C system requirements, may be deemed to be Category C.",
+        "An example of a Category C underground wiring system is given in Figure 3.16."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [
+          "3.16"
+        ],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.11.4",
+      "title": "Installation requirements",
+      "content": "",
+      "page": 200,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.11.4.1",
+      "title": "General",
+      "content": "Underground wiring systems shall be installed in accordance with the requirements of Clauses 3.11.4.2 to 3.11.4.6.",
+      "page": 200,
+      "notes": [
+        "Typical arrangements of underground wiring systems are shown, and measurement values also apply to any direction where the cover is relied upon to minimize risk of excavation."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "3.11.4.2",
+          "3.11.4.3",
+          "3.11.4.4",
+          "3.11.4.5",
+          "3.11.4.6"
+        ]
+      }
+    },
+    {
+      "number": "3.11.4.2",
+      "title": "Unenclosed cables",
+      "content": "Any Category A or Category B wiring system that comprises cables not installed in a wiring enclosure shall be laid on a bed of not less than 50 mm of sand or friable soil, free of sharp stone, and covered by not less than 50 mm of the same material.",
+      "page": 200,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.11.4.3",
+      "title": "Category B wiring system mechanical protection",
+      "content": "For a Category B wiring system, additional mechanical protection shall be provided as follows:\n(a) The protection shall be placed not more than 75 mm above the wiring system.\n(b) The protection shall be not less than 150 mm wide.\n(c) The protection shall overlap the wiring system by at least 40 mm on each side.\n(d) The protection shall consist of one or a combination of the following:\n(i) Precast concrete slabs having a thickness of not less than 40 mm and a classification of not less than grade 20 in accordance with AS 3600 or NZS 3104.\n(ii) Concrete slabs cast on-site having a thickness of not less than 100 mm.\n(iii) A continuous concrete pour having a thickness of not less than 75 mm.\n(iv) Fibrous cement slabs having a thickness of not less than 12 mm.\n(v) Bricks manufactured specifically for the protection of electric cables.\n(vi) Polymeric cable cover strips complying with AS 4702.\n(vii) Other materials that offer the same degree of protection afforded by the materials in Items (i) to (vi).",
+      "page": 200,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS 3600",
+          "NZS 3104",
+          "AS 4702"
+        ],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.11.4.4",
+      "title": "Minimum depth of cover",
+      "content": "Underground wiring systems shall be installed with the minimum depth of cover and protection specified in Table 3.6.",
+      "page": 200,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [
+          "Table 3.6"
+        ],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    }
+  ],
+  "tables": [
+    {
+      "number": "3.1",
+      "title": "CABLE TYPES AND THEIR APPLICATION IN WIRING SYSTEMS",
+      "page": 155,
+      "columns": [
+        "Installation method",
+        "Description",
+        "Typical cable types"
+      ],
+      "data": [
+        {
+          "Installation method": "Unenclosed",
+          "Description": "On a surface (including cable tray or ladder)",
+          "Typical cable types": "Insulated and sheathed, Screened or armoured, Mineral insulated, metal sheathed (MIMS), Earthing conductors"
+        },
+        {
+          "Installation method": "Unenclosed",
+          "Description": "On a surface partly surrounded by thermal insulation",
+          "Typical cable types": ""
+        },
+        {
+          "Installation method": "Unenclosed",
+          "Description": "Fully surrounded by thermal insulation",
+          "Typical cable types": ""
+        },
+        {
+          "Installation method": "Unenclosed",
+          "Description": "Buried direct in the ground, subject to the requirements of Clause 3.11",
+          "Typical cable types": ""
+        }
+      ],
+      "searchable_text": "Table 3.1 CABLE TYPES AND THEIR APPLICATION IN WIRING SYSTEMS: Installation method Unenclosed, Description On a surface (including cable tray or ladder), On a surface partly surrounded by thermal insulation, Fully surrounded by thermal insulation, Buried direct in the ground subject to the requirements of Clause 3.11, Typical cable types Insulated and sheathed, Screened or armoured, Mineral insulated metal sheathed (MIMS), Earthing conductors"
+    },
+    {
+      "number": "3.1",
+      "title": "Installation methods (continued)",
+      "page": 156,
+      "columns": [
+        "Installation method",
+        "Description",
+        "Typical cable types"
+      ],
+      "data": [
+        {
+          "Installation method": "On a surface (including cable trunking)",
+          "Description": "On a surface (including cable trunking)",
+          "Typical cable types": "Insulated, unsheathed; Insulated and sheathed; Screened or armoured; MIMS"
+        },
+        {
+          "Installation method": "On a surface and partly surrounded by thermal insulation",
+          "Description": "In an enclosure",
+          "Typical cable types": "Earthing conductors"
+        },
+        {
+          "Installation method": "Fully surrounded by thermal insulation",
+          "Description": "Fully surrounded by thermal insulation",
+          "Typical cable types": "Insulated, unsheathed"
+        },
+        {
+          "Installation method": "Underground, subject to the requirements of Clause 3.11",
+          "Description": "Underground, subject to the requirements of Clause 3.11",
+          "Typical cable types": "Insulated and sheathed; Screened or armoured; Earthing conductors"
+        },
+        {
+          "Installation method": "Supported on a catenary system",
+          "Description": "Supported on a catenary system",
+          "Typical cable types": "Insulated and sheathed; Screened or armoured; Earthing conductors"
+        },
+        {
+          "Installation method": "Supported on insulators",
+          "Description": "Supported on insulators",
+          "Typical cable types": "Aerial conductors; Earthing conductors"
+        }
+      ],
+      "searchable_text": "Table 3.1 Installation methods continued: On a surface including cable trunking - Insulated unsheathed, Insulated and sheathed, Screened or armoured, MIMS; On a surface and partly surrounded by thermal insulation - In an enclosure, Earthing conductors; Fully surrounded by thermal insulation - Insulated unsheathed; Underground subject to requirements of Clause 3.11 - Insulated and sheathed, Screened or armoured, Earthing conductors; Supported on a catenary system - Insulated and sheathed, Screened or armoured, Earthing conductors; Supported on insulators - Aerial conductors, Earthing conductors",
+      "references": {
+        "other_clauses": [
+          "3.11"
+        ]
+      }
+    },
+    {
+      "number": "3.2",
+      "title": "LIMITING TEMPERATURES FOR INSULATED CABLES",
+      "page": 161,
+      "columns": [
+        "Type of cable insulation",
+        "Operating temperature of conductor, \u00b0C - Normal use",
+        "Operating temperature of conductor, \u00b0C - Maximum permissible",
+        "Operating temperature of conductor, \u00b0C - Minimum ambient"
+      ],
+      "data": [
+        {
+          "Type of cable insulation": "Thermoplastic",
+          "Operating temperature of conductor, \u00b0C - Normal use": "",
+          "Operating temperature of conductor, \u00b0C - Maximum permissible": "",
+          "Operating temperature of conductor, \u00b0C - Minimum ambient": ""
+        },
+        {
+          "Type of cable insulation": "V-75",
+          "Operating temperature of conductor, \u00b0C - Normal use": "75",
+          "Operating temperature of conductor, \u00b0C - Maximum permissible": "75",
+          "Operating temperature of conductor, \u00b0C - Minimum ambient": "0"
+        },
+        {
+          "Type of cable insulation": "HFI-75-TP, TPE-75",
+          "Operating temperature of conductor, \u00b0C - Normal use": "75",
+          "Operating temperature of conductor, \u00b0C - Maximum permissible": "75",
+          "Operating temperature of conductor, \u00b0C - Minimum ambient": "\u221220"
+        },
+        {
+          "Type of cable insulation": "V-90",
+          "Operating temperature of conductor, \u00b0C - Normal use": "75",
+          "Operating temperature of conductor, \u00b0C - Maximum permissible": "90",
+          "Operating temperature of conductor, \u00b0C - Minimum ambient": "0"
+        },
+        {
+          "Type of cable insulation": "HFI-90-TP, TP-90",
+          "Operating temperature of conductor, \u00b0C - Normal use": "75",
+          "Operating temperature of conductor, \u00b0C - Maximum permissible": "90",
+          "Operating temperature of conductor, \u00b0C - Minimum ambient": "\u221220"
+        },
+        {
+          "Type of cable insulation": "V-90HT",
+          "Operating temperature of conductor, \u00b0C - Normal use": "75",
+          "Operating temperature of conductor, \u00b0C - Maximum permissible": "105",
+          "Operating temperature of conductor, \u00b0C - Minimum ambient": "0"
+        },
+        {
+          "Type of cable insulation": "Elastomeric",
+          "Operating temperature of conductor, \u00b0C - Normal use": "",
+          "Operating temperature of conductor, \u00b0C - Maximum permissible": "",
+          "Operating temperature of conductor, \u00b0C - Minimum ambient": ""
+        },
+        {
+          "Type of cable insulation": "R-EP-90",
+          "Operating temperature of conductor, \u00b0C - Normal use": "90",
+          "Operating temperature of conductor, \u00b0C - Maximum permissible": "90",
+          "Operating temperature of conductor, \u00b0C - Minimum ambient": "\u221240"
+        },
+        {
+          "Type of cable insulation": "R-CPE-90, R-HF-90, R-CSP-90",
+          "Operating temperature of conductor, \u00b0C - Normal use": "90",
+          "Operating temperature of conductor, \u00b0C - Maximum permissible": "90",
+          "Operating temperature of conductor, \u00b0C - Minimum ambient": "\u221220"
+        },
+        {
+          "Type of cable insulation": "R-HF-110, R-E-110",
+          "Operating temperature of conductor, \u00b0C - Normal use": "110",
+          "Operating temperature of conductor, \u00b0C - Maximum permissible": "110",
+          "Operating temperature of conductor, \u00b0C - Minimum ambient": "*"
+        },
+        {
+          "Type of cable insulation": "R-S-150",
+          "Operating temperature of conductor, \u00b0C - Normal use": "150",
+          "Operating temperature of conductor, \u00b0C - Maximum permissible": "150",
+          "Operating temperature of conductor, \u00b0C - Minimum ambient": "\u221250"
+        },
+        {
+          "Type of cable insulation": "Cross-linked polyethylene",
+          "Operating temperature of conductor, \u00b0C - Normal use": "",
+          "Operating temperature of conductor, \u00b0C - Maximum permissible": "",
+          "Operating temperature of conductor, \u00b0C - Minimum ambient": ""
+        },
+        {
+          "Type of cable insulation": "X-90, X-90UV, X-HF-90",
+          "Operating temperature of conductor, \u00b0C - Normal use": "90",
+          "Operating temperature of conductor, \u00b0C - Maximum permissible": "90",
+          "Operating temperature of conductor, \u00b0C - Minimum ambient": "*"
+        },
+        {
+          "Type of cable insulation": "X-HF-110",
+          "Operating temperature of conductor, \u00b0C - Normal use": "110",
+          "Operating temperature of conductor, \u00b0C - Maximum permissible": "110",
+          "Operating temperature of conductor, \u00b0C - Minimum ambient": "*"
+        },
+        {
+          "Type of cable insulation": "MIMS",
+          "Operating temperature of conductor, \u00b0C - Normal use": "100",
+          "Operating temperature of conductor, \u00b0C - Maximum permissible": "250",
+          "Operating temperature of conductor, \u00b0C - Minimum ambient": "(6)"
+        },
+        {
+          "Type of cable insulation": "Other types",
+          "Operating temperature of conductor, \u00b0C - Normal use": "",
+          "Operating temperature of conductor, \u00b0C - Maximum permissible": "",
+          "Operating temperature of conductor, \u00b0C - Minimum ambient": ""
+        },
+        {
+          "Type of cable insulation": "PE, LLDPE",
+          "Operating temperature of conductor, \u00b0C - Normal use": "70",
+          "Operating temperature of conductor, \u00b0C - Maximum permissible": "70",
+          "Operating temperature of conductor, \u00b0C - Minimum ambient": "*"
+        }
+      ],
+      "notes": [
+        "* Refer to manufacturer's information.",
+        "1 The types of cable insulation given in Table 3.2 are included in relevant specifications, i.e. the AS/NZS 5000 series, AS/NZS 3191, AS/NZS 3808 and AS/NZS 60702.1.",
+        "2 Lower maximum temperatures will apply where materials used in the construction of the cables or in association therewith, such as coverings, sheathings, insulating sleeving on connections and sealing compounds, have maximum operating temperatures lower than the cable proper. However, the allowable operating temperatures for such materials shall not be exceeded.",
+        "3 If manufacturer's recommendations permit, cables may be installed in locations where temperatures lower than specified may occur.",
+        "4 The normal operating temperature of thermoplastic cables, including flexible cords installed as installation wiring, is based on a conductor temperature of 75\u00b0C. This is because of the risk of thermal deformation of insulation if the cables are clipped, fixed or otherwise installed in a manner that exposes cable to severe mechanical pressure at higher temperatures."
+      ],
+      "searchable_text": "Table 3.2 LIMITING TEMPERATURES FOR INSULATED CABLES: Thermoplastic V-75 75\u00b0C normal 75\u00b0C max 0\u00b0C min, HFI-75-TP TPE-75 75\u00b0C normal 75\u00b0C max -20\u00b0C min, V-90 75\u00b0C normal 90\u00b0C max 0\u00b0C min, HFI-90-TP TP-90 75\u00b0C normal 90\u00b0C max -20\u00b0C min, V-90HT 75\u00b0C normal 105\u00b0C max 0\u00b0C min, Elastomeric R-EP-90 90\u00b0C normal 90\u00b0C max -40\u00b0C min, R-CPE-90 R-HF-90 R-CSP-90 90\u00b0C normal 90\u00b0C max -20\u00b0C min, R-HF-110 R-E-110 110\u00b0C normal 110\u00b0C max, R-S-150 150\u00b0C normal 150\u00b0C max -50\u00b0C min, Cross-linked polyethylene X-90 X-90UV X-HF-90 90\u00b0C normal 90\u00b0C max, X-HF-110 110\u00b0C normal 110\u00b0C max, MIMS 100\u00b0C normal 250\u00b0C max, PE LLDPE 70\u00b0C normal 70\u00b0C max",
+      "references": {
+        "standards": [
+          "AS/NZS 5000 series",
+          "AS/NZS 3191",
+          "AS/NZS 3808",
+          "AS/NZS 60702.1"
+        ]
+      }
+    },
+    {
+      "number": "3.3",
+      "title": "NOMINAL MINIMUM CROSS-SECTIONAL AREA OF CONDUCTORS",
+      "page": 164,
+      "columns": [
+        "Type of wiring system",
+        "Use of the circuit",
+        "Material",
+        "Conductor Cross-sectional area mm2"
+      ],
+      "data": [
+        {
+          "Type of wiring system": "Insulated conductors",
+          "Use of the circuit": "Socket-outlets (see Exception 1)",
+          "Material": "Copper",
+          "Conductor Cross-sectional area mm2": "2.5"
+        },
+        {
+          "Type of wiring system": "Insulated conductors",
+          "Use of the circuit": "Other circuits",
+          "Material": "Copper",
+          "Conductor Cross-sectional area mm2": "1"
+        },
+        {
+          "Type of wiring system": "Insulated conductors",
+          "Use of the circuit": "Signal and relay control circuits",
+          "Material": "Copper",
+          "Conductor Cross-sectional area mm2": "0.5"
+        },
+        {
+          "Type of wiring system": "Bare conductors",
+          "Use of the circuit": "\u2014",
+          "Material": "Copper",
+          "Conductor Cross-sectional area mm2": "6"
+        },
+        {
+          "Type of wiring system": "Insulated flexible conductors",
+          "Use of the circuit": "\u2014",
+          "Material": "Copper",
+          "Conductor Cross-sectional area mm2": "0.75"
+        },
+        {
+          "Type of wiring system": "Aerial wiring",
+          "Use of the circuit": "\u2014",
+          "Material": "Copper",
+          "Conductor Cross-sectional area mm2": "6"
+        },
+        {
+          "Type of wiring system": "Aerial wiring",
+          "Use of the circuit": "\u2014",
+          "Material": "Aluminium",
+          "Conductor Cross-sectional area mm2": "16"
+        }
+      ],
+      "exceptions": [
+        "1 Smaller conductors may be used on subcircuits supplying socket-outlets, based on their suitability, in accordance with this Standard, and taking account of voltage drop, current-carrying capacity and reliability of connections.",
+        "2 Table 3.3 does not limit cable sizes for extra-low voltage or switchboard wiring."
+      ],
+      "notes": [
+        "The size of unprotected consumer mains should be coordinated with the electricity distributor."
+      ],
+      "searchable_text": "Table 3.3 NOMINAL MINIMUM CROSS-SECTIONAL AREA OF CONDUCTORS: Insulated conductors Socket-outlets Copper 2.5mm2, Other circuits Copper 1mm2, Signal and relay control circuits Copper 0.5mm2, Bare conductors Copper 6mm2, Insulated flexible conductors Copper 0.75mm2, Aerial wiring Copper 6mm2 Aluminium 16mm2"
+    },
+    {
+      "number": "3.4",
+      "title": "CONDUCTOR COLOURS FOR INSTALLATION WIRING",
+      "page": 172,
+      "columns": [
+        "Function",
+        "Insulation colour"
+      ],
+      "data": [
+        {
+          "Function": "Protective earth",
+          "Insulation colour": "Green/yellow"
+        },
+        {
+          "Function": "Equipotential bonding",
+          "Insulation colour": "Green/yellow"
+        },
+        {
+          "Function": "Neutral",
+          "Insulation colour": "Black or light blue"
+        },
+        {
+          "Function": "Active",
+          "Insulation colour": "Any colour other than green, yellow, green/yellow, black or light blue"
+        }
+      ],
+      "notes": [
+        "When green/yellow is used, one colour shall cover not less than 30% and not more than 70% of the surface area, with the other colour covering the remainder of the surface.",
+        "Recommended colours for actives are\u2014 (a) Red or brown for single-phase; or (b) Red, white or blue for multiphase.",
+        "Where colours are used for the identification of cable cores, Australian and New Zealand cable identification colours and European cable identification colours shall not be combined within the same wiring enclosure or the same multi-core cable.",
+        "In New Zealand domestic installations, the only permitted colour for neutral conductors is black."
+      ],
+      "searchable_text": "Table 3.4 CONDUCTOR COLOURS FOR INSTALLATION WIRING: Protective earth Green/yellow, Equipotential bonding Green/yellow, Neutral Black or light blue, Active Any colour other than green yellow green/yellow black or light blue"
+    },
+    {
+      "number": "3.5",
+      "title": "UNDERGROUND WIRING SYSTEM CATEGORIES",
+      "page": 199,
+      "columns": [
+        "Method of protection\u2014Type of cable",
+        "Heavy-duty conduit*",
+        "Medium-duty conduit* encased in concrete",
+        "Heavy-duty fibre cement conduit",
+        "Fibre cement conduit encased in concrete",
+        "Medium- or heavy-duty galvanized pipe",
+        "Medium-duty, corrugated or flexible conduit*",
+        "Buried direct in the ground with no enclosure",
+        "Chased in rock with no enclosure"
+      ],
+      "data": [
+        {
+          "Method of protection\u2014Type of cable": "Insulated, unsheathed",
+          "Heavy-duty conduit*": "A",
+          "Medium-duty conduit* encased in concrete": "A",
+          "Heavy-duty fibre cement conduit": "NP",
+          "Fibre cement conduit encased in concrete": "NP",
+          "Medium- or heavy-duty galvanized pipe": "NP",
+          "Medium-duty, corrugated or flexible conduit*": "B",
+          "Buried direct in the ground with no enclosure": "NP",
+          "Chased in rock with no enclosure": null
+        }
+      ],
+      "searchable_text": "Table 3.5 UNDERGROUND WIRING SYSTEM CATEGORIES: Method of protection types including Heavy-duty conduit, Medium-duty conduit encased in concrete, Heavy-duty fibre cement conduit, Fibre cement conduit encased in concrete, Medium- or heavy-duty galvanized pipe, Medium-duty corrugated or flexible conduit, Buried direct in the ground with no enclosure, Chased in rock with no enclosure. Cable types include Insulated unsheathed. Values A, B, NP indicating permitted installation methods."
+    }
+  ],
+  "figures": [
+    {
+      "number": "3.1",
+      "caption": "SINGLE-PHASE CABLES",
+      "page": 175
+    },
+    {
+      "number": "3.2",
+      "caption": "MULTIPHASE CABLES",
+      "page": 175
+    },
+    {
+      "number": "3.3",
+      "caption": "PROTECTION OF WIRING SYSTEMS WITHIN SOLID OR FRAMED WALLS",
+      "page": 178
+    },
+    {
+      "number": "3.4",
+      "caption": "PROTECTION OF WIRING SYSTEMS WITHIN CEILINGS, FLOORS AND WALL SPACES",
+      "page": 179
+    },
+    {
+      "number": "3.5",
+      "caption": "PROTECTION OF WIRING SYSTEMS WITHIN CONCRETE ROOFS, CEILINGS OR FLOORS",
+      "page": 179
+    },
+    {
+      "number": "3.6",
+      "caption": "PROHIBITED WIRING SYSTEM LOCATION\u2014ROOF OR WALL-LINING MATERIALS",
+      "page": 180
+    },
+    {
+      "number": "3.7",
+      "caption": "PROTECTION OF WIRING SYSTEM BELOW ROOFING MATERIAL",
+      "page": 180
+    },
+    {
+      "number": "3.8",
+      "caption": "SEPARATION OF LOW VOLTAGE CABLES FROM TELECOMMUNICATIONS CABLES ON SURFACES OR CONCEALED IN WALLS, FLOORS OR CEILINGS",
+      "page": 188
+    },
+    {
+      "number": "3.9",
+      "caption": "SEPARATION OF LOW VOLTAGE CABLES FROM TELECOMMUNICATIONS CABLES IN UNDERGROUND TRENCHES",
+      "page": 188
+    }
+  ],
+  "cross_references": {
+    "IEC 60269-3": [
+      "2.10.3.5"
+    ],
+    "AS/NZS 5112": [
+      "2.10.4.1",
+      "2.10.4.3",
+      "2.10.5.4"
+    ],
+    "AS 60529": [
+      "3.3.1"
+    ],
+    "AS/NZS 3008.1 series": [
+      "3.3.2.1",
+      "3.3.2.11",
+      "3.3.2.13",
+      "3.4.1"
+    ],
+    "AS/NZS 3808": [
+      "3.3.2.11"
+    ],
+    "NZECP 55": [
+      "3.3.2.13"
+    ],
+    "AS/NZS 3008.1": [
+      "3.4.3",
+      "3.6.2",
+      "3.9.11"
+    ],
+    "IEC 60364-5-52": [
+      null
+    ],
+    "AS/NZS 4777.1": [
+      "3.6.2"
+    ],
+    "AS/NZS 61535": [
+      "3.7.4"
+    ],
+    "AS/NZS 3439 series": [
+      null,
+      "3.9.7.1.2"
+    ],
+    "AS/NZS 61439 series": [
+      null,
+      "3.9.7.1.2"
+    ],
+    "NZS 3604": [
+      "3.9.3.1"
+    ],
+    "AS/NZS 2053 series": [
+      "3.9.7.1.2",
+      null,
+      "3.10.2.1"
+    ],
+    "AS/NZS 61386 series": [
+      "3.9.7.1.2",
+      null,
+      "3.10.2.1"
+    ],
+    "AS/NZS 3560 series": [
+      "3.9.7.1.2"
+    ],
+    "AS/NZS 5601 series": [
+      null
+    ],
+    "AS/NZS 3500 series": [
+      null
+    ],
+    "AS/CA S009": [
+      null
+    ],
+    "NZ Telecommunications Forum (TCF) NZ Premises Wiring Guidelines": [
+      null
+    ],
+    "AS/NZS 3013": [
+      "3.9.9.2"
+    ],
+    "AS/NZS 4296": [
+      null,
+      "3.10.3.9"
+    ],
+    "AS/NZS 5000 series": [
+      "3.10.1.2"
+    ],
+    "AS/NZS 2053.1": [
+      "3.10.3.9"
+    ],
+    "AS/NZS 61386.1": [
+      "3.10.3.9"
+    ],
+    "AS 3600": [
+      "3.11.4.3"
+    ],
+    "NZS 3104": [
+      "3.11.4.3"
+    ],
+    "AS 4702": [
+      "3.11.4.3"
+    ]
+  }
+}

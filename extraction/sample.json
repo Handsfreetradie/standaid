@@ -1,0 +1,332 @@
+{
+  "metadata": {
+    "standard_code": "AS/NZS 3000",
+    "version": "2018",
+    "title": "Electrical Installations (known as the Australian/New Zealand Wiring Rules)",
+    "extraction_date": "2026-05-04T02:24:57.279218",
+    "extraction_quality": 80.0,
+    "total_pages": 611
+  },
+  "sections": [],
+  "clauses": [
+    {
+      "number": "2.10.3.5",
+      "title": "Screw-in fuses",
+      "content": "Fuses using screw-in carriers shall be connected so that the centre contact is on the supply side of the fuse base.",
+      "page": 149,
+      "notes": [
+        "These fuses include IEC 60269-3 System A Type D."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "IEC 60269-3"
+        ],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.4",
+      "title": "Bars",
+      "content": "",
+      "page": 149,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.4.1",
+      "title": "General",
+      "content": "Bars shall be provided with facilities for securely terminating conductors in accordance with Clause 3.7.",
+      "page": 149,
+      "notes": [
+        "Bars that comply with the relevant requirements of AS/NZS 5112 are deemed to comply with this Clause (2.10.4)."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 5112"
+        ],
+        "other_clauses": [
+          "3.7",
+          "2.10.4"
+        ]
+      }
+    },
+    {
+      "number": "2.10.4.2",
+      "title": "Tunnel-type terminals",
+      "content": "All screws that are in direct contact with conductors in tunnel-type terminals shall be of the type designed not to cut the conductor.\n\nWhere tunnel-type terminals having clamping screws that are in direct contact with the conductors are provided for connection of\u2014\n(a) the main incoming neutral conductor;\n(b) the main earthing conductor;\n(c) the connection between the main earthing terminal/connection or bar and the neutral bar (MEN connection); or\n(d) a neutral conductor used as a combined protective earthing and neutral (PEN) conductor for protective earthing of any portion of an electrical installation,\nthe terminal shall be of a type having\u2014\n(i) two screws; or\n(ii) one screw with an outside diameter not less than 80% of the tunnel diameter.",
+      "page": 149,
+      "notes": [
+        "This requirement does not apply to connections arranged so that the conductor is clamped by suitable ferrules or plates in direct contact with the conductor."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.4.3",
+      "title": "Neutral bar",
+      "content": "Every switchboard, to which a neutral conductor is connected, shall be provided with a neutral bar that is\u2014\n(a) of adequate current-carrying capacity;\n(b) located in an accessible position to allow all conductors to be safely connected without moving other cables or isolating the supply to the switchboard;\n(c) designed such that the incoming neutral conductor cannot be inadvertently disconnected from the bar or link; and\n(d) provided with a separate terminal for\u2014\n(i) the incoming neutral conductor terminating at the switchboard; and\n(ii) the neutral conductor(s) associated with each outgoing circuit originating at the switchboard.\nWhere tunnel-type terminals are provided, the provisions of Clause 2.10.4.2 shall apply.\nA neutral conductor or busbar connection may be used between the neutral bar and a number of multi-pole devices mounted on the switchboard. Where such an arrangement is used, the connection device shall comply with Clause 2.10.4.1 and, where appropriate, Clause 2.10.4.2.\nWhere a cable is used as the neutral conductor, and is looped between devices on the line side, the connection to each device shall be such that continuity remains when the device is removed. Twisting of conductors is not adequate.",
+      "page": 150,
+      "notes": [
+        "The current-carrying capacity of the incoming neutral conductor may be used as a guide.",
+        "Tunnel-type terminals that comply with AS/NZS 5112 are deemed to comply with the above requirements."
+      ],
+      "exceptions": [
+        "Where the connection is made at a terminal of switchgear in accordance with the manufacturer's specifications, the provisions of Clauses 2.10.4.1 and 2.10.4.2 need not apply."
+      ],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 5112"
+        ],
+        "other_clauses": [
+          "2.10.4.2",
+          "2.10.4.1"
+        ]
+      }
+    },
+    {
+      "number": "2.10.5",
+      "title": "Equipment identification",
+      "content": "",
+      "page": 150,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.5.1",
+      "title": "General",
+      "content": "All equipment installed on a switchboard shall be legibly and indelibly identified in the English language in accordance with the requirements of Clauses 2.10.5.2 to 2.10.5.6.",
+      "page": 150,
+      "notes": [
+        "See Clauses 2.3.3 and 2.3.4 for the marking requirements for main switches and additional isolating switches."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "2.10.5.2",
+          "2.10.5.6",
+          "2.3.3",
+          "2.3.4"
+        ]
+      }
+    },
+    {
+      "number": "2.10.5.2",
+      "title": "Relationship of electrical equipment",
+      "content": "The relationship of switches, circuit-breakers, fuses, RCDs and similar electrical equipment to the various sections of the electrical installation shall be marked on or adjacent to the switchboard. The means of identification shall enable persons to readily identify equipment supplied and the corresponding circuit protective device.",
+      "page": 151,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.5.3",
+      "title": "Bars",
+      "content": "Bars shall be identified to indicate whether they are active, neutral or earth.",
+      "page": 151,
+      "notes": [],
+      "exceptions": [
+        "Bars need not be identified at switchboards where the colour of the basic insulation of the conductors connected is visible and clearly indicates the nature of the bar."
+      ],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.5.4",
+      "title": "Terminals of switchboard equipment",
+      "content": "Terminals of bars, circuit-breakers, fuses and other electrical equipment mounted on a switchboard shall be marked or arranged to identify the corresponding active and neutral connection for each circuit. The terminals for the connection of the MEN connection and for the main neutral conductor shall be legibly and indelibly marked at the main neutral bar. Where the MEN connection is made at another location, such as a substation, in accordance with Clause 5.3.5.1, the location of the connection shall be legibly and indelibly marked at the main switchboard. Compliance with AS/NZS 5112 satisfies the above requirements.",
+      "page": 151,
+      "notes": [],
+      "exceptions": [
+        "Where the MEN connection is made at a terminal at one extremity of the bar.",
+        "Where the main neutral conductor is connected to the next adjacent terminal of the bar."
+      ],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [
+          "AS/NZS 5112"
+        ],
+        "other_clauses": [
+          "5.3.5.1"
+        ]
+      }
+    },
+    {
+      "number": "2.10.5.5",
+      "title": "Common neutral",
+      "content": "Where a common neutral is used for two or more different circuits it shall be legibly and permanently marked to identify the associated active conductors.",
+      "page": 151,
+      "notes": [
+        "The requirements of Clause 2.2.1.2 also apply to the use of a common neutral conductor."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "2.2.1.2"
+        ]
+      }
+    },
+    {
+      "number": "2.10.5.6",
+      "title": "Fuse",
+      "content": "Where the marking of the fuse base does not correctly indicate the rating of the associated fuse-element, the rating of the fuse-element shall be marked either on an exposed non-detachable portion of the fuse or on its enclosing case, or on the switchboard adjacent to the fuse.",
+      "page": 151,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.6",
+      "title": "Wiring",
+      "content": "Switchboard wiring shall be designed and installed to withstand any thermal and magnetic effects on the conductors.\n\nWhere provision is made to hinge or remove switchboard panels, all conductors connected to electrical equipment on the switchboard panel shall be\u2014\n\n(a) provided with sufficient free length to allow the panel to be moved into a position to enable work to be carried out;\n(b) suitably fixed or otherwise retained in position to avoid undue movement or stress at terminals of electrical equipment when the panel is moved or is fixed in position; and\n(c) arranged to prevent undue pressure on electrical equipment mounted behind the panel.",
+      "page": 152,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "2.10.7",
+      "title": "Fire-protective measures",
+      "content": "Wiring associated with switchboards shall be installed in such a manner that, in the event of fire originating at the switchboard, the spread of fire will be kept to a minimum.\n\nWhere a switchboard is enclosed in a case or surround, any wiring systems entering the switchboard enclosure shall pass through openings that provide a close fit.",
+      "page": 152,
+      "notes": [
+        "See also Clause 2.10.2.5(h) regarding restricted location of switchboards in or near egress paths or fire exits and Clause 3.9.9 regarding requirements to prevent the spread of fire.",
+        "There is a very high risk that wiring enclosures, especially those that enter at the top or sides of a switchboard, will contribute to the spread of fire and for this reason care needs to be taken to ensure that these wiring systems are provided with close-fitting entries. In some cases internal sealing should be provided.",
+        "An opening with less than 5 mm diameter of free space is considered to be a close fit. Therefore, any opening of 5 mm diameter or greater requires sealing with a fire-retardant sealant.",
+        "Wiring enclosures, such as conduits, having an internal free space of greater than 5 mm diameter also require sealing to stop any draft effect that could allow the spread of fire."
+      ],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "2.10.2.5(h)",
+          "3.9.9"
+        ]
+      }
+    },
+    {
+      "number": "3.1",
+      "title": "GENERAL",
+      "content": "",
+      "page": 153,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.1.1",
+      "title": "Application",
+      "content": "This Section specifies the minimum requirements for the selection and installation of wiring systems that shall be achieved to satisfy Part 1 of this Standard.",
+      "page": 153,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": [
+          "Part 1"
+        ]
+      }
+    },
+    {
+      "number": "3.1.2",
+      "title": "Selection and installation",
+      "content": "Wiring systems shall be selected and installed to perform the following functions or have the following features:\n(a) Protect against physical contact with live parts by durable insulation materials or by placing live parts out of reach.\n(b) Satisfy current-carrying capacity, voltage drop and other minimum size requirements for conductors.\n(c) Provide reliability and electrical continuity of connections, joints and terminations.\n(d) Provide adequate strength of supports, suspensions and fixings.\n(e) Suit intended use, including applications requiring a particular type of wiring system, e.g. fire-resistance, explosion protection, safety services.\n(f) Protect against mechanical damage, environmental and other external influences by enclosure or other means.\n(g) Installed in accordance with the requirements of this Section and the additional requirements as specified in the manufacturer's instructions.\n\nCharacteristics of wiring systems that shall be considered include conductor materials, core identification, insulation properties, temperature rise, bending and tension limitations.",
+      "page": 153,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    },
+    {
+      "number": "3.2",
+      "title": "TYPES OF WIRING SYSTEMS",
+      "content": "The type of wiring system and method of installation used shall either\u2014\n(a) comply with Table 3.1; or\n(b) have a degree of safety equivalent to that given in Table 3.1.",
+      "page": 153,
+      "notes": [],
+      "exceptions": [],
+      "references": {
+        "tables": [
+          "Table 3.1"
+        ],
+        "figures": [],
+        "standards": [],
+        "other_clauses": []
+      }
+    }
+  ],
+  "tables": [],
+  "figures": [],
+  "cross_references": {
+    "IEC 60269-3": [
+      "2.10.3.5"
+    ],
+    "AS/NZS 5112": [
+      "2.10.4.1",
+      "2.10.4.3",
+      "2.10.5.4"
+    ]
+  }
+}

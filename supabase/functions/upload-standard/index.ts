@@ -109,8 +109,8 @@ serve(async (req) => {
       .single();
 
     if (insertError) {
-      console.error("Insert error:", insertError);
-      return new Response(JSON.stringify({ error: "Failed to create standard record" }), {
+      console.error("Insert error:", JSON.stringify(insertError));
+      return new Response(JSON.stringify({ error: "Failed to create standard record", details: insertError.message }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
     }
@@ -126,6 +126,7 @@ serve(async (req) => {
     // doesn't depend on the user's JWT (which may be rejected for internal calls).
     const processUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/process-standard`;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    console.log(`[upload-standard] Triggering process-standard for standard ${standard.id}`);
     const processPromise = fetch(processUrl, {
       method: "POST",
       headers: {
@@ -134,9 +135,14 @@ serve(async (req) => {
         "x-user-auth": authHeader,
       },
       body: JSON.stringify({ standard_id: standard.id, user_id: userId, extracted_text: extractedText }),
-    }).then(r => {
-      if (!r.ok) r.text().then(t => console.error("process-standard trigger failed:", r.status, t));
-    }).catch(err => console.error("Failed to trigger processing:", err));
+    }).then(async r => {
+      if (!r.ok) {
+        const text = await r.text();
+        console.error(`[upload-standard] process-standard trigger failed: ${r.status}`, text);
+      } else {
+        console.log(`[upload-standard] process-standard triggered successfully`);
+      }
+    }).catch(err => console.error("[upload-standard] Failed to trigger processing:", err));
 
     if (typeof EdgeRuntime !== "undefined") {
       EdgeRuntime.waitUntil(processPromise);
@@ -152,9 +158,11 @@ serve(async (req) => {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } 
     });
   } catch (e) {
-    console.error("Upload error:", e);
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), { 
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } 
+    console.error("[upload-standard] Unexpected error:", JSON.stringify(e));
+    const errorMsg = e instanceof Error ? e.message : String(e);
+    console.error("[upload-standard] Error details:", errorMsg);
+    return new Response(JSON.stringify({ error: errorMsg, code: "UPLOAD_ERROR" }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
   }
 });
