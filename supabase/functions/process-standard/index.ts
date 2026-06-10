@@ -495,21 +495,20 @@ function extractFigureChunks(text: string, standardCode: string, version: string
   // e.g. "**Figure 3.1 — Caption**" (AI OCR markdown)
   const captionLinePattern = /^(?:\*{0,2})FIGURE\s+(\d+(?:\.\d+)*)\s*(?:—|–|-|:)?\s*(.*)$/i;
 
-  // Debug: log all lines that contain "figure" to diagnose format issues
-  const figureLineMatches: string[] = [];
-  lines.forEach((line, idx) => {
-    if (/figure/i.test(line)) {
-      figureLineMatches.push(`Line ${idx}: "${line.substring(0, 100)}"`);
-    }
-  });
-  if (figureLineMatches.length > 0) {
-    console.log(`[${label}] DEBUG: Lines containing 'figure':\n${figureLineMatches.join('\n')}`);
-  }
-
+  // Debug: test regex against sample lines
+  let pass1Count = 0;
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].replace(/\r$/, "").trim();
+    const rawLine = lines[i];
+    const line = rawLine.replace(/\r$/, "").trim();
     const match = line.match(captionLinePattern);
+
+    if (/figure\s+\d/i.test(line)) {
+      const matchStr = match ? "✓ MATCH" : "✗ NO MATCH";
+      console.log(`[${label}] Line ${i}: ${matchStr} | Raw: "${rawLine.substring(0, 80)}" | Trimmed: "${line.substring(0, 80)}"`);
+    }
+
     if (!match) continue;
+    pass1Count++;
     const figNum = match[1].trim();
     if (seenFigures.has(figNum)) continue;
     let caption = (match[2] || "").trim().replace(/\*+$/, "");
@@ -560,7 +559,8 @@ function extractFigureChunks(text: string, standardCode: string, version: string
     });
   }
 
-  console.log(`[${label}] Figure extraction summary: Pass 1 found ${pass2Before}, Pass 2 found ${seenFigures.size - pass2Before}, total ${seenFigures.size}`);
+  console.log(`[${label}] Figure extraction summary: Pass 1 found ${pass1Count}, Pass 2 found ${seenFigures.size - pass1Count}, total ${seenFigures.size}`);
+  console.log(`[${label}] Regex pattern test: /^(?:\\*{0,2})FIGURE\\s+(\\d+(?:\\.\\d+)*)\\s*(?:—|–|-|:)?\\s*(.*)$/i`);
 
   return chunks;
 }
