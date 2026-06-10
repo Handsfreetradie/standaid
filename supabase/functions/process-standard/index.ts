@@ -491,8 +491,20 @@ function extractFigureChunks(text: string, standardCode: string, version: string
 
   // ── Pass 1: Find figures with captions on their own line ──────────────────
   // e.g. "Figure 3.1 — Resistance test of main earthing conductor"
+  // e.g. "FIGURE 1 CAPTION TEXT" (Claude format — no dash)
   // e.g. "**Figure 3.1 — Caption**" (AI OCR markdown)
-  const captionLinePattern = /^(?:\*{0,2})FIGURE\s+(\d+(?:\.\d+)*)\s*(?:[—\-–:]\s*([^*\n]+))?(?:\*{0,2})$/i;
+  const captionLinePattern = /^(?:\*{0,2})FIGURE\s+(\d+(?:\.\d+)*)\s*(?:—|–|-|:)?\s*(.*)$/i;
+
+  // Debug: log all lines that contain "figure" to diagnose format issues
+  const figureLineMatches: string[] = [];
+  lines.forEach((line, idx) => {
+    if (/figure/i.test(line)) {
+      figureLineMatches.push(`Line ${idx}: "${line.substring(0, 100)}"`);
+    }
+  });
+  if (figureLineMatches.length > 0) {
+    console.log(`[${label}] DEBUG: Lines containing 'figure':\n${figureLineMatches.join('\n')}`);
+  }
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].replace(/\r$/, "").trim();
@@ -500,7 +512,7 @@ function extractFigureChunks(text: string, standardCode: string, version: string
     if (!match) continue;
     const figNum = match[1].trim();
     if (seenFigures.has(figNum)) continue;
-    let caption = (match[2] || "").trim();
+    let caption = (match[2] || "").trim().replace(/\*+$/, "");
     // If no caption on this line, try the next non-empty line
     if (!caption) {
       for (let j = i + 1; j < Math.min(i + 3, lines.length); j++) {
@@ -526,6 +538,7 @@ function extractFigureChunks(text: string, standardCode: string, version: string
   // e.g. "(a) Figure 3.3 for testing..." or "see Figure 3.21"
   // Creates placeholder chunks for figures not found with a caption in Pass 1.
   const refPattern = /\bFIGURE\s+(\d+(?:\.\d+)*)\b/gi;
+  const pass2Before = seenFigures.size;
   let refMatch: RegExpExecArray | null;
   while ((refMatch = refPattern.exec(text)) !== null) {
     const figNum = refMatch[1].trim();
@@ -546,6 +559,8 @@ function extractFigureChunks(text: string, standardCode: string, version: string
       chunk_index: 0,
     });
   }
+
+  console.log(`[${label}] Figure extraction summary: Pass 1 found ${pass2Before}, Pass 2 found ${seenFigures.size - pass2Before}, total ${seenFigures.size}`);
 
   return chunks;
 }
