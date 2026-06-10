@@ -1,4 +1,5 @@
 const PRODUCTION_ORIGINS = [
+  "https://standaid.vercel.app",
   "https://standaid-9mas.vercel.app",
   "https://standaid.com.au",
 ];
