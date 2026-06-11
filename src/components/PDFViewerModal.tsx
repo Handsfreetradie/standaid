@@ -55,21 +55,22 @@ export function PDFViewerModal({ isOpen, onClose, clauseNumber, standardCode, st
       }
       setMeta(data);
       setCurrentPage(data.page_number ?? 1);
-      loadPdf(data.signed_url, data.page_number ?? 1);
+      loadPdf(data.signed_url);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, clauseNumber, standardCode, standardId, pageNumber]);
 
-  const loadPdf = async (url: string, startPage: number) => {
+  const loadPdf = async (url: string) => {
     try {
       const pdfjsLib = await import("pdfjs-dist");
       pdfjsLib.GlobalWorkerOptions.workerSrc =
         `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
       const doc = await pdfjsLib.getDocument({ url, rangeChunkSize: 65536 }).promise;
-      setPdfDoc(doc);
       setTotalPages(doc.numPages);
-      await renderPage(doc, startPage);
+      setPdfDoc(doc);
+      // Rendering is driven by the effect below — it waits until `loading` is
+      // false so the <canvas> is actually mounted before we draw to it.
     } catch (e) {
       console.error("[PDFViewerModal] load error:", e);
       setError("Failed to load PDF.");
@@ -77,6 +78,16 @@ export function PDFViewerModal({ isOpen, onClose, clauseNumber, standardCode, st
       setLoading(false);
     }
   };
+
+  // Draw the current page once the doc is ready AND the canvas is mounted
+  // (canvas only renders when !loading && !error). Without this, the first
+  // render fired before the canvas existed and the page showed blank until
+  // the user clicked Next.
+  useEffect(() => {
+    if (!pdfDoc || loading || error) return;
+    renderPage(pdfDoc, currentPage);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pdfDoc, currentPage, loading, error]);
 
   const renderPage = async (doc: any, pageNum: number) => {
     if (!canvasRef.current) return;
@@ -108,10 +119,9 @@ export function PDFViewerModal({ isOpen, onClose, clauseNumber, standardCode, st
     }
   };
 
-  const goToPage = async (pageNum: number) => {
+  const goToPage = (pageNum: number) => {
     if (!pdfDoc || pageNum < 1 || pageNum > totalPages) return;
-    setCurrentPage(pageNum);
-    await renderPage(pdfDoc, pageNum);
+    setCurrentPage(pageNum); // the render effect redraws when currentPage changes
   };
 
   const handleSearch = async (e: React.FormEvent) => {
