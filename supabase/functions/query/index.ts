@@ -478,6 +478,24 @@ ${chunk.content}`;
           });
         }
 
+        // Attach the real standard_id + page to each citation from the matched
+        // chunks. standard_code is often null/mismatched, so the ID is the only
+        // reliable key for the PDF viewer to open the right document and page.
+        if (parsedResponse.citations?.length) {
+          for (const c of parsedResponse.citations) {
+            const want = (c.clause_number || "").toString().trim();
+            const hit =
+              matchedChunks.find((mc: any) => (mc.clause_number || "").toString().trim() === want) ||
+              matchedChunks.find((mc: any) => want && (mc.clause_number || "").toString().trim().startsWith(want));
+            if (hit) {
+              c.standard_id = hit.standard_id;
+              if (c.page_number == null) c.page_number = hit.page_number;
+            } else if (standardIds.length === 1) {
+              c.standard_id = standardIds[0];
+            }
+          }
+        }
+
         // Free tier clause gating
         if (tier === "free" && parsedResponse.citations) {
           parsedResponse.citations = parsedResponse.citations.map((c: any) => ({

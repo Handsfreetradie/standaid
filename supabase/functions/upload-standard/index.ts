@@ -72,6 +72,8 @@ serve(async (req) => {
       if (existing) {
         isReplacement = true;
         await supabaseAdmin.from("standard_chunks").delete().eq("standard_id", existing.id);
+        await supabaseAdmin.from("standard_figures").delete().eq("standard_id", existing.id);
+        await supabaseAdmin.from("standard_tables").delete().eq("standard_id", existing.id);
         await supabaseAdmin.from("processing_jobs").delete().eq("standard_id", existing.id);
         await supabaseAdmin.from("standards").delete().eq("id", existing.id);
       }

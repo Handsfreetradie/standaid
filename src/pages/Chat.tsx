@@ -16,6 +16,7 @@ interface Citation {
   clause_number: string;
   standard_code: string;
   standard_version?: string;
+  standard_id?: string;
   page_number?: number;
   relevant_text?: string;
   gated?: boolean;
@@ -427,7 +428,7 @@ const Chat = () => {
                         ) : (
                           <button
                             key={idx}
-                            onClick={() => setPdfViewer({ clauseNumber: citation.clause_number, standardCode: citation.standard_code })}
+                            onClick={() => setPdfViewer({ clauseNumber: citation.clause_number, standardCode: citation.standard_code, standardId: citation.standard_id, pageNumber: citation.page_number })}
                             className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 active:scale-95 transition-all"
                           >
                             {citation.clause_number}

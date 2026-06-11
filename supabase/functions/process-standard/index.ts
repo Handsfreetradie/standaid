@@ -433,18 +433,26 @@ function extractTableChunks(text: string, standardCode: string, version: string)
   const chunks: Chunk[] = [];
   const lines = text.split("\n");
   const tablePattern = /TABLE\s+(\d+(?:\.\d+)*)(.*)?/i;
+  const pageMarker = /^\[PAGE\s+(\d+)\]/i;
+
+  // Track the current page as we scan down through the [PAGE N] markers.
+  let currentPage = 1;
 
   for (let i = 0; i < lines.length; i++) {
+    const pm = lines[i].match(pageMarker);
+    if (pm) { currentPage = parseInt(pm[1], 10); continue; }
+
     const match = lines[i].match(tablePattern);
     if (!match) continue;
 
     const tableNumber = match[1].trim();
     const title = (match[2] || "").replace(/^[\s—\-:]+/, "").trim();
 
-    // Grab up to ~500 chars of surrounding content (next lines)
+    // Grab up to ~500 chars of surrounding content (next lines), skipping markers.
     let surrounding = "";
     let charCount = 0;
     for (let j = i + 1; j < lines.length && charCount < 500; j++) {
+      if (pageMarker.test(lines[j])) continue;
       surrounding += lines[j] + "\n";
       charCount += lines[j].length + 1;
     }
@@ -456,7 +464,7 @@ function extractTableChunks(text: string, standardCode: string, version: string)
       clause_number: `TABLE ${tableNumber}`,
       clause_title: title || null,
       content,
-      page_number: 1,
+      page_number: currentPage,
       chunk_index: 0, // will be reassigned after merge
     });
   }
@@ -511,6 +519,7 @@ function extractFigureChunks(text: string, standardCode: string, version: string
     if (!caption) {
       for (let j = i + 1; j < Math.min(i + 3, lines.length); j++) {
         const next = lines[j].replace(/\r$/, "").trim();
+        if (/^\[PAGE\s+\d+\]/i.test(next)) continue;
         if (next && !/^\d+\.\d/.test(next) && next.length < 120) {
           caption = next.replace(/^[—\-–:]+\s*/, "").trim();
           break;
@@ -558,7 +567,7 @@ function extractFigureChunks(text: string, standardCode: string, version: string
   for (const figNum of sortedNums) {
     const { caption, lineIdx } = figures.get(figNum)!;
     const page = getPage(lineIdx);
-    const surrounding = lines.slice(lineIdx + 1, lineIdx + 6).map(l => l.trim()).filter(Boolean).join(" ");
+    const surrounding = lines.slice(lineIdx + 1, lineIdx + 6).map(l => l.trim()).filter(Boolean).filter(l => !/^\[PAGE\s+\d+\]/i.test(l)).join(" ");
     chunks.push({
       clause_number: `FIGURE ${figNum}`,
       clause_title: caption || null,
@@ -721,10 +730,14 @@ serve(async (req) => {
     const standardCode = standard.standard_code || "Unknown";
     const version = standard.version || "";
 
+    // Figure/table detection needs the [PAGE N] markers to work out which page
+    // each one is on. extracted.text has them stripped, so rebuild a marked
+    // version from the pages array (page 1 = pages[0]).
+    const markedText = extracted.pages.map((p, i) => `[PAGE ${i + 1}]\n${p}`).join("\n");
     const sections = sortIntoSections(extracted.text, extracted.pages);
     const clauseChunks = chunkSections(sections, standardCode, version);
-    const tableChunks = extractTableChunks(extracted.text, standardCode, version);
-    const figureChunks = extractFigureChunks(extracted.text, standardCode, version);
+    const tableChunks = extractTableChunks(markedText, standardCode, version);
+    const figureChunks = extractFigureChunks(markedText, standardCode, version);
     console.log(`[${standard_id}] Found ${tableChunks.length} table chunks, ${figureChunks.length} figure chunks`);
 
     // Merge and re-assign chunk_index globally
