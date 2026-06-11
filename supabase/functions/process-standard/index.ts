@@ -354,7 +354,10 @@ function chunkSections(sections: Section[], standardCode: string, version: strin
 
   for (const section of sections) {
     const sectionText = section.lines.join("\n").trim();
-    if (sectionText.length < 20) continue;
+    // Drop tiny fragments — but never a real SECTION/PART/APPENDIX heading, even
+    // a short one like "SECTION 3 TESTS" (needed for the exam-helper section list).
+    const isHeading = section.clauseNumber === null && SECTION_HEADING.test(section.heading || "");
+    if (sectionText.length < 20 && !isHeading) continue;
 
     const breadcrumb = buildBreadcrumb(standardCode, version, section.clauseNumber, section.heading);
 

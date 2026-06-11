@@ -218,19 +218,9 @@ const Learn = () => {
       }
     }
 
-    if (parsed.length > 0) {
-      parsed.sort((a, b) => {
-        const aNum = Number(a.prefix), bNum = Number(b.prefix);
-        if (!isNaN(aNum) && !isNaN(bNum)) return aNum - bNum;
-        if (!isNaN(aNum)) return -1;
-        if (!isNaN(bNum)) return 1;
-        return a.prefix.localeCompare(b.prefix);
-      });
-      setSections(parsed.slice(0, 30));
-      return;
-    }
-
-    // Fallback for standards without explicit SECTION headings — infer from clause numbers
+    // Always scan clause numbers too and MERGE — a section heading can be missed
+    // (e.g. a short "SECTION 3 TESTS" heading) yet still have dozens of clauses.
+    // Heading titles win where we have them; clause prefixes fill any gaps.
     const { data } = await supabase
       .from("standard_chunks")
       .select("clause_number, clause_title")
@@ -238,14 +228,13 @@ const Learn = () => {
       .not("clause_number", "is", null)
       .order("chunk_index", { ascending: true });
 
-    if (!data) return;
-
     const counts = new Map<string, number>();
     const allTitles = new Map<string, string[]>();
 
-    for (const chunk of data) {
+    for (const chunk of data || []) {
       const cn = chunk.clause_number as string;
       if (!cn || !/^[\dA-Za-z]/.test(cn)) continue;
+      if (/^(FIGURE|TABLE)\b/i.test(cn)) continue; // figures/tables aren't sections
       const prefix = cn.split(".")[0];
       counts.set(prefix, (counts.get(prefix) || 0) + 1);
       if (chunk.clause_title) {
@@ -262,22 +251,23 @@ const Learn = () => {
       return candidates.sort((a, b) => a.length - b.length)[0];
     };
 
-    const sorted = [...counts.entries()]
-      .filter(([, count]) => count >= 5)
-      .sort(([a], [b]) => {
-        const aNum = Number(a), bNum = Number(b);
-        if (!isNaN(aNum) && !isNaN(bNum)) return aNum - bNum;
-        if (!isNaN(aNum)) return -1;
-        if (!isNaN(bNum)) return 1;
-        return a.localeCompare(b);
-      })
-      .slice(0, 30)
-      .map(([prefix]) => ({
-        prefix,
-        title: pickBestTitle(allTitles.get(prefix) || []) ?? (isNaN(Number(prefix)) ? `Appendix ${prefix}` : `Section ${prefix}`),
-      }));
+    // Add any clause-prefix section with enough chunks that the heading scan missed.
+    for (const [prefix, count] of counts) {
+      if (accepted.has(prefix) || count < 5) continue;
+      accepted.add(prefix);
+      parsed.push({ prefix, title: pickBestTitle(allTitles.get(prefix) || []) ?? "" });
+    }
 
-    setSections(sorted);
+    if (parsed.length === 0) return;
+
+    parsed.sort((a, b) => {
+      const aNum = Number(a.prefix), bNum = Number(b.prefix);
+      if (!isNaN(aNum) && !isNaN(bNum)) return aNum - bNum;
+      if (!isNaN(aNum)) return -1;
+      if (!isNaN(bNum)) return 1;
+      return a.prefix.localeCompare(b.prefix);
+    });
+    setSections(parsed.slice(0, 30));
   };
 
   const loadGuides = async () => {
