@@ -489,30 +489,25 @@ function extractFigureChunks(text: string, standardCode: string, version: string
     return page;
   }
 
-  // ── Pass 1: Find figures with captions on their own line ──────────────────
-  // e.g. "Figure 3.1 — Resistance test of main earthing conductor"
-  // e.g. "FIGURE 1 CAPTION TEXT" (Claude format — no dash)
-  // e.g. "**Figure 3.1 — Caption**" (AI OCR markdown)
+  // A figure number can appear two ways in a standard:
+  //   1. As a CAPTION — the line starts with "Figure 3.1 — ..." (the real diagram)
+  //   2. As a REFERENCE — "see Figure 3.1" or "(Figures 3.3, 3.4 and 3.5)" inside a sentence
+  // We want one chunk per unique figure, preferring the caption (it has the best
+  // title + page) but still capturing figures that are only ever referenced.
+
+  // figNum -> { caption, lineIdx }  (caption is "" for reference-only figures)
+  const figures = new Map<string, { caption: string; lineIdx: number }>();
+
+  // ── Pass 1: caption lines (line STARTS with "Figure X.X") ─────────────────
+  // Accepts dash, colon or plain-space separators and optional **markdown**.
   const captionLinePattern = /^(?:\*{0,2})FIGURE\s+(\d+(?:\.\d+)*)\s*(?:—|–|-|:)?\s*(.*)$/i;
-
-  // Debug: test regex against sample lines
-  let pass1Count = 0;
   for (let i = 0; i < lines.length; i++) {
-    const rawLine = lines[i];
-    const line = rawLine.replace(/\r$/, "").trim();
+    const line = lines[i].replace(/\r$/, "").trim();
     const match = line.match(captionLinePattern);
-
-    if (/figure\s+\d/i.test(line)) {
-      const matchStr = match ? "✓ MATCH" : "✗ NO MATCH";
-      console.log(`[${label}] Line ${i}: ${matchStr} | Raw: "${rawLine.substring(0, 80)}" | Trimmed: "${line.substring(0, 80)}"`);
-    }
-
     if (!match) continue;
-    pass1Count++;
     const figNum = match[1].trim();
-    if (seenFigures.has(figNum)) continue;
-    let caption = (match[2] || "").trim().replace(/\*+$/, "");
-    // If no caption on this line, try the next non-empty line
+    let caption = (match[2] || "").trim().replace(/[*—–\-:\s]+$/, "");
+    // If the caption ran onto the next line, pull it in.
     if (!caption) {
       for (let j = i + 1; j < Math.min(i + 3, lines.length); j++) {
         const next = lines[j].replace(/\r$/, "").trim();
@@ -522,45 +517,59 @@ function extractFigureChunks(text: string, standardCode: string, version: string
         }
       }
     }
-    seenFigures.add(figNum);
-    const surrounding = lines.slice(i + 1, i + 6).map(l => l.trim()).filter(Boolean).join(" ");
-    chunks.push({
-      clause_number: `FIGURE ${figNum}`,
-      clause_title: caption || null,
-      content: `${label} Figure ${figNum}${caption ? ` — ${caption}` : ""}\n\nThis figure appears on page ${getPage(i)} of the standard. A visual description will be generated shortly.\n\nContext: ${surrounding}`,
-      page_number: getPage(i),
-      chunk_index: 0,
-    });
+    // Prefer the entry that actually has a caption.
+    const existing = figures.get(figNum);
+    if (!existing || (!existing.caption && caption)) {
+      figures.set(figNum, { caption, lineIdx: i });
+    }
   }
 
-  // ── Pass 2: Find figures referenced anywhere in the text ─────────────────
-  // e.g. "(a) Figure 3.3 for testing..." or "see Figure 3.21"
-  // Creates placeholder chunks for figures not found with a caption in Pass 1.
-  const refPattern = /\bFIGURE\s+(\d+(?:\.\d+)*)\b/gi;
-  const pass2Before = seenFigures.size;
+  const captionCount = figures.size;
+
+  // ── Pass 2: any "Figure X.X" referenced anywhere (incl. lists like
+  //    "Figures 3.7, 3.8, 3.9 and 3.13"). Adds figures we didn't see a caption for.
+  // Matches "Figure 3.1" or a list head "Figures 3.7, 3.8 and 3.13".
+  const refPattern = /\bFIGURES?\s+(\d+(?:\.\d+)*(?:\s*(?:,|and|&)\s*\d+(?:\.\d+)*)*)/gi;
   let refMatch: RegExpExecArray | null;
   while ((refMatch = refPattern.exec(text)) !== null) {
-    const figNum = refMatch[1].trim();
-    if (seenFigures.has(figNum)) continue;
-    seenFigures.add(figNum);
-    // Find which line this reference is on for page number
+    // Split a possible list ("3.7, 3.8 and 3.13") into individual numbers.
+    const nums = refMatch[1].match(/\d+(?:\.\d+)*/g) || [];
     const charPos = refMatch.index;
     let lineIdx = 0;
     for (let j = pageOffsets.length - 1; j >= 0; j--) {
       if (pageOffsets[j] <= charPos) { lineIdx = j; break; }
     }
-    const context = text.slice(Math.max(0, charPos - 100), charPos + 200).replace(/\s+/g, " ").trim();
-    chunks.push({
-      clause_number: `FIGURE ${figNum}`,
-      clause_title: null,
-      content: `${label} Figure ${figNum}\n\nThis figure is referenced in the standard. A visual description will be generated shortly.\n\nContext: ${context}`,
-      page_number: getPage(lineIdx),
-      chunk_index: 0,
-    });
+    for (const figNum of nums) {
+      if (!figures.has(figNum)) figures.set(figNum, { caption: "", lineIdx });
+    }
   }
 
-  console.log(`[${label}] Figure extraction summary: Pass 1 found ${pass1Count}, Pass 2 found ${seenFigures.size - pass1Count}, total ${seenFigures.size}`);
-  console.log(`[${label}] Regex pattern test: /^(?:\\*{0,2})FIGURE\\s+(\\d+(?:\\.\\d+)*)\\s*(?:—|–|-|:)?\\s*(.*)$/i`);
+  // ── Build one chunk per unique figure, sorted naturally (1.1, 3.1, 3.2 …) ──
+  const sortedNums = [...figures.keys()].sort((a, b) => {
+    const pa = a.split(".").map(Number);
+    const pb = b.split(".").map(Number);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+      if (d !== 0) return d;
+    }
+    return 0;
+  });
+
+  for (const figNum of sortedNums) {
+    const { caption, lineIdx } = figures.get(figNum)!;
+    const page = getPage(lineIdx);
+    const surrounding = lines.slice(lineIdx + 1, lineIdx + 6).map(l => l.trim()).filter(Boolean).join(" ");
+    chunks.push({
+      clause_number: `FIGURE ${figNum}`,
+      clause_title: caption || null,
+      content: `${label} Figure ${figNum}${caption ? ` — ${caption}` : ""}\n\nThis figure appears on page ${page} of the standard. A visual description will be generated shortly.\n\nContext: ${surrounding}`,
+      page_number: page,
+      chunk_index: 0,
+    });
+    seenFigures.add(figNum);
+  }
+
+  console.log(`[${label}] Figures: ${captionCount} with captions, ${figures.size} total → ${sortedNums.join(", ")}`);
 
   return chunks;
 }
