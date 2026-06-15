@@ -122,6 +122,33 @@ async function getChunksWithRecovery(
   return chunks;
 }
 
+// Convert an OpenAI-style message content array into Anthropic blocks.
+// Mainly handles images: OpenAI uses {type:"image_url", image_url:{url}},
+// Anthropic uses {type:"image", source:{type:"base64", media_type, data}}.
+function toAnthropicContent(content: unknown): unknown {
+  if (!Array.isArray(content)) return content;
+  return content.map((block: any) => {
+    if (block?.type === "image_url" && block.image_url?.url) {
+      const m = String(block.image_url.url).match(/^data:(.+?);base64,(.*)$/);
+      if (m) return { type: "image", source: { type: "base64", media_type: m[1], data: m[2] } };
+    }
+    return block;
+  });
+}
+
+// Pull the input object from the first Anthropic tool_use block (replaces
+// OpenAI's choices[0].message.tool_calls[0].function.arguments).
+function getToolInput(aiData: any): any | null {
+  const block = aiData?.content?.find?.((b: any) => b.type === "tool_use");
+  return block ? block.input : null;
+}
+
+// Concatenate text from Anthropic text blocks (replaces choices[0].message.content).
+function getText(aiData: any): string {
+  const blocks = aiData?.content?.filter?.((b: any) => b.type === "text") || [];
+  return blocks.map((b: any) => b.text).join("").trim();
+}
+
 async function callAI(
   body: Record<string, unknown>,
   anthropicKey: string,
@@ -131,6 +158,30 @@ async function callAI(
   if (!("max_tokens" in payload)) payload.max_tokens = options.max_tokens ?? 1000;
   // Claude doesn't use temperature; remove if present
   delete payload.temperature;
+
+  // ── Translate OpenAI-shaped fields → Anthropic Messages API format ──
+  // System: Anthropic takes a top-level `system` string, not a message role.
+  if (Array.isArray(payload.messages)) {
+    const msgs = payload.messages as any[];
+    const systemText = msgs.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
+    if (systemText) payload.system = systemText;
+    payload.messages = msgs
+      .filter((m) => m.role !== "system")
+      .map((m) => ({ ...m, content: toAnthropicContent(m.content) }));
+  }
+  // Tools: OpenAI {type:"function", function:{name, description, parameters}}
+  //        → Anthropic {name, description, input_schema}
+  if (Array.isArray(payload.tools)) {
+    payload.tools = (payload.tools as any[]).map((t) =>
+      t?.function
+        ? { name: t.function.name, description: t.function.description, input_schema: t.function.parameters }
+        : t
+    );
+  }
+  // tool_choice: OpenAI {type:"function", function:{name}} → Anthropic {type:"tool", name}
+  if (payload.tool_choice && (payload.tool_choice as any).function) {
+    payload.tool_choice = { type: "tool", name: (payload.tool_choice as any).function.name };
+  }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
@@ -260,9 +311,9 @@ serve(async (req) => {
       if (!aiResponse.ok) return await aiError(aiResponse);
 
       const aiData = await aiResponse.json();
-      const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
-      if (!toolCall) throw new Error("No questions generated");
-      const { questions } = JSON.parse(toolCall.function.arguments);
+      const input = getToolInput(aiData);
+      if (!input) throw new Error("No questions generated");
+      const { questions } = input;
 
       const inserts = questions.map((q: any) => ({
         user_id: user.id, standard_id: standardId, question: q.question, options: q.options,
@@ -326,7 +377,7 @@ Rules:
       if (!aiResponse.ok) return await aiError(aiResponse);
 
       const aiData = await aiResponse.json();
-      const analysis = aiData.choices?.[0]?.message?.content;
+      const analysis = getText(aiData);
       if (!analysis) throw new Error("No analysis generated");
 
       try { await supabase.from("capstone_usage").insert({ user_id: user.id }); } catch (_) {}
@@ -382,7 +433,7 @@ Rules:
       if (!aiResponse.ok) return await aiError(aiResponse);
 
       const aiData = await aiResponse.json();
-      const explanation = aiData.choices?.[0]?.message?.content;
+      const explanation = getText(aiData);
       if (!explanation) throw new Error("No explanation generated");
 
       // Cache the result
@@ -508,7 +559,7 @@ Rules:
       if (!aiResponse.ok) return await aiError(aiResponse);
 
       const aiData = await aiResponse.json();
-      const content = aiData.choices?.[0]?.message?.content;
+      const content = getText(aiData);
       if (!content) throw new Error("No guide generated");
 
       const guideTitle = sectionFilter
@@ -626,9 +677,8 @@ Rules:
       if (!aiResponse.ok) return await aiError(aiResponse);
 
       const aiData = await aiResponse.json();
-      const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
-      if (!toolCall) throw new Error("No exam prep generated");
-      const result = JSON.parse(toolCall.function.arguments);
+      const result = getToolInput(aiData);
+      if (!result) throw new Error("No exam prep generated");
 
       const { data: guide } = await supabase.from("capstone_study_guides").insert({
         user_id: user.id, standard_id: standardId || null,
@@ -732,11 +782,11 @@ Use realistic Australian values. Show clear step-by-step working in the model so
 
       if (!aiResponse.ok) return await aiError(aiResponse);
       const aiData = await aiResponse.json();
-      const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
-      if (!toolCall) throw new Error("No calculation generated");
+      const question = getToolInput(aiData);
+      if (!question) throw new Error("No calculation generated");
 
       try { await supabase.from("capstone_usage").insert({ user_id: user.id }); } catch (_) {}
-      return new Response(JSON.stringify({ question: JSON.parse(toolCall.function.arguments) }), {
+      return new Response(JSON.stringify({ question }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -782,9 +832,9 @@ Give specific, helpful feedback.`,
 
       if (!aiResponse.ok) return await aiError(aiResponse);
       const aiData = await aiResponse.json();
-      const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
-      if (!toolCall) throw new Error("Grading failed");
-      return new Response(JSON.stringify(JSON.parse(toolCall.function.arguments)), {
+      const grade = getToolInput(aiData);
+      if (!grade) throw new Error("Grading failed");
+      return new Response(JSON.stringify(grade), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -851,9 +901,9 @@ CRITICAL: Never mention any clause number in the question text itself. Clause nu
       if (!aiResponse.ok) return await aiError(aiResponse);
 
       const aiData = await aiResponse.json();
-      const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
-      if (!toolCall) throw new Error("No questions generated");
-      const { questions } = JSON.parse(toolCall.function.arguments);
+      const input = getToolInput(aiData);
+      if (!input) throw new Error("No questions generated");
+      const { questions } = input;
 
       try { await supabase.from("capstone_usage").insert({ user_id: user.id }); } catch (_) {}
       return new Response(JSON.stringify({ questions: questions.map((q: any) => ({ ...q, marks: 2 })) }), {
@@ -905,9 +955,8 @@ Be strict but fair. Accept minor wording differences if the meaning is correct. 
       if (!aiResponse.ok) return await aiError(aiResponse);
 
       const aiData = await aiResponse.json();
-      const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
-      if (!toolCall) throw new Error("Grading failed");
-      const result = JSON.parse(toolCall.function.arguments);
+      const result = getToolInput(aiData);
+      if (!result) throw new Error("Grading failed");
 
       return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
