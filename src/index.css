@@ -210,3 +210,66 @@
   background: hsl(var(--muted-foreground) / 0.3);
   border-radius: 2px;
 }
+
+/*
+ * Chat answer typography.
+ * The AI replies in markdown (bold section labels, bullet lists, paragraphs).
+ * These rules give each part room to breathe so answers read as clear
+ * sections instead of one dense block of text.
+ */
+.chat-answer {
+  font-size: 15px;
+  line-height: 1.65;
+}
+.chat-answer > :first-child {
+  margin-top: 0;
+}
+.chat-answer > :last-child {
+  margin-bottom: 0;
+}
+.chat-answer p {
+  margin-top: 0.7em;
+  margin-bottom: 0.7em;
+}
+/* A paragraph that is only a bold label (e.g. "What the extracts confirm:")
+   acts as a section header — give it extra space above and tighten below. */
+.chat-answer p > strong:only-child {
+  display: inline-block;
+  margin-top: 0.4em;
+}
+.chat-answer strong {
+  font-weight: 650;
+  color: hsl(var(--foreground));
+}
+.chat-answer ul,
+.chat-answer ol {
+  margin-top: 0.6em;
+  margin-bottom: 0.6em;
+  padding-left: 1.25em;
+}
+.chat-answer li {
+  margin-top: 0.35em;
+  margin-bottom: 0.35em;
+  padding-left: 0.15em;
+}
+.chat-answer li::marker {
+  color: hsl(var(--primary));
+}
+.chat-answer h1,
+.chat-answer h2,
+.chat-answer h3 {
+  font-weight: 700;
+  color: hsl(var(--foreground));
+  margin-top: 1em;
+  margin-bottom: 0.4em;
+  line-height: 1.3;
+}
+.chat-answer h1 { font-size: 1.1em; }
+.chat-answer h2 { font-size: 1.05em; }
+.chat-answer h3 { font-size: 1em; }
+.chat-answer code {
+  background: hsl(var(--muted));
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}

@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Mic, ThumbsUp, ThumbsDown, HelpCircle, Check, FileText } from "lucide-react";
+import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Mic, ThumbsUp, ThumbsDown, HelpCircle, Check, FileText, History } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import VoiceMode from "@/components/VoiceMode";
+import ChatHistory, { HistoryItem } from "@/components/ChatHistory";
 import { PDFViewerModal } from "@/components/PDFViewerModal";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -153,6 +154,7 @@ const Chat = () => {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [pdfViewer, setPdfViewer] = useState<{ clauseNumber: string; standardCode?: string; standardId?: string; pageNumber?: number } | null>(null);
   const { session } = useAuth();
   const { data: profile } = useProfile();
@@ -320,8 +322,37 @@ const Chat = () => {
     }
   }, [session]);
 
+  // Reopen a saved question from history — loads it into the view to read back.
+  // Only question/answer/clauses/safety were saved, so figures, follow-ups and
+  // feedback aren't restored (queryId is left unset on purpose).
+  const openFromHistory = useCallback((item: HistoryItem) => {
+    setMessages([
+      { id: `${item.id}-q`, role: "user", content: item.question },
+      {
+        id: `${item.id}-a`,
+        role: "ai",
+        content: item.response || "",
+        citations: Array.isArray(item.citations) ? item.citations : [],
+        safety_critical: item.safety_flagged,
+      },
+    ]);
+  }, []);
+
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
+      {/* Top bar — history access */}
+      <div className="flex items-center justify-end px-4 py-1.5 border-b border-border">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setHistoryOpen(true)}
+          className="h-8 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+        >
+          <History className="h-4 w-4" />
+          History
+        </Button>
+      </div>
+
       {/* Query count for free tier */}
       {profile?.subscription_tier === "free" && (
         <div className="px-5 py-1.5 border-b border-border bg-muted/30">
@@ -406,7 +437,7 @@ const Chat = () => {
                   )}
 
                   {/* Answer — markdown rendered during and after typing */}
-                  <div className="text-sm text-card-foreground leading-relaxed prose prose-sm max-w-none prose-headings:text-foreground prose-p:text-card-foreground prose-strong:text-foreground prose-li:text-card-foreground">
+                  <div className="chat-answer text-card-foreground">
                     <ReactMarkdown>{msg.content || " "}</ReactMarkdown>
                     {msg.isTyping && (
                       <span className="inline-block w-0.5 h-4 bg-primary ml-0.5 animate-pulse align-middle" />
@@ -628,6 +659,9 @@ const Chat = () => {
           onClose={() => setVoiceMode(false)}
         />
       )}
+
+      {/* Chat history panel */}
+      <ChatHistory open={historyOpen} onOpenChange={setHistoryOpen} onSelect={openFromHistory} />
 
       {/* PDF Clause Viewer */}
       {pdfViewer && (
