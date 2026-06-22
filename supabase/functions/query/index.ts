@@ -400,17 +400,18 @@ ${chunk.content}`;
           if (!seenTblNums.has(n)) { aiTables.push({ table_number: n }); seenTblNums.add(n); }
         }
 
-        const isVisualRequest = /\b(show\s+me|diagram|zones|layout|exclusion|illustrat|picture|what does.{0,20}look like)\b/i.test(question);
-        if (isVisualRequest) {
-          const answerText2 = parsedResponse.answer || "";
-          const answerFigRefs = [...answerText2.matchAll(/\bfigure\s+(\d+(?:\.\d+)*)\b/gi)].map((m) => m[1]);
-          for (const n of answerFigRefs) {
-            if (!seenFigNums.has(n)) { aiFigures.push({ figure_number: n }); seenFigNums.add(n); }
-          }
-          const answerTblRefs = [...answerText2.matchAll(/\btable\s+(\d+(?:\.\d+)*)\b/gi)].map((m) => m[1]);
-          for (const n of answerTblRefs) {
-            if (!seenTblNums.has(n)) { aiTables.push({ table_number: n }); seenTblNums.add(n); }
-          }
+        // Always scan answer text for figure/table references — Claude is
+        // instructed to mention figure numbers from extracts, so any answer
+        // mentioning "Figure 4.17" should surface that figure regardless of
+        // whether the question was explicitly a visual request.
+        const answerText2 = parsedResponse.answer || "";
+        const answerFigRefs = [...answerText2.matchAll(/\bfigure\s+(\d+(?:\.\d+)*)\b/gi)].map((m) => m[1]);
+        for (const n of answerFigRefs) {
+          if (!seenFigNums.has(n)) { aiFigures.push({ figure_number: n }); seenFigNums.add(n); }
+        }
+        const answerTblRefs = [...answerText2.matchAll(/\btable\s+(\d+(?:\.\d+)*)\b/gi)].map((m) => m[1]);
+        for (const n of answerTblRefs) {
+          if (!seenTblNums.has(n)) { aiTables.push({ table_number: n }); seenTblNums.add(n); }
         }
 
         const figNums = aiFigures.map((f: any) => f.figure_number).filter(Boolean);
@@ -492,6 +493,38 @@ ${chunk.content}`;
               if (c.page_number == null) c.page_number = hit.page_number;
             } else if (standardIds.length === 1) {
               c.standard_id = standardIds[0];
+            }
+          }
+        }
+
+        // Fallback: scan answer text for "Clause X.X.X" mentions and auto-cite
+        // from matched chunks. Handles cases where Claude mentions the clause
+        // in prose but omits it from the metadata JSON (common when the answer
+        // spans multiple sub-clauses or includes a correction).
+        if (matchedChunks.length > 0) {
+          const citedNums = new Set(
+            parsedResponse.citations.map((c: any) => (c.clause_number || "").toString().trim())
+          );
+          const answerClauseRefs = [
+            ...(parsedResponse.answer || "").matchAll(/\bclause\s+(\d+(?:\.\d+){1,4})\b/gi)
+          ].map((m) => m[1]);
+          for (const ref of answerClauseRefs) {
+            if (citedNums.has(ref)) continue;
+            const hit =
+              matchedChunks.find((mc: any) => (mc.clause_number || "").toString().trim() === ref) ||
+              matchedChunks.find((mc: any) => (mc.clause_number || "").toString().trim().startsWith(ref + ".")) ||
+              matchedChunks.find((mc: any) => ref.startsWith(((mc.clause_number || "").toString().trim()) + "."));
+            if (hit) {
+              const std = standardMap.get(hit.standard_id);
+              parsedResponse.citations.push({
+                standard_code: std?.standard_code || null,
+                standard_version: std?.version || null,
+                clause_number: hit.clause_number,
+                relevant_text: (hit.content || "").slice(0, 300).trim(),
+                page_number: hit.page_number,
+                standard_id: hit.standard_id,
+              });
+              citedNums.add((hit.clause_number || "").toString().trim());
             }
           }
         }

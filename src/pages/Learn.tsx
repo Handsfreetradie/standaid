@@ -494,6 +494,28 @@ const Learn = () => {
     }
   };
 
+  const compressImage = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const MAX = 1280;
+        let { width, height } = img;
+        if (width > MAX || height > MAX) {
+          if (width > height) { height = Math.round(height * MAX / width); width = MAX; }
+          else { width = Math.round(width * MAX / height); height = MAX; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d")!.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", 0.8).split(",")[1]);
+      };
+      img.onerror = reject;
+      img.src = url;
+    });
+
   const handlePhotoUpload = () => {
     if (!selectedStandard) {
       toast.error("Please select a standard before uploading a photo.");
@@ -506,15 +528,14 @@ const Learn = () => {
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
-      if (file.size > 10 * 1024 * 1024) { toast.error("Image must be under 10MB"); return; }
-
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64 = (reader.result as string).split(",")[1];
-        setPhotoPreview(reader.result as string);
+      if (file.size > 30 * 1024 * 1024) { toast.error("Image must be under 30MB"); return; }
+      try {
+        const base64 = await compressImage(file);
+        setPhotoPreview(`data:image/jpeg;base64,${base64}`);
         analyzePhoto(base64);
-      };
-      reader.readAsDataURL(file);
+      } catch {
+        toast.error("Failed to process image. Please try another photo.");
+      }
     };
     input.click();
   };

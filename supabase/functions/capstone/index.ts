@@ -184,7 +184,7 @@ async function callAI(
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
+  const timeout = setTimeout(() => controller.abort(), 90000);
   let res: Response;
   try {
     res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -238,7 +238,7 @@ serve(async (req) => {
     };
 
     // ── RATE LIMIT: 20 AI calls per hour per user (applies to AI actions only) ──
-    const AI_ACTIONS = ["generate_questions", "analyze_photo", "explain_chunk", "generate_study_guide"];
+    const AI_ACTIONS = ["generate_questions", "analyze_photo", "explain_chunk", "generate_study_guide", "generate_short_answer", "generate_calculation", "grade_calculation", "grade_short_answer", "exam_prep"];
     if (AI_ACTIONS.includes(action)) {
       const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
       const { count: usageCount } = await supabase
@@ -274,7 +274,7 @@ serve(async (req) => {
           model: "claude-opus-4-8",
           messages: [
             { role: "system", content: `You are an exam question generator for trade apprentices studying ${standard?.title || "industry standards"}. Generate practical, scenario-based multiple-choice questions ONLY from the provided standard content. Never invent facts. Frame questions as real on-site situations — e.g. "You are wiring a bathroom and...", "A customer asks you to install...", "On a job site you find...". Do NOT ask "What does Clause X.X say?" or "According to Clause X.X..." — test understanding and application, not clause memorisation. CRITICAL: Never mention any clause number in the question text. Clause numbers belong only in the explanation field.` },
-            { role: "user", content: `Generate ${count} ${diff}-difficulty multiple-choice questions from this standard content. ${topicFilter}\n\nStandard: ${standard?.standard_code || standard?.title}\n\nContent:\n${allChunks.map((c) => `[${c.clause_number || ""}] ${c.content}`).join("\n\n")}` },
+            { role: "user", content: `Generate ${count} ${diff}-difficulty multiple-choice questions from this standard content. ${topicFilter}\n\nStandard: ${standard?.standard_code || standard?.title}\n\nContent:\n${allChunks.map((c) => `[${c.clause_number || ""}] ${(c.content || "").slice(0, 700)}`).join("\n\n")}` },
           ],
           tools: [{
             type: "function",
@@ -332,8 +332,8 @@ serve(async (req) => {
     if (action === "analyze_photo") {
       if (!imageBase64) throw new Error("No image provided");
 
-      if (imageBase64.length > 1_000_000) {
-        return new Response(JSON.stringify({ error: "Image too large. Please use an image under 750KB." }), {
+      if (imageBase64.length > 5_000_000) {
+        return new Response(JSON.stringify({ error: "Image too large. Please use an image under 3.5MB." }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
@@ -349,21 +349,29 @@ serve(async (req) => {
           messages: [
             {
               role: "system",
-              content: `You are a trade educator reviewing an apprentice's handwritten work against ${standard?.standard_code || standard?.title}. 
-Rules:
-- Give CONCISE hints only (max 3-5 bullet points)
-- Do NOT give full answers unless explicitly asked
-- Reference specific clause numbers from the standard
-- If the handwriting is unclear, say so honestly
-- Focus on what needs correction or improvement
-- Be encouraging but accurate`,
+              content: `You are reviewing handwritten exam work from an Australian electrical apprentice studying ${standard?.standard_code || standard?.title}.
+
+CRITICAL — NEVER GUESS HANDWRITING:
+If any word, number, or symbol is not clearly legible, write [unclear] — do NOT guess what it says.
+Misreading a number (e.g. reading "2.5" as "25") gives dangerously wrong feedback on a real exam.
+Only evaluate content you can clearly and confidently read.
+
+Respond in this exact format:
+
+**What I can read:**
+Transcribe the handwritten text word-for-word. Mark anything uncertain as [unclear]. If the image is too blurry, dark, or unclear overall, say so and stop here.
+
+**Feedback:**
+Only comment on content you clearly transcribed above — never on [unclear] sections.
+Reference specific clause numbers from the standard content provided.
+Max 4 bullet points. Be direct and honest about what is correct vs what needs work.`,
             },
             {
               role: "user",
               content: [
                 {
                   type: "text",
-                  text: `Review this apprentice's handwritten work against the standard. Give max 5 concise hints about what's correct and what needs improvement.\n\nRelevant standard content:\n${chunks.map((c) => `[${c.clause_number || ""}] ${c.content}`).join("\n\n")}`,
+                  text: `Review this apprentice's handwritten work. Transcribe what you can read first, then give feedback against the standard.\n\nRelevant standard content:\n${chunks.map((c) => `[${c.clause_number || ""}] ${(c.content || "").slice(0, 600)}`).join("\n\n")}`,
                 },
                 {
                   type: "image_url",
@@ -465,18 +473,75 @@ Rules:
       if (sectionFilter) {
         questionQuery = questionQuery.or(`clause_reference.like.${sectionFilter}.%,clause_reference.like.Clause ${sectionFilter}.%,topic.ilike.Section ${sectionFilter}%`);
       }
-      let { data: questions } = await questionQuery;
+      let { data: existingQuestions } = await questionQuery;
 
-      if (!questions?.length) {
-        return new Response(JSON.stringify({ error: "No questions available. Generate practice questions first." }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+      // Auto-generate if not enough questions in the pool
+      if (!existingQuestions || existingQuestions.length < count) {
+        const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 30, undefined, sectionFilter);
+        if (!chunks?.length) throw new Error("No content found for this standard. Please ensure it has been fully processed.");
+        const figureChunks = await fetchDescribedFigures(supabase, standardId, 5, sectionFilter);
+        const allChunks = [...chunks, ...figureChunks];
+        const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
+
+        const genResponse = await callAI({
+          model: "claude-opus-4-8",
+          messages: [
+            { role: "system", content: `You are an exam question generator for trade apprentices studying ${standard?.title || "industry standards"}. Generate practical, scenario-based multiple-choice questions ONLY from the provided standard content. Never invent facts. Frame questions as real on-site situations — e.g. "You are wiring a bathroom and...", "A customer asks you to install...", "On a job site you find...". Do NOT ask "What does Clause X.X say?" — test understanding and application, not clause memorisation. CRITICAL: Never mention any clause number in the question text. Clause numbers belong only in the explanation field.` },
+            { role: "user", content: `Generate ${count} medium-difficulty multiple-choice questions from this standard content.\n\nStandard: ${standard?.standard_code || standard?.title}\n\nContent:\n${allChunks.map((c) => `[${c.clause_number || ""}] ${(c.content || "").slice(0, 700)}`).join("\n\n")}` },
+          ],
+          tools: [{
+            type: "function",
+            function: {
+              name: "return_questions",
+              description: "Return generated quiz questions",
+              parameters: {
+                type: "object",
+                properties: {
+                  questions: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        question: { type: "string" },
+                        options: { type: "array", items: { type: "string" }, minItems: 4, maxItems: 4 },
+                        correct_answer: { type: "string" },
+                        explanation: { type: "string" },
+                        clause_reference: { type: "string" },
+                        topic: { type: "string" },
+                      },
+                      required: ["question", "options", "correct_answer", "explanation", "clause_reference"],
+                    },
+                  },
+                },
+                required: ["questions"],
+                additionalProperties: false,
+              },
+            },
+          }],
+          tool_choice: { type: "function", function: { name: "return_questions" } },
+        }, ANTHROPIC_API_KEY, { max_tokens: 3000 });
+
+        if (!genResponse.ok) return await aiError(genResponse);
+        const genData = await genResponse.json();
+        const genInput = getToolInput(genData);
+        if (genInput?.questions?.length) {
+          const inserts = genInput.questions.map((q: any) => ({
+            user_id: user.id, standard_id: standardId, question: q.question, options: q.options,
+            correct_answer: q.correct_answer, explanation: q.explanation, clause_reference: q.clause_reference,
+            difficulty: "medium", topic: q.topic || null,
+          }));
+          const { data: newQ } = await supabase.from("capstone_questions").insert(inserts).select();
+          existingQuestions = [...(existingQuestions || []), ...(newQ || [])];
+        }
+        try { await supabase.from("capstone_usage").insert({ user_id: user.id }); } catch (_) {}
       }
 
-      const shuffled = questions.sort(() => Math.random() - 0.5).slice(0, count);
+      if (!existingQuestions?.length) throw new Error("Failed to generate questions. Please try again.");
+
+      const shuffled = existingQuestions.sort(() => Math.random() - 0.5).slice(0, count);
 
       const { data: exam, error: examErr } = await supabase.from("capstone_exams").insert({
-        user_id: user.id, title: "Practice Exam", total_questions: shuffled.length,
+        user_id: user.id, title: "Mock Exam", total_questions: shuffled.length,
         time_limit_seconds: timeLimit, status: "in_progress",
       }).select().single();
       if (examErr) throw examErr;
@@ -552,7 +617,7 @@ Rules:
           model: "claude-opus-4-8",
           messages: [
             { role: "system", content: `You are an expert trade educator. Create concise, apprentice-friendly study guides from standard content. Use clear headings, bullet points, and highlight key clause numbers. Only use information from the provided content.${figureNote}` },
-            { role: "user", content: `Create a comprehensive study guide for apprentices from this standard. ${focusNote}\n\nStandard: ${standard?.standard_code || standard?.title}${sectionLabel}\n\nContent:\n${allChunks.map((c) => `[${c.clause_number || ""}${c.clause_title ? " - " + c.clause_title : ""}] ${c.content}`).join("\n\n")}` },
+            { role: "user", content: `Create a comprehensive study guide for apprentices from this standard. ${focusNote}\n\nStandard: ${standard?.standard_code || standard?.title}${sectionLabel}\n\nContent:\n${allChunks.map((c) => `[${c.clause_number || ""}${c.clause_title ? " - " + c.clause_title : ""}] ${(c.content || "").slice(0, 700)}`).join("\n\n")}` },
           ],
       }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 3000 });
 
@@ -725,8 +790,8 @@ Rules:
 Voltage drop limit: 5% of supply voltage (AS/NZS 3000 Clause 3.6)`;
 
       const context = [
-        primaryChunks.length > 0 ? `AS/NZS 3000 CONTENT:\n${primaryChunks.map((c) => `[${c.clause_number || ""}] ${c.content}`).join("\n\n")}` : "",
-        cableChunks.length > 0 ? `AS/NZS 3008 CABLE DATA:\n${cableChunks.map((c) => `[${c.clause_number || ""}] ${c.content}`).join("\n\n")}` : fallbackCableData,
+        primaryChunks.length > 0 ? `AS/NZS 3000 CONTENT:\n${primaryChunks.map((c) => `[${c.clause_number || ""}] ${(c.content || "").slice(0, 600)}`).join("\n\n")}` : "",
+        cableChunks.length > 0 ? `AS/NZS 3008 CABLE DATA:\n${cableChunks.map((c) => `[${c.clause_number || ""}] ${(c.content || "").slice(0, 600)}`).join("\n\n")}` : fallbackCableData,
       ].filter(Boolean).join("\n\n---\n\n");
 
       const aiResponse = await callAI({
@@ -814,6 +879,7 @@ Give specific, helpful feedback.`,
           type: "function",
           function: {
             name: "return_grade",
+            description: "Return the grade for a calculation question",
             parameters: {
               type: "object",
               properties: {
@@ -866,7 +932,7 @@ CRITICAL: Never mention any clause number in the question text itself. Clause nu
           },
           {
             role: "user",
-            content: `Generate ${count} short-answer exam questions from this standard content.${sectionFilter ? ` Focus on Section ${sectionFilter}.` : ""}\n\nStandard: ${standard?.standard_code || standard?.title}\n\nContent:\n${allChunks.map((c) => `[${c.clause_number || ""}${c.clause_title ? " — " + c.clause_title : ""}] ${c.content}`).join("\n\n")}`,
+            content: `Generate ${count} short-answer exam questions from this standard content.${sectionFilter ? ` Focus on Section ${sectionFilter}.` : ""}\n\nStandard: ${standard?.standard_code || standard?.title}\n\nContent:\n${allChunks.map((c) => `[${c.clause_number || ""}${c.clause_title ? " — " + c.clause_title : ""}] ${(c.content || "").slice(0, 700)}`).join("\n\n")}`,
           },
         ],
         tools: [{

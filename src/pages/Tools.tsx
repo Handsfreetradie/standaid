@@ -65,7 +65,7 @@ const Tools = () => {
   const categories = [...new Set(TOOLS.map(t => t.category))];
 
   return (
-    <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md md:max-w-2xl mx-auto">
+    <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 md:px-8 max-w-md md:max-w-5xl mx-auto">
       <div className="flex items-center gap-3 mb-6">
         <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
           <Calculator className="h-5 w-5 text-primary" />
@@ -79,7 +79,7 @@ const Tools = () => {
       {categories.map(cat => (
         <div key={cat} className="mb-5">
           <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">{cat}</p>
-          <div className="space-y-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
             {TOOLS.filter(t => t.category === cat).map(tool => (
               <Card key={tool.id} className="p-4 cursor-pointer hover:border-primary/50 transition-colors active:scale-[0.99]"
                 onClick={() => setMode(tool.id)}>

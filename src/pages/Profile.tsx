@@ -137,7 +137,8 @@ const Profile = () => {
 
           {/* Right column: settings */}
           <div className="md:col-span-3">
-            <div className="space-y-1">
+            <h2 className="hidden md:block font-sans text-lg font-bold text-foreground mb-3">Settings</h2>
+            <Card className="p-2 md:p-3 space-y-1">
               {[
                 {
                   icon: CreditCard,
@@ -183,7 +184,7 @@ const Profile = () => {
                   <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                 </button>
               ))}
-            </div>
+            </Card>
 
             <p className="text-center text-[10px] text-muted-foreground mt-8">
               StandAId v1.0 · Australian Standards AI Assistant
