@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Mic, ThumbsUp, ThumbsDown, HelpCircle, Check, FileText, History } from "lucide-react";
+import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Mic, ThumbsUp, ThumbsDown, HelpCircle, Check, FileText, History, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import VoiceMode from "@/components/VoiceMode";
 import ChatHistory, { HistoryItem } from "@/components/ChatHistory";
@@ -39,6 +39,7 @@ interface Message {
   id: string;
   role: "user" | "ai";
   content: string;
+  attachedImage?: string;
   isTyping?: boolean;
   citations?: Citation[];
   figures_referenced?: ImageRef[];
@@ -149,9 +150,32 @@ const STARTER_QUESTIONS = [
   "When is a safety switch required?",
 ];
 
+const compressImage = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const MAX = 1280;
+      let { width, height } = img;
+      if (width > MAX || height > MAX) {
+        if (width > height) { height = Math.round(height * MAX / width); width = MAX; }
+        else { width = Math.round(width * MAX / height); height = MAX; }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext("2d")!.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/jpeg", 0.8).split(",")[1]);
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+
 const Chat = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  const [pendingImage, setPendingImage] = useState<{ base64: string; previewUrl: string } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -159,6 +183,7 @@ const Chat = () => {
   const { session } = useAuth();
   const { data: profile } = useProfile();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const queriesRemaining = profile
     ? Math.max(0, 5 - (profile.daily_query_count || 0))
@@ -174,7 +199,24 @@ const Chat = () => {
     scrollToBottom();
   }, [messages.length, isLoading, scrollToBottom]);
 
-  const runQuery = async (question: string): Promise<string | undefined> => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Only images are supported — video analysis coming soon.");
+      return;
+    }
+    try {
+      const base64 = await compressImage(file);
+      const previewUrl = `data:image/jpeg;base64,${base64}`;
+      setPendingImage({ base64, previewUrl });
+    } catch {
+      toast.error("Couldn't load that image. Please try another.");
+    }
+    e.target.value = "";
+  };
+
+  const runQuery = async (question: string, imageBase64?: string): Promise<string | undefined> => {
     if (!session) {
       toast.error("Please sign in to use the chat");
       return undefined;
@@ -198,7 +240,7 @@ const Chat = () => {
           "Authorization": `Bearer ${session.access_token}`,
           "apikey": SUPABASE_PUBLISHABLE_KEY,
         },
-        body: JSON.stringify({ question, conversation_history: history }),
+        body: JSON.stringify({ question, conversation_history: history, ...(imageBase64 ? { image_base64: imageBase64 } : {}) }),
       });
 
       if (!response.ok || !response.body) {
@@ -283,14 +325,23 @@ const Chat = () => {
 
   const sendQuery = async (overrideText?: string) => {
     const question = (overrideText ?? input).trim();
-    if (!question || isLoading) return;
+    const img = pendingImage;
+    if (!question && !img) return;
+    if (isLoading) return;
 
-    setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "user" as const, content: question }]);
+    const effectiveQuestion = question || "Please analyse this image and give me guidance based on the relevant Australian standards.";
+    setMessages((prev) => [...prev, {
+      id: crypto.randomUUID(),
+      role: "user" as const,
+      content: effectiveQuestion,
+      attachedImage: img?.base64,
+    }]);
     setInput("");
+    setPendingImage(null);
     setIsLoading(true);
 
     try {
-      await runQuery(question);
+      await runQuery(effectiveQuestion, img?.base64);
     } catch (e: any) {
       console.error("Query error:", e);
     } finally {
@@ -399,6 +450,13 @@ const Chat = () => {
           >
             {msg.role === "user" ? (
               <div className="max-w-[85%] rounded-2xl rounded-br-md bg-primary px-4 py-3">
+                {msg.attachedImage && (
+                  <img
+                    src={`data:image/jpeg;base64,${msg.attachedImage}`}
+                    alt="Attached"
+                    className="w-full max-w-[240px] rounded-lg mb-2"
+                  />
+                )}
                 <p className="text-sm text-primary-foreground">{msg.content}</p>
               </div>
             ) : (
@@ -612,12 +670,35 @@ const Chat = () => {
 
       {/* Input — chat-input-wrapper class is locked in index.css, do not remove */}
       <div className="chat-input-wrapper flex-shrink-0 border-t border-border px-4 pt-3 bg-card">
+        {/* Image preview */}
+        {pendingImage && (
+          <div className="relative inline-block mb-2">
+            <img
+              src={pendingImage.previewUrl}
+              alt="Attached"
+              className="h-16 w-16 object-cover rounded-lg border border-border"
+            />
+            <button
+              onClick={() => setPendingImage(null)}
+              className="absolute -top-1.5 -right-1.5 h-5 w-5 bg-destructive rounded-full flex items-center justify-center shadow"
+            >
+              <X className="h-3 w-3 text-white" />
+            </button>
+          </div>
+        )}
         <div className="flex items-end gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleFileSelect}
+          />
           <Button
             size="icon"
             variant="ghost"
-            className="h-10 w-10 flex-shrink-0 text-muted-foreground"
-            onClick={() => toast.info("Photo analysis — coming soon!")}
+            className={`h-10 w-10 flex-shrink-0 ${pendingImage ? "text-primary" : "text-muted-foreground"}`}
+            onClick={() => fileInputRef.current?.click()}
           >
             <Camera className="h-5 w-5" />
           </Button>
@@ -640,7 +721,7 @@ const Chat = () => {
           <Button
             size="icon"
             className="h-10 w-10 flex-shrink-0"
-            disabled={!input.trim() || isLoading}
+            disabled={(!input.trim() && !pendingImage) || isLoading}
             onClick={() => sendQuery()}
           >
             <Send className="h-4 w-4" />

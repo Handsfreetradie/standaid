@@ -36,18 +36,26 @@ serve(async (req) => {
     }
     const userId = user.id;
 
-    const { question, conversation_history } = await req.json();
-    if (!question || typeof question !== "string" || question.trim().length === 0) {
+    const { question, conversation_history, image_base64 } = await req.json();
+    const hasImage = typeof image_base64 === "string" && image_base64.length > 0;
+    if ((!question || typeof question !== "string" || question.trim().length === 0) && !hasImage) {
       return new Response(JSON.stringify({ error: "Question is required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
     }
-    if (question.length > 2000) {
+    if (question && question.length > 2000) {
       return new Response(JSON.stringify({ error: "Question must be 2,000 characters or less" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    if (hasImage && image_base64.length > 7_000_000) {
+      return new Response(JSON.stringify({ error: "Image too large — please use a smaller photo." }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const effectiveQuestion = (question?.trim()) || "Please analyse this image and give guidance based on the relevant Australian standards.";
 
+    // Use effectiveQuestion throughout for retrieval
     const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
     if (!ANTHROPIC_API_KEY) {
       return new Response(JSON.stringify({ error: "Service unavailable" }), {
@@ -91,14 +99,14 @@ serve(async (req) => {
       .slice(-2)
       .map((m) => m.content)
       .join(" ");
-    const retrievalQuery = lastUserMessages ? `${lastUserMessages} ${question}` : question;
+    const retrievalQuery = lastUserMessages ? `${lastUserMessages} ${effectiveQuestion}` : effectiveQuestion;
 
     // Expand tradie terms to standards terminology
     const { keywords, expandedText, matchedPhrases } = expandQuery(retrievalQuery);
-    const hasExpansion = expandedText !== question;
+    const hasExpansion = expandedText !== effectiveQuestion;
 
     // Detect explicit clause numbers
-    const clauseNumberMatches = question.match(/\b[A-Za-z]?\d+(?:\.\d+){1,4}\b/g) || [];
+    const clauseNumberMatches = effectiveQuestion.match(/\b[A-Za-z]?\d+(?:\.\d+){1,4}\b/g) || [];
 
     // Server-side keyword search: top 5 keywords via ilike (much faster than loading 2000 chunks)
     const topKeywords = keywords.slice(0, 5).filter((kw: string) => kw.length > 2);
@@ -203,7 +211,7 @@ serve(async (req) => {
     const topStandardName = standardCounts.size > 0
       ? [...standardCounts.entries()].sort((a, b) => b[1] - a[1])[0][0]
       : null;
-    const trade: TradeType = detectTrade(question, topStandardName);
+    const trade: TradeType = detectTrade(effectiveQuestion, topStandardName);
 
     // Build context string
     const contextChunks = matchedChunks.length > 0
@@ -238,9 +246,17 @@ ${chunk.content}`;
     const queryId = crypto.randomUUID();
     const isLowConfidence = topSimilarity < 0.80;
 
-    // Call Claude with streaming (30-second timeout)
+    // Build user message content — include image if uploaded
+    const lastUserContent: any = hasImage
+      ? [
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: image_base64 } },
+          { type: "text", text: effectiveQuestion },
+        ]
+      : effectiveQuestion;
+
+    // Call Claude with streaming (60-second timeout — image analysis takes longer)
     const aiController = new AbortController();
-    const aiTimeout = setTimeout(() => aiController.abort(), 30000);
+    const aiTimeout = setTimeout(() => aiController.abort(), 60000);
     let aiResponse: Response;
     try {
       aiResponse = await fetch("https://api.anthropic.com/v1/messages", {
@@ -253,7 +269,7 @@ ${chunk.content}`;
           messages: [
             { role: "user", content: systemPrompt },
             ...history,
-            { role: "user", content: question },
+            { role: "user", content: lastUserContent },
           ],
         }),
         signal: aiController.signal,
@@ -386,8 +402,8 @@ ${chunk.content}`;
         };
 
         // Figure/table lookup — regex supports whole numbers (e.g. "Table 50") and "fig" abbreviation/typos
-        const questionFigNums = [...question.matchAll(/\bfig(?:ure)?s?\s+(\d+(?:\.\d+)*)\b/gi)].map((m) => m[1]);
-        const questionTblNums = [...question.matchAll(/\btable[s]?\s+(\d+(?:\.\d+)*)\b/gi)].map((m) => m[1]);
+        const questionFigNums = [...effectiveQuestion.matchAll(/\bfig(?:ure)?s?\s+(\d+(?:\.\d+)*)\b/gi)].map((m) => m[1]);
+        const questionTblNums = [...effectiveQuestion.matchAll(/\btable[s]?\s+(\d+(?:\.\d+)*)\b/gi)].map((m) => m[1]);
         const aiFigures: any[] = parsedResponse.figures_referenced || [];
         const aiTables: any[] = parsedResponse.tables_referenced || [];
 
@@ -462,7 +478,7 @@ ${chunk.content}`;
         const validation = validateResponse({
           response: parsedResponse.answer || "",
           chunks: matchedChunks,
-          query: question,
+          query: effectiveQuestion,
           trade,
         });
         parsedResponse.answer = validation.cleanedResponse;
@@ -558,7 +574,7 @@ ${chunk.content}`;
           await supabase.from("query_log").insert({
             id: queryId,
             user_id: userId,
-            query_text: question,
+            query_text: effectiveQuestion,
             trade,
             retrieved_chunk_ids: matchedChunks.map((c: any) => c.id).filter(Boolean),
             retrieved_chunk_count: matchedChunks.length,
@@ -570,7 +586,7 @@ ${chunk.content}`;
           });
           const { data: queryRecord } = await supabase.from("queries").insert({
             user_id: userId,
-            question,
+            question: effectiveQuestion,
             response: parsedResponse.answer,
             citations: parsedResponse.citations,
             confidence_score: topSimilarity,
