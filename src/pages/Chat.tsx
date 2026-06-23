@@ -458,37 +458,17 @@ const Chat = () => {
               </p>
             </div>
 
-            {/* Affiliate — buy standards */}
-            <div className="w-full max-w-sm">
-              <Card className="border-primary/20 bg-primary/5 overflow-hidden">
-                <div className="p-4">
-                  <div className="flex items-start gap-3 mb-3">
-                    <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <ShoppingCart className="h-4 w-4 text-primary" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-semibold text-foreground leading-tight">
-                        Buy Australian Standards
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                        Electrician, plumber, builder — find and purchase the official AS/NZS standards for your trade, then upload them here for instant AI answers on any clause.
-                      </p>
-                    </div>
-                  </div>
-
-                  <a
-                    href={STANDARDS_AFFILIATE_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2 w-full rounded-lg bg-primary text-primary-foreground text-sm font-semibold py-3 hover:bg-primary/90 active:scale-[0.98] transition-all"
-                  >
-                    <ShoppingCart className="h-4 w-4" />
-                    Buy Standards
-                    <ExternalLink className="h-3.5 w-3.5 opacity-70" />
-                  </a>
-                </div>
-              </Card>
-            </div>
+            {/* Affiliate — subtle secondary link */}
+            <a
+              href={STANDARDS_AFFILIATE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border bg-background hover:bg-muted/50 active:scale-[0.98] transition-all text-xs text-muted-foreground hover:text-foreground"
+            >
+              <ShoppingCart className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
+              <span>Need a standard? <span className="font-semibold text-foreground">Buy Australian Standards</span></span>
+              <ExternalLink className="h-3 w-3 flex-shrink-0 ml-auto" />
+            </a>
           </div>
         )}
 
