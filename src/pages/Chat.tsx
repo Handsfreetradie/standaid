@@ -151,6 +151,37 @@ const STARTER_QUESTIONS = [
   "When is a safety switch required?",
 ];
 
+function ThinkingBubble({ isComplianceCheck }: { isComplianceCheck?: boolean }) {
+  const [stage, setStage] = useState(0);
+  const stages = isComplianceCheck
+    ? ["Scanning photo…", "Checking compliance…", "Reviewing clauses…"]
+    : ["Searching standards…", "Finding clauses…", "Drafting answer…"];
+
+  useEffect(() => {
+    const t = setInterval(() => setStage((s) => (s + 1) % stages.length), 2000);
+    return () => clearInterval(t);
+  }, [stages.length]);
+
+  return (
+    <div className="flex items-center gap-3 py-0.5">
+      <div className="flex gap-[5px] items-end">
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="block rounded-full bg-primary"
+            style={{
+              width: 7,
+              height: 7,
+              animation: `thinking-dot 1.2s ease-in-out ${i * 0.18}s infinite`,
+            }}
+          />
+        ))}
+      </div>
+      <span className="text-sm text-muted-foreground">{stages[stage]}</span>
+    </div>
+  );
+}
+
 const compressImage = (file: File): Promise<string> =>
   new Promise((resolve, reject) => {
     const img = new Image();
@@ -505,13 +536,17 @@ const Chat = () => {
                     </div>
                   )}
 
-                  {/* Answer — markdown rendered during and after typing */}
-                  <div className="chat-answer text-card-foreground">
-                    <ReactMarkdown>{msg.content || " "}</ReactMarkdown>
-                    {msg.isTyping && (
-                      <span className="inline-block w-0.5 h-4 bg-primary ml-0.5 animate-pulse align-middle" />
-                    )}
-                  </div>
+                  {/* Thinking animation while waiting for first token, then stream */}
+                  {msg.isTyping && !msg.content ? (
+                    <ThinkingBubble isComplianceCheck={msg.isComplianceCheck} />
+                  ) : (
+                    <div className="chat-answer text-card-foreground">
+                      <ReactMarkdown>{msg.content || " "}</ReactMarkdown>
+                      {msg.isTyping && (
+                        <span className="inline-block w-0.5 h-4 bg-primary ml-0.5 animate-pulse align-middle" />
+                      )}
+                    </div>
+                  )}
 
                   {/* Clause badges */}
                   {!msg.isTyping && msg.citations && msg.citations.length > 0 && (
@@ -666,14 +701,7 @@ const Chat = () => {
         {isLoading && !messages.some(m => m.isTyping) && (
           <div className="flex justify-start">
             <Card className="p-4 shadow-sm">
-              <div className="flex items-center gap-2">
-                <div className="flex gap-1">
-                  <span className="h-2 w-2 rounded-full bg-primary animate-bounce [animation-delay:0ms]" />
-                  <span className="h-2 w-2 rounded-full bg-primary animate-bounce [animation-delay:150ms]" />
-                  <span className="h-2 w-2 rounded-full bg-primary animate-bounce [animation-delay:300ms]" />
-                </div>
-                <p className="text-sm text-muted-foreground">Searching your standards...</p>
-              </div>
+              <ThinkingBubble />
             </Card>
           </div>
         )}
