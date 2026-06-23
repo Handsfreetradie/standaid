@@ -221,13 +221,30 @@ serve(async (req) => {
       : null;
     const trade: TradeType = detectTrade(effectiveQuestion, topStandardName);
 
+    // Pre-call figure lookup — when question explicitly names a figure, fetch its
+    // caption from the DB so Claude knows what it shows before it answers.
+    const preFigNums = [...effectiveQuestion.matchAll(/\bfig(?:ure)?s?\s+(\d+(?:\.\d+)*)\b/gi)].map((m) => m[1]);
+    let figCaptionContext = "";
+    if (preFigNums.length > 0) {
+      const { data: preFigData } = await supabase
+        .from("standard_figures")
+        .select("figure_number, caption, page_number")
+        .eq("user_id", userId)
+        .in("figure_number", preFigNums);
+      if (preFigData?.length) {
+        figCaptionContext = "\n\n[FIGURE REFERENCE]\n" + preFigData.map((f: any) =>
+          `Figure ${f.figure_number}: ${f.caption || "Diagram from the standard"} (Page ${f.page_number})`
+        ).join("\n");
+      }
+    }
+
     // Build context string
     const contextChunks = matchedChunks.length > 0
       ? matchedChunks.map((chunk: any, i: number) => {
           const std = standardMap.get(chunk.standard_id);
           return `[Source ${i + 1} — ${std?.standard_code || "Unknown"} ${std?.version || ""} Clause ${chunk.clause_number || "N/A"} (Page ${chunk.page_number || "N/A"})]
 ${chunk.content}`;
-        }).join("\n\n")
+        }).join("\n\n") + figCaptionContext
       : null;
 
     // No-chunks fallback — refuse to fabricate, tell user to check their uploads
@@ -539,18 +556,29 @@ User's question/context: ${effectiveQuestion}` : "";
           }
         }
 
-        // Fallback: scan answer text for "Clause X.X.X" mentions and auto-cite
-        // from matched chunks. Handles cases where Claude mentions the clause
-        // in prose but omits it from the metadata JSON (common when the answer
-        // spans multiple sub-clauses or includes a correction).
+        // Fallback: scan answer text for clause references and auto-cite from
+        // matched chunks. Catches "Clause 2.2.2", "clause 2.2.2", bare "2.2.2"
+        // references, and high-similarity top chunks when no citations were found.
         if (matchedChunks.length > 0) {
           const citedNums = new Set(
             parsedResponse.citations.map((c: any) => (c.clause_number || "").toString().trim())
           );
+
+          // Pattern 1: explicit "clause X.X.X" or "section X.X.X"
           const answerClauseRefs = [
-            ...(parsedResponse.answer || "").matchAll(/\bclause\s+(\d+(?:\.\d+){1,4})\b/gi)
+            ...(parsedResponse.answer || "").matchAll(/\b(?:clause|section)\s+(\d+(?:\.\d+){1,4})\b/gi)
           ].map((m) => m[1]);
-          for (const ref of answerClauseRefs) {
+
+          // Pattern 2: bare clause numbers like "2.2.2" appearing in answer (only X.X.X+ depth)
+          const bareClauseRefs = [
+            ...(parsedResponse.answer || "").matchAll(/\b(\d+(?:\.\d+){2,4})\b/g)
+          ].map((m) => m[1]);
+
+          // Pattern 3: if still no citations after all patterns, surface the top
+          // high-similarity chunk so at least one clause badge appears
+          const allRefs = [...new Set([...answerClauseRefs, ...bareClauseRefs])];
+
+          for (const ref of allRefs) {
             if (citedNums.has(ref)) continue;
             const hit =
               matchedChunks.find((mc: any) => (mc.clause_number || "").toString().trim() === ref) ||
@@ -568,6 +596,20 @@ User's question/context: ${effectiveQuestion}` : "";
               });
               citedNums.add((hit.clause_number || "").toString().trim());
             }
+          }
+
+          // Last resort: if still no citations, always surface the top retrieved chunk
+          if (parsedResponse.citations.length === 0 && matchedChunks.length > 0) {
+            const top = matchedChunks[0];
+            const std = standardMap.get(top.standard_id);
+            parsedResponse.citations.push({
+              standard_code: std?.standard_code || null,
+              standard_version: std?.version || null,
+              clause_number: top.clause_number,
+              relevant_text: (top.content || "").slice(0, 300).trim(),
+              page_number: top.page_number,
+              standard_id: top.standard_id,
+            });
           }
         }
 
