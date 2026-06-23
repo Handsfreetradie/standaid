@@ -40,6 +40,7 @@ interface Message {
   role: "user" | "ai";
   content: string;
   attachedImage?: string;
+  isComplianceCheck?: boolean;
   isTyping?: boolean;
   citations?: Citation[];
   figures_referenced?: ImageRef[];
@@ -216,7 +217,7 @@ const Chat = () => {
     e.target.value = "";
   };
 
-  const runQuery = async (question: string, imageBase64?: string): Promise<string | undefined> => {
+  const runQuery = async (question: string, imageBase64?: string, isComplianceCheck?: boolean): Promise<string | undefined> => {
     if (!session) {
       toast.error("Please sign in to use the chat");
       return undefined;
@@ -294,6 +295,7 @@ const Chat = () => {
                   ...m,
                   content: finalAnswer,
                   isTyping: false,
+                  isComplianceCheck: isComplianceCheck || false,
                   citations: event.citations || [],
                   figures_referenced: (event.figures_referenced || []).filter((f: ImageRef) => f.image_url || (f.standard_id && f.page_number)),
                   tables_referenced: (event.tables_referenced || []).filter((t: ImageRef) => t.image_url || (t.standard_id && t.page_number)),
@@ -330,6 +332,7 @@ const Chat = () => {
     if (isLoading) return;
 
     const effectiveQuestion = question || "Please analyse this image and give me guidance based on the relevant Australian standards.";
+    const isComplianceCheck = !!img;
     setMessages((prev) => [...prev, {
       id: crypto.randomUUID(),
       role: "user" as const,
@@ -341,7 +344,7 @@ const Chat = () => {
     setIsLoading(true);
 
     try {
-      await runQuery(effectiveQuestion, img?.base64);
+      await runQuery(effectiveQuestion, img?.base64, isComplianceCheck);
     } catch (e: any) {
       console.error("Query error:", e);
     } finally {
@@ -462,6 +465,14 @@ const Chat = () => {
             ) : (
               <div className="max-w-[90%] space-y-2">
                 <Card className="p-4 shadow-sm">
+                  {/* Compliance check badge */}
+                  {msg.isComplianceCheck && (
+                    <div className="flex items-center gap-1.5 mb-3 text-xs font-semibold text-amber-600 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-400 rounded-lg px-3 py-1.5 w-fit">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      Compliance Check
+                    </div>
+                  )}
+
                   {/* Accuracy score — hide while typing */}
                   {!msg.isTyping && msg.accuracy_score != null && (
                     <div className="flex items-center gap-3 mb-3">
@@ -706,7 +717,7 @@ const Chat = () => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask about your standards..."
+            placeholder={pendingImage ? "Describe what to check, or just send to let Claude assess it..." : "Ask about your standards..."}
             className="min-h-[40px] max-h-[120px] resize-none text-sm"
             rows={1}
           />

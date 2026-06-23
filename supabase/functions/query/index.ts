@@ -99,7 +99,15 @@ serve(async (req) => {
       .slice(-2)
       .map((m) => m.content)
       .join(" ");
-    const retrievalQuery = lastUserMessages ? `${lastUserMessages} ${effectiveQuestion}` : effectiveQuestion;
+
+    // When image is present with a short/generic question, boost retrieval with common
+    // onsite compliance topics so we pull relevant clauses even without a detailed query
+    const imageBoost = hasImage && (!question || question.trim().length < 40)
+      ? " socket outlet powerpoint bathroom kitchen installation compliance distance clearance zone IP rating earthing wiring rules"
+      : "";
+    const retrievalQuery = lastUserMessages
+      ? `${lastUserMessages} ${effectiveQuestion}${imageBoost}`
+      : `${effectiveQuestion}${imageBoost}`;
 
     // Expand tradie terms to standards terminology
     const { keywords, expandedText, matchedPhrases } = expandQuery(retrievalQuery);
@@ -247,10 +255,28 @@ ${chunk.content}`;
     const isLowConfidence = topSimilarity < 0.80;
 
     // Build user message content — include image if uploaded
+    const complianceInstruction = hasImage ? `
+
+[PHOTO COMPLIANCE CHECK]
+Analyse the photo above against the retrieved standard extracts. Structure your response exactly as follows:
+
+**What I can see:**
+Describe the installation shown in the photo — type of fitting, location, visible wiring, mounting position.
+
+**Compliance assessment:**
+For each compliance point, state: ✅ Compliant, ⚠️ Concern, or ❌ Non-compliant — with the relevant clause number from the standards. If something is not visible enough to assess, say so.
+
+**Need to know:**
+List specific measurements or details you need to give a definitive verdict. Be precise — e.g. "What is the horizontal distance from the socket outlet face to the nearest tap?" or "Is this circuit RCD protected?"
+
+If everything visible appears compliant, state that clearly with the clauses that confirm it.
+
+User's question/context: ${effectiveQuestion}` : "";
+
     const lastUserContent: any = hasImage
       ? [
           { type: "image", source: { type: "base64", media_type: "image/jpeg", data: image_base64 } },
-          { type: "text", text: effectiveQuestion },
+          { type: "text", text: complianceInstruction || effectiveQuestion },
         ]
       : effectiveQuestion;
 
