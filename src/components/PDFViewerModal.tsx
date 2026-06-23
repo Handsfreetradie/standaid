@@ -22,7 +22,12 @@ interface PDFMeta {
   standard_id: string | null;
 }
 
-export function PDFViewerModal({ isOpen, onClose, clauseNumber, standardCode, standardId, pageNumber }: PDFViewerModalProps) {
+export function PDFViewerModal({ isOpen, onClose: rawOnClose, clauseNumber, standardCode, standardId, pageNumber }: PDFViewerModalProps) {
+  // Wraps the parent's onClose so we always pop the history entry we pushed.
+  const onClose = () => {
+    if (window.history.state?.pdfModal) window.history.back();
+    else rawOnClose();
+  };
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [meta, setMeta] = useState<PDFMeta | null>(null);
@@ -35,6 +40,18 @@ export function PDFViewerModal({ isOpen, onClose, clauseNumber, standardCode, st
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const renderTaskRef = useRef<any>(null);
+
+  // Push a history entry when the modal opens so the phone's back button
+  // closes it rather than navigating away from the page.
+  useEffect(() => {
+    if (!isOpen) return;
+    window.history.pushState({ pdfModal: true }, "");
+    const handlePop = () => onClose();
+    window.addEventListener("popstate", handlePop);
+    return () => window.removeEventListener("popstate", handlePop);
+  // onClose is stable — intentionally omitting from deps to avoid re-firing
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
