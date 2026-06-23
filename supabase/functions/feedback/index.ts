@@ -22,7 +22,6 @@ serve(async (req: Request) => {
   if (req.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405, corsHeaders);
 
   try {
-    // --- Auth check ---
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
       return jsonResponse({ error: "Unauthorized" }, 401, corsHeaders);
@@ -32,7 +31,6 @@ serve(async (req: Request) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     if (!supabaseUrl || !supabaseKey) {
-      console.error("Missing Supabase environment variables");
       return jsonResponse({ error: "Server configuration error" }, 500, corsHeaders);
     }
 
@@ -43,12 +41,47 @@ serve(async (req: Request) => {
       return jsonResponse({ error: "Unauthorized" }, 401, corsHeaders);
     }
     const userId = user.id;
-    // --- End auth check ---
 
     const body = (await req.json()) as FeedbackRequestBody;
-
     const validationError = validateFeedbackBody(body);
     if (validationError) return jsonResponse({ error: validationError }, 400, corsHeaders);
+
+    const isNegative = (body.rating === "wrong" || body.rating === "unclear") && !!body.userComment;
+
+    // For negative feedback with a comment, look up the original question and embed it
+    // so similar future queries can receive this correction as context.
+    let questionText: string | null = null;
+    let questionEmbedding: number[] | null = null;
+
+    if (isNegative) {
+      const { data: logRow } = await supabase
+        .from("query_log")
+        .select("query_text")
+        .eq("id", body.queryId)
+        .single();
+
+      questionText = logRow?.query_text ?? null;
+
+      if (questionText) {
+        const openaiKey = Deno.env.get("OPENAI_API_KEY");
+        if (openaiKey) {
+          try {
+            const embRes = await fetch("https://api.openai.com/v1/embeddings", {
+              method: "POST",
+              headers: { Authorization: `Bearer ${openaiKey}`, "Content-Type": "application/json" },
+              body: JSON.stringify({ model: "text-embedding-3-small", input: questionText }),
+            });
+            if (embRes.ok) {
+              const embData = await embRes.json();
+              questionEmbedding = embData.data[0].embedding;
+            }
+          } catch (e) {
+            // Non-fatal — feedback still saves without embedding
+            console.error("[feedback] Embedding failed:", e);
+          }
+        }
+      }
+    }
 
     const { data, error } = await supabase
       .from("query_feedback")
@@ -58,6 +91,8 @@ serve(async (req: Request) => {
         user_comment: body.userComment ?? null,
         user_id: userId,
         created_at: new Date().toISOString(),
+        ...(questionText ? { question_text: questionText } : {}),
+        ...(questionEmbedding ? { question_embedding: questionEmbedding } : {}),
       })
       .select("id")
       .single();
@@ -76,17 +111,12 @@ serve(async (req: Request) => {
 
 function validateFeedbackBody(body: unknown): string | null {
   if (!body || typeof body !== "object") return "Request body is required";
-
   const b = body as Partial<FeedbackRequestBody>;
-
   if (!b.queryId || typeof b.queryId !== "string") return "queryId is required and must be a string";
-
   const validRatings: FeedbackRating[] = ["helpful", "wrong", "unclear"];
   if (!b.rating || !validRatings.includes(b.rating)) return `rating must be one of: ${validRatings.join(", ")}`;
-
   if (b.userComment && typeof b.userComment !== "string") return "userComment must be a string if provided";
   if (b.userComment && b.userComment.length > 2000) return "userComment must be 2000 characters or fewer";
-
   return null;
 }
 

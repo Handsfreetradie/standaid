@@ -154,18 +154,27 @@ serve(async (req) => {
         : Promise.resolve({ data: [] }),
     ]);
 
-    // Vector search 1 — original query
+    // Vector search 1 — original query; also search for past feedback corrections in parallel
     let vectorChunks1: any[] = [];
+    let feedbackCorrections: Array<{ question_text: string; user_comment: string }> = [];
     if (embResponse.ok) {
       const embData = await embResponse.json();
       const queryEmbedding = embData.data[0].embedding;
-      const { data, error: matchError } = await supabase.rpc("match_chunks", {
-        query_embedding: queryEmbedding,
-        match_user_id: userId,
-        match_threshold: 0.20,
-        match_count: 20,
-      });
-      if (!matchError && data?.length) vectorChunks1 = data;
+      const [chunksResult, correctionsResult] = await Promise.all([
+        supabase.rpc("match_chunks", {
+          query_embedding: queryEmbedding,
+          match_user_id: userId,
+          match_threshold: 0.20,
+          match_count: 20,
+        }),
+        supabase.rpc("match_feedback_corrections", {
+          query_embedding: queryEmbedding,
+          match_threshold: 0.82,
+          match_count: 3,
+        }),
+      ]);
+      if (!chunksResult.error && chunksResult.data?.length) vectorChunks1 = chunksResult.data;
+      if (!correctionsResult.error && correctionsResult.data?.length) feedbackCorrections = correctionsResult.data;
     }
 
     // Vector search 2 — expanded query
@@ -238,13 +247,22 @@ serve(async (req) => {
       }
     }
 
+    // Corrections from past user feedback — injected before Claude answers so it
+    // can avoid repeating mistakes flagged on similar questions.
+    const correctionsContext = feedbackCorrections.length > 0
+      ? "\n\n[PAST FEEDBACK CORRECTIONS — Users flagged similar questions as wrong or unclear. Review these before answering:]\n" +
+        feedbackCorrections.map((c, i) =>
+          `Correction ${i + 1}: A user asked "${c.question_text}" and reported this issue: "${c.user_comment}"`
+        ).join("\n")
+      : "";
+
     // Build context string
     const contextChunks = matchedChunks.length > 0
       ? matchedChunks.map((chunk: any, i: number) => {
           const std = standardMap.get(chunk.standard_id);
           return `[Source ${i + 1} — ${std?.standard_code || "Unknown"} ${std?.version || ""} Clause ${chunk.clause_number || "N/A"} (Page ${chunk.page_number || "N/A"})]
 ${chunk.content}`;
-        }).join("\n\n") + figCaptionContext
+        }).join("\n\n") + figCaptionContext + correctionsContext
       : null;
 
     // No-chunks fallback — refuse to fabricate, tell user to check their uploads
