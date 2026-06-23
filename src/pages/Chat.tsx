@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Mic, ThumbsUp, ThumbsDown, HelpCircle, Check, FileText, History, X } from "lucide-react";
+import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Mic, ThumbsUp, ThumbsDown, HelpCircle, Check, FileText, History, X, ExternalLink, ShoppingCart } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import VoiceMode from "@/components/VoiceMode";
 import ChatHistory, { HistoryItem } from "@/components/ChatHistory";
@@ -144,12 +144,7 @@ function FeedbackButtons({ queryId }: { queryId: string }) {
   );
 }
 
-const STARTER_QUESTIONS = [
-  "What are the minimum cable burial depths?",
-  "What protection is required for RCDs?",
-  "What are the earthing requirements for a subboard?",
-  "When is a safety switch required?",
-];
+const STANDARDS_AFFILIATE_URL = "https://www.standards.org.au"; // TODO: replace with affiliate link
 
 function ThinkingBubble({ isComplianceCheck }: { isComplianceCheck?: boolean }) {
   const [stage, setStage] = useState(0);
@@ -452,8 +447,8 @@ const Chat = () => {
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-5 py-4 flex flex-col">
         {messages.length === 0 && (
-          <div className="flex-1 flex flex-col items-center justify-center text-center px-4 gap-5">
-            <div>
+          <div className="flex-1 flex flex-col items-center justify-center px-4 gap-5">
+            <div className="text-center">
               <Shield className="h-12 w-12 text-primary/30 mb-3 mx-auto" />
               <p className="text-sm font-semibold text-foreground mb-1">
                 What do you need to know?
@@ -462,16 +457,37 @@ const Chat = () => {
                 Ask anything about your uploaded standards. I'll find the exact clause.
               </p>
             </div>
-            <div className="grid grid-cols-1 gap-2 w-full max-w-sm">
-              {STARTER_QUESTIONS.map((q) => (
-                <button
-                  key={q}
-                  onClick={() => sendQuery(q)}
-                  className="text-left text-xs text-primary bg-primary/8 hover:bg-primary/15 rounded-xl px-4 py-3 transition-colors font-medium"
-                >
-                  {q}
-                </button>
-              ))}
+
+            {/* Affiliate — buy standards */}
+            <div className="w-full max-w-sm">
+              <Card className="border-primary/20 bg-primary/5 overflow-hidden">
+                <div className="p-4">
+                  <div className="flex items-start gap-3 mb-3">
+                    <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <ShoppingCart className="h-4 w-4 text-primary" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-foreground leading-tight">
+                        Buy Australian Standards
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                        Electrician, plumber, builder — find and purchase the official AS/NZS standards for your trade, then upload them here for instant AI answers on any clause.
+                      </p>
+                    </div>
+                  </div>
+
+                  <a
+                    href={STANDARDS_AFFILIATE_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2 w-full rounded-lg bg-primary text-primary-foreground text-sm font-semibold py-3 hover:bg-primary/90 active:scale-[0.98] transition-all"
+                  >
+                    <ShoppingCart className="h-4 w-4" />
+                    Buy Standards
+                    <ExternalLink className="h-3.5 w-3.5 opacity-70" />
+                  </a>
+                </div>
+              </Card>
             </div>
           </div>
         )}
