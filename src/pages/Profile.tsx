@@ -1,11 +1,12 @@
-import { User, ChevronRight, Shield, Zap, HelpCircle, LogOut, CreditCard, Bell } from "lucide-react";
+import { useState } from "react";
+import { User, ChevronRight, ChevronDown, Shield, Zap, HelpCircle, LogOut, CreditCard, Bell, Mail, ExternalLink, CheckCircle2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/hooks/useAuth";
 import { useProfile } from "@/hooks/useData";
-import { toast } from "sonner";
 
 const TRADE_LABELS: Record<string, string> = {
   electrical: "Electrical",
@@ -20,9 +21,36 @@ const TRADE_LABELS: Record<string, string> = {
   other: "Other",
 };
 
+const FAQS = [
+  {
+    q: "How do I upload a standard?",
+    a: "Go to the Standards tab, tap the upload button, and select your PDF. StandAId will process and index it automatically — usually takes 1–2 minutes.",
+  },
+  {
+    q: "What standards can I upload?",
+    a: "Any Australian Standard in PDF format — AS/NZS 3000, AS 3017, plumbing codes, building codes, NCC, and more. Any trade, any standard.",
+  },
+  {
+    q: "How accurate are the AI answers?",
+    a: "StandAId retrieves exact clause text from your uploaded standard and cites the source. Always verify critical decisions against the original document.",
+  },
+  {
+    q: "Can I upload multiple standards?",
+    a: "Yes — upload as many as you need. The AI searches across all your standards to find the most relevant clause for each question.",
+  },
+];
+
 const Profile = () => {
   const { user, signOut } = useAuth();
   const { data: profile } = useProfile();
+  const [activePanel, setActivePanel] = useState<string | null>(null);
+  const [openFaq, setOpenFaq] = useState<number | null>(null);
+  const [notifFeatures, setNotifFeatures] = useState(() =>
+    localStorage.getItem("notif_features") !== "false"
+  );
+  const [notifStandards, setNotifStandards] = useState(() =>
+    localStorage.getItem("notif_standards") !== "false"
+  );
 
   const handleSignOut = async () => {
     try {
@@ -33,8 +61,12 @@ const Profile = () => {
     }
   };
 
-  const handleComingSoon = (feature: string) => {
-    toast.info(`${feature} — coming soon!`);
+  const togglePanel = (panel: string) =>
+    setActivePanel((prev) => (prev === panel ? null : panel));
+
+  const setNotif = (key: string, value: boolean, setter: (v: boolean) => void) => {
+    setter(value);
+    localStorage.setItem(key, String(value));
   };
 
   const displayName = profile?.display_name || user?.email?.split("@")[0] || "Tradie";
@@ -47,8 +79,8 @@ const Profile = () => {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="px-5 py-6 pb-24 md:pb-10 max-w-5xl md:mx-auto">
-        <div className="md:grid md:grid-cols-5 md:gap-10 md:items-start">
+      <div className="min-h-full px-5 py-6 pb-24 md:pb-10 max-w-5xl md:mx-auto flex flex-col">
+        <div className="md:grid md:grid-cols-5 md:gap-10 md:items-start flex-1">
 
           {/* Left column: identity + plan */}
           <div className="md:col-span-2 mb-6 md:mb-0">
@@ -95,17 +127,14 @@ const Profile = () => {
                 </div>
               </div>
               {!isPro && (
-                <Button
-                  className="w-full h-11 text-sm font-semibold gap-1.5"
-                  onClick={() => handleComingSoon("Upgrade to Pro")}
-                >
+                <Button className="w-full h-11 text-sm font-semibold gap-1.5">
                   <Zap className="h-4 w-4" />
                   Upgrade to Pro — $19.99/mo
                 </Button>
               )}
             </Card>
 
-            {/* Plan Comparison */}
+            {/* Plan Comparison — free tier only */}
             {!isPro && (
               <>
                 <h2 className="font-sans text-lg font-bold text-foreground mb-3">Compare Plans</h2>
@@ -136,57 +165,193 @@ const Profile = () => {
           </div>
 
           {/* Right column: settings */}
-          <div className="md:col-span-3">
-            <h2 className="hidden md:block font-sans text-lg font-bold text-foreground mb-3">Settings</h2>
-            <Card className="p-2 md:p-3 space-y-1">
-              {[
-                {
-                  icon: CreditCard,
-                  label: "Subscription & Billing",
-                  sub: isPro ? `${tier.charAt(0).toUpperCase() + tier.slice(1)} plan active` : "Free plan",
-                  onClick: () => handleComingSoon("Subscription & Billing"),
-                  danger: false,
-                },
-                {
-                  icon: Bell,
-                  label: "Notifications",
-                  sub: null,
-                  onClick: () => handleComingSoon("Notifications"),
-                  danger: false,
-                },
-                {
-                  icon: HelpCircle,
-                  label: "Help & Support",
-                  sub: null,
-                  onClick: () => handleComingSoon("Help & Support"),
-                  danger: false,
-                },
-                {
-                  icon: LogOut,
-                  label: "Sign Out",
-                  sub: user?.email || null,
-                  onClick: handleSignOut,
-                  danger: true,
-                },
-              ].map(({ icon: Icon, label, sub, onClick, danger }) => (
+          <div className="md:col-span-3 flex flex-col gap-6">
+            <div>
+              <h2 className="hidden md:block font-sans text-lg font-bold text-foreground mb-3">Settings</h2>
+              <Card className="p-2 md:p-3 divide-y divide-border">
+
+                {/* Subscription & Billing */}
+                <div>
+                  <button
+                    onClick={() => togglePanel("billing")}
+                    className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-foreground hover:bg-secondary transition-colors min-h-[44px]"
+                  >
+                    <CreditCard className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
+                    <div className="flex-1 text-left">
+                      <span className="block">Subscription & Billing</span>
+                      <span className="block text-xs text-muted-foreground font-normal mt-0.5">
+                        {isPro ? `${tier.charAt(0).toUpperCase() + tier.slice(1)} plan active` : "Free plan"}
+                      </span>
+                    </div>
+                    {activePanel === "billing"
+                      ? <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      : <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    }
+                  </button>
+                  {activePanel === "billing" && (
+                    <div className="px-3 pb-4 pt-1 space-y-3">
+                      <div className="rounded-lg bg-muted/50 p-3 space-y-2.5">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground">Plan</span>
+                          <span className="font-semibold capitalize text-foreground">{tier}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground">Price</span>
+                          <span className="font-semibold text-foreground">
+                            {isPro ? (tier === "business" ? "$49.99/month" : "$19.99/month") : "Free"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground">Status</span>
+                          <span className="flex items-center gap-1 font-semibold text-green-600">
+                            <CheckCircle2 className="h-3 w-3" /> Active
+                          </span>
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        To manage or cancel your subscription, contact us at{" "}
+                        <a href="mailto:support@standaid.com.au" className="text-primary underline">
+                          support@standaid.com.au
+                        </a>
+                      </p>
+                      {!isPro && (
+                        <Button size="sm" className="w-full gap-1.5">
+                          <Zap className="h-3.5 w-3.5" />
+                          Upgrade to Pro — $19.99/mo
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Notifications */}
+                <div>
+                  <button
+                    onClick={() => togglePanel("notifications")}
+                    className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-foreground hover:bg-secondary transition-colors min-h-[44px]"
+                  >
+                    <Bell className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
+                    <div className="flex-1 text-left">
+                      <span className="block">Notifications</span>
+                    </div>
+                    {activePanel === "notifications"
+                      ? <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      : <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    }
+                  </button>
+                  {activePanel === "notifications" && (
+                    <div className="px-3 pb-4 pt-1 space-y-2">
+                      {[
+                        {
+                          key: "notif_features",
+                          label: "Feature updates",
+                          sub: "New tools and improvements to StandAId",
+                          value: notifFeatures,
+                          setter: (v: boolean) => setNotif("notif_features", v, setNotifFeatures),
+                        },
+                        {
+                          key: "notif_standards",
+                          label: "Standard alerts",
+                          sub: "When Australian Standards you use are revised",
+                          value: notifStandards,
+                          setter: (v: boolean) => setNotif("notif_standards", v, setNotifStandards),
+                        },
+                      ].map(({ key, label, sub, value, setter }) => (
+                        <div key={key} className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-3">
+                          <div className="flex-1 mr-3">
+                            <p className="text-xs font-medium text-foreground">{label}</p>
+                            <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>
+                          </div>
+                          <Switch checked={value} onCheckedChange={setter} />
+                        </div>
+                      ))}
+                      <p className="text-[11px] text-muted-foreground px-1">
+                        Push notifications coming soon. Preferences saved locally.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Help & Support */}
+                <div>
+                  <button
+                    onClick={() => togglePanel("help")}
+                    className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-foreground hover:bg-secondary transition-colors min-h-[44px]"
+                  >
+                    <HelpCircle className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
+                    <div className="flex-1 text-left">
+                      <span className="block">Help & Support</span>
+                    </div>
+                    {activePanel === "help"
+                      ? <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      : <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    }
+                  </button>
+                  {activePanel === "help" && (
+                    <div className="px-3 pb-4 pt-1 space-y-3">
+                      {/* FAQs */}
+                      <div className="space-y-1.5">
+                        {FAQS.map((faq, i) => (
+                          <div key={i} className="rounded-lg border border-border overflow-hidden">
+                            <button
+                              onClick={() => setOpenFaq(openFaq === i ? null : i)}
+                              className="flex w-full items-center justify-between px-3 py-2.5 text-left"
+                            >
+                              <span className="text-xs font-medium text-foreground pr-3">{faq.q}</span>
+                              <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground flex-shrink-0 transition-transform ${openFaq === i ? "rotate-180" : ""}`} />
+                            </button>
+                            {openFaq === i && (
+                              <div className="px-3 pb-3">
+                                <p className="text-xs text-muted-foreground leading-relaxed">{faq.a}</p>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Contact */}
+                      <div className="rounded-lg bg-muted/50 p-3 space-y-2">
+                        <p className="text-xs font-medium text-foreground">Contact us</p>
+                        <a
+                          href="mailto:support@standaid.com.au"
+                          className="flex items-center gap-2 text-xs text-primary hover:underline"
+                        >
+                          <Mail className="h-3.5 w-3.5" />
+                          support@standaid.com.au
+                        </a>
+                        <a
+                          href="https://github.com/Handsfreetradie/standaid/issues"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          Report a bug on GitHub
+                        </a>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Sign Out */}
                 <button
-                  key={label}
-                  onClick={onClick}
-                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium transition-colors min-h-[44px] ${
-                    danger ? "text-destructive hover:bg-destructive/10" : "text-foreground hover:bg-secondary"
-                  }`}
+                  onClick={handleSignOut}
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors min-h-[44px]"
                 >
-                  <Icon className={`h-5 w-5 flex-shrink-0 ${danger ? "text-destructive" : "text-muted-foreground"}`} />
+                  <LogOut className="h-5 w-5 flex-shrink-0 text-destructive" />
                   <div className="flex-1 text-left">
-                    <span className="block">{label}</span>
-                    {sub && <span className="block text-xs text-muted-foreground font-normal mt-0.5">{sub}</span>}
+                    <span className="block">Sign Out</span>
+                    {user?.email && (
+                      <span className="block text-xs text-muted-foreground font-normal mt-0.5">{user.email}</span>
+                    )}
                   </div>
                   <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                 </button>
-              ))}
-            </Card>
 
-            <p className="text-center text-[10px] text-muted-foreground mt-8">
+              </Card>
+            </div>
+
+            <p className="text-center text-[10px] text-muted-foreground mt-auto">
               StandAId v1.0 · Australian Standards AI Assistant
             </p>
           </div>
