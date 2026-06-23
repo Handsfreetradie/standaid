@@ -163,12 +163,8 @@ function ThinkingBubble({ isComplianceCheck }: { isComplianceCheck?: boolean }) 
         {[0, 1, 2].map((i) => (
           <span
             key={i}
-            className="block rounded-full bg-primary"
-            style={{
-              width: 7,
-              height: 7,
-              animation: `thinking-dot 1.2s ease-in-out ${i * 0.18}s infinite`,
-            }}
+            className="block rounded-full bg-primary animate-thinking-dot"
+            style={{ width: 7, height: 7, animationDelay: `${i * 0.18}s` }}
           />
         ))}
       </div>

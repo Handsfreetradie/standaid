@@ -84,11 +84,16 @@ export default {
           "0%, 100%": { boxShadow: "0 0 0 0 hsl(var(--primary) / 0.4)" },
           "50%": { boxShadow: "0 0 0 8px hsl(var(--primary) / 0)" },
         },
+        "thinking-dot": {
+          "0%, 60%, 100%": { transform: "translateY(0)", opacity: "0.35" },
+          "30%": { transform: "translateY(-5px)", opacity: "1" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "pulse-red": "pulse-red 2s ease-in-out infinite",
+        "thinking-dot": "thinking-dot 1.2s ease-in-out infinite",
       },
     },
   },
