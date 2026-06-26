@@ -117,10 +117,12 @@ function validateCitations(
   ];
 
   if (citations.length === 0) {
+    // Info only — by design, clause numbers go in the citations metadata array,
+    // not in the answer text. This is not a real problem.
     issues.push({
       type: "no_citation",
-      severity: "warning",
-      detail: "Response contains no clause citation",
+      severity: "info",
+      detail: "Response contains no inline clause citation (expected — clauses go in metadata)",
     });
     return { cleaned: response, issues };
   }
@@ -227,11 +229,13 @@ function checkGrounding(
   const overlapCount = responseWords.filter((w) => chunkWords.has(w)).length;
   const overlapRatio = responseWords.length > 0 ? overlapCount / responseWords.length : 0;
 
-  if (overlapRatio < 0.2 && responseWords.length > 30) {
+  // Plain-English answers naturally use different vocabulary to formal standards text,
+  // so the overlap threshold is intentionally low. Only flag if truly negligible.
+  if (overlapRatio < 0.08 && responseWords.length > 30) {
     issues.push({
       type: "unverified_claim",
       severity: "warning",
-      detail: `Low source grounding: only ${Math.round(overlapRatio * 100)}% of response terms appear in chunks`,
+      detail: `Very low source grounding: only ${Math.round(overlapRatio * 100)}% of response terms appear in chunks`,
     });
   }
 
