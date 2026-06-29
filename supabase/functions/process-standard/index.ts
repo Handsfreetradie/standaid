@@ -279,31 +279,21 @@ async function extractTextFromPdf(
 
 // ── Sectioning ───────────────────────────────────────────────────────────────
 
-function sortIntoSections(text: string, pages: string[]): Section[] {
-  const lines = text.split("\n");
+// Splits text into sections, tracking the real page from inline [PAGE N] markers.
+// This is accurate (marker-driven) rather than estimating from character offsets,
+// which used to drift further off the deeper into a document you got — the cause
+// of clauses opening on the wrong PDF page.
+function sortIntoSections(markedText: string): Section[] {
+  const lines = markedText.split("\n");
   const sections: Section[] = [];
   let current: Section = { heading: null, clauseNumber: null, lines: [], pageNumber: 1 };
-
-  // Build page offset map
-  let charCount = 0;
-  const pageOffsets: number[] = [];
-  for (const page of pages) {
-    pageOffsets.push(charCount);
-    charCount += page.length;
-  }
-
-  let totalChars = 0;
+  let currentPage = 1;
+  const pageMarker = /^\[PAGE\s+(\d+)\]/i;
 
   for (const line of lines) {
-    totalChars += line.length + 1;
-
-    let currentPage = 1;
-    for (let p = pageOffsets.length - 1; p >= 0; p--) {
-      if (totalChars >= pageOffsets[p]) {
-        currentPage = p + 1;
-        break;
-      }
-    }
+    // Update the running page from the marker, but never treat it as content
+    const pm = line.match(pageMarker);
+    if (pm) { currentPage = parseInt(pm[1], 10) || currentPage; continue; }
 
     const sectionMatch = line.match(SECTION_HEADING);
     const clauseMatch = line.match(CLAUSE_PATTERN);
@@ -721,7 +711,10 @@ serve(async (req) => {
     const qualityScore = computeQualityScore(extracted.text, extracted.totalPages, extracted.pagesWithContent);
     console.log(`Quality score: ${qualityScore} (${extracted.pagesWithContent}/${extracted.totalPages} pages with content)`);
 
-    if (qualityScore < 40 && extracted.text.length < 100) {
+    // Reject low-quality extractions outright — a half-read standard produces wrong
+    // answers, which is worse than asking the user for a cleaner PDF. A genuine
+    // standard scores 70+; garbage/partial scans score well below 35.
+    if (qualityScore < 35 || extracted.text.length < 100) {
       clearTimeout(timeoutHandle);
       await supabaseAdmin.from("standards").update({ extraction_status: "failed", extraction_quality_score: qualityScore }).eq("id", standard_id);
       await supabaseAdmin.from("processing_jobs")
@@ -737,7 +730,7 @@ serve(async (req) => {
     // each one is on. extracted.text has them stripped, so rebuild a marked
     // version from the pages array (page 1 = pages[0]).
     const markedText = extracted.pages.map((p, i) => `[PAGE ${i + 1}]\n${p}`).join("\n");
-    const sections = sortIntoSections(extracted.text, extracted.pages);
+    const sections = sortIntoSections(markedText);
     const clauseChunks = chunkSections(sections, standardCode, version);
     const tableChunks = extractTableChunks(markedText, standardCode, version);
     const figureChunks = extractFigureChunks(markedText, standardCode, version);

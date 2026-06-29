@@ -99,12 +99,16 @@ serve(async (req) => {
         break;
       }
 
-      // Fetch next batch of un-embedded chunks within the index limit
+      // Fetch next batch of un-embedded chunks within the index limit.
+      // Skip figure placeholders — describe-figures rewrites their content with a real
+      // description, after which they get embedded. Embedding the placeholder would
+      // pollute search with empty "description will be generated shortly" chunks.
       const { data: chunks } = await supabaseAdmin
         .from("standard_chunks")
         .select("id, chunk_index, content")
         .eq("standard_id", standard_id)
         .is("embedding", null)
+        .not("content", "ilike", "%visual description will be generated shortly%")
         .lt("chunk_index", indexLimit)
         .order("chunk_index")
         .limit(EMBED_BATCH_SIZE * PARALLEL_EMBED);
@@ -142,12 +146,14 @@ serve(async (req) => {
       }
     }
 
-    // Check remaining un-embedded chunks
+    // Check remaining un-embedded chunks — excluding figure placeholders so the
+    // standard can complete while figures are still being described in the background.
     const { count: remaining } = await supabaseAdmin
       .from("standard_chunks")
       .select("id", { count: "exact", head: true })
       .eq("standard_id", standard_id)
       .is("embedding", null)
+      .not("content", "ilike", "%visual description will be generated shortly%")
       .lt("chunk_index", indexLimit);
 
     const allDone = (remaining ?? 1) === 0;

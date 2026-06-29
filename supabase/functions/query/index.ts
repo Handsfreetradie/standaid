@@ -164,7 +164,7 @@ serve(async (req) => {
         supabase.rpc("match_chunks", {
           query_embedding: queryEmbedding,
           match_user_id: userId,
-          match_threshold: 0.20,
+          match_threshold: 0.30,
           match_count: 20,
         }),
         supabase.rpc("match_feedback_corrections", {
@@ -185,7 +185,7 @@ serve(async (req) => {
       const { data, error: matchError2 } = await supabase.rpc("match_chunks", {
         query_embedding: expandedEmbedding,
         match_user_id: userId,
-        match_threshold: 0.20,
+        match_threshold: 0.30,
         match_count: 20,
       });
       if (!matchError2 && data?.length) vectorChunks2 = data;
@@ -209,7 +209,7 @@ serve(async (req) => {
     const uniqueVector = vectorChunks.filter((c: any) => !seenIds.has(c.id));
     uniqueVector.forEach((c: any) => seenIds.add(c.id));
     const uniqueKeyword = keywordChunks.filter((c: any) => !seenIds.has(c.id));
-    const matchedChunks = [...clauseChunks, ...uniqueVector, ...uniqueKeyword].slice(0, 25);
+    const matchedChunks = [...clauseChunks, ...uniqueVector, ...uniqueKeyword].slice(0, 15);
     const topSimilarity = matchedChunks[0]?.similarity || 0;
 
     // Get standard details
