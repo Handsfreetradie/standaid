@@ -557,17 +557,38 @@ User's question/context: ${effectiveQuestion}` : "";
         }
 
         // Attach the real standard_id + page to each citation from the matched
-        // chunks. standard_code is often null/mismatched, so the ID is the only
-        // reliable key for the PDF viewer to open the right document and page.
+        // chunks. Prefer chunks from the same standard the AI cited (c.standard_code)
+        // to avoid e.g. AS3000 clause 3.1.1 shadowing AS3017 clause 3.1.1.
+        const normCode = (s: string) => (s || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+        const codeToStdId = new Map<string, string>();
+        for (const [id, s] of standardMap.entries()) {
+          const n = normCode((s as any).standard_code);
+          if (n) codeToStdId.set(n, id);
+        }
+
         if (parsedResponse.citations?.length) {
           for (const c of parsedResponse.citations) {
             const want = (c.clause_number || "").toString().trim();
+            const cHint = normCode(c.standard_code || "");
+            // Find the standard_id that best matches the AI's stated standard_code
+            const hintStdId = cHint
+              ? ([...codeToStdId.entries()].find(([code]) => code.includes(cHint) || cHint.includes(code))?.[1] ?? null)
+              : null;
+
             const hit =
+              // Prefer: exact clause match in the hinted standard
+              (hintStdId && matchedChunks.find((mc: any) => mc.standard_id === hintStdId && (mc.clause_number || "").toString().trim() === want)) ||
+              // Then: prefix clause match in the hinted standard
+              (hintStdId && matchedChunks.find((mc: any) => mc.standard_id === hintStdId && want && (mc.clause_number || "").toString().trim().startsWith(want))) ||
+              // Fallback: any standard with exact match
               matchedChunks.find((mc: any) => (mc.clause_number || "").toString().trim() === want) ||
               matchedChunks.find((mc: any) => want && (mc.clause_number || "").toString().trim().startsWith(want));
+
             if (hit) {
               c.standard_id = hit.standard_id;
               if (c.page_number == null) c.page_number = hit.page_number;
+            } else if (hintStdId) {
+              c.standard_id = hintStdId;
             } else if (standardIds.length === 1) {
               c.standard_id = standardIds[0];
             }
