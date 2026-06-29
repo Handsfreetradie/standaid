@@ -59,6 +59,44 @@ async function extractFnError(error: any): Promise<Error> {
   return new Error(msg);
 }
 
+// Correct section names for known AS/NZS standards — overrides DB-derived names
+// which can be wrong due to PDF extraction artefacts (e.g. "Section 2 — AS/NZS 3000:2018").
+const KNOWN_SECTIONS: Record<string, { prefix: string; title: string }[]> = {
+  "3000": [
+    { prefix: "1", title: "Scope, application and fundamental principles" },
+    { prefix: "2", title: "Wiring systems" },
+    { prefix: "3", title: "Selection and installation of wiring systems" },
+    { prefix: "4", title: "Selection and installation of electrical equipment" },
+    { prefix: "5", title: "Earthing arrangements and earthing conductors" },
+    { prefix: "6", title: "Damp situations and special locations" },
+    { prefix: "7", title: "Special electrical installations" },
+    { prefix: "8", title: "Verification" },
+    { prefix: "A", title: "Referenced documents" },
+    { prefix: "B", title: "Types of wiring systems" },
+    { prefix: "C", title: "Current-carrying capacity" },
+    { prefix: "D", title: "Calculation of voltage drop" },
+    { prefix: "E", title: "Maximum demand" },
+  ],
+  "3017": [
+    { prefix: "1", title: "Scope and general" },
+    { prefix: "2", title: "Definitions" },
+    { prefix: "3", title: "Safety requirements" },
+    { prefix: "4", title: "Inspection" },
+    { prefix: "5", title: "Testing" },
+    { prefix: "6", title: "Reporting" },
+    { prefix: "A", title: "Electrical installation forms" },
+  ],
+};
+
+// Match a standard_code or title to a KNOWN_SECTIONS key
+function matchKnownSections(code: string | null, title: string | null): { prefix: string; title: string }[] | null {
+  const haystack = `${code ?? ""} ${title ?? ""}`.toLowerCase();
+  for (const key of Object.keys(KNOWN_SECTIONS)) {
+    if (haystack.includes(key)) return KNOWN_SECTIONS[key];
+  }
+  return null;
+}
+
 const ScrollPage = ({ children }: { children: React.ReactNode }) => (
   <div className="h-full overflow-y-auto">
     <div className="px-5 py-6 pb-24 md:pb-8 max-w-2xl mx-auto">
@@ -131,6 +169,14 @@ const Learn = () => {
   const loadSections = async (standardId: string) => {
     setSections([]);
     setSelectedSection("");
+
+    // Use hardcoded sections for known standards — DB-derived names can be corrupted by PDF artefacts
+    const std = standards.find(s => s.id === standardId);
+    const knownSections = std ? matchKnownSections(std.standard_code, std.title) : null;
+    if (knownSections) {
+      setSections(knownSections);
+      return;
+    }
 
     // Primary: query explicit section/appendix heading chunks stored by process-standard
     // These have clause_number = null and clause_title like "SECTION 1 SCOPE..."
