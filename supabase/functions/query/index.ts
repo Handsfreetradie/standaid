@@ -494,6 +494,14 @@ User's question/context: ${effectiveQuestion}` : "";
         const figNums = aiFigures.map((f: any) => f.figure_number).filter(Boolean);
         const tblNums = aiTables.map((t: any) => t.table_number).filter(Boolean);
 
+        // Build standard code → UUID map once; used by figures, tables, and citations below
+        const normCode = (s: string) => (s || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+        const codeToStdId = new Map<string, string>();
+        for (const [id, s] of standardMap.entries()) {
+          const n = normCode((s as any).standard_code);
+          if (n) codeToStdId.set(n, id);
+        }
+
         if (figNums.length > 0 || tblNums.length > 0) {
           const [figRows, tblRows] = await Promise.all([
             figNums.length > 0
@@ -505,30 +513,51 @@ User's question/context: ${effectiveQuestion}` : "";
                   .eq("user_id", userId).in("table_number", tblNums).in("standard_id", standardIds)
               : Promise.resolve({ data: [] }),
           ]);
-          const figMap = new Map((figRows.data || []).map((r: any) => [r.figure_number, r]));
-          const tblMap = new Map((tblRows.data || []).map((r: any) => [r.table_number, r]));
 
-          // For refs without an image, find the page from matched chunks so we can open the PDF
-          const findPageInChunks = (label: string, num: string) => {
+          // Key by "standardId::number" so same number from two standards don't overwrite each other
+          const figMap = new Map((figRows.data || []).map((r: any) => [`${r.standard_id}::${r.figure_number}`, r]));
+          const tblMap = new Map((tblRows.data || []).map((r: any) => [`${r.standard_id}::${r.table_number}`, r]));
+          // Fallback maps keyed by number only (used when no standard hint available)
+          const figMapByNum = new Map<string, any>();
+          for (const r of figRows.data || []) { if (!figMapByNum.has(r.figure_number)) figMapByNum.set(r.figure_number, r); }
+          const tblMapByNum = new Map<string, any>();
+          for (const r of tblRows.data || []) { if (!tblMapByNum.has(r.table_number)) tblMapByNum.set(r.table_number, r); }
+
+          // Find page in matched chunks, preferring a specific standard when hintStdId is provided
+          const findPageInChunks = (label: string, num: string, hintStdId?: string) => {
             const pat = new RegExp(`\\b${label}\\s+${num.replace(/\./g, "\\.")}\\b`, "i");
-            const hit = matchedChunks.find((c: any) =>
+            const matches = matchedChunks.filter((c: any) =>
               pat.test(c.content) || (c.clause_number || "").toUpperCase() === `${label.toUpperCase()} ${num}`
             );
+            const hit = (hintStdId && matches.find((c: any) => c.standard_id === hintStdId)) || matches[0];
             return hit ? { page_number: hit.page_number, standard_id: hit.standard_id } : null;
           };
 
+          // Resolve hintStdId from a standard_code string (same normCode helper defined below)
+          const resolveStdId = (code: string | null | undefined): string | null => {
+            if (!code) return null;
+            const norm = (code || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+            return [...codeToStdId.entries()].find(([k]) => k.includes(norm) || norm.includes(k))?.[1] ?? null;
+          };
+
           parsedResponse.figures_referenced = aiFigures.map((f: any) => {
-            const row = figMap.get(f.figure_number);
+            const hintStdId = resolveStdId(f.standard_code);
+            const row = (hintStdId && figMap.get(`${hintStdId}::${f.figure_number}`)) || figMapByNum.get(f.figure_number);
             if (row?.image_url) return { ...f, image_url: row.image_url, caption: f.caption || row.caption, page_number: row.page_number, standard_id: row.standard_id };
-            const pi = findPageInChunks("Figure", f.figure_number);
-            return pi ? { ...f, page_number: pi.page_number, standard_id: pi.standard_id } : null;
+            const pi = findPageInChunks("Figure", f.figure_number, hintStdId ?? undefined);
+            if (pi) return { ...f, page_number: pi.page_number, standard_id: pi.standard_id };
+            if (hintStdId) return { ...f, standard_id: hintStdId, page_number: null };
+            return null;
           }).filter(Boolean);
 
           parsedResponse.tables_referenced = aiTables.map((t: any) => {
-            const row = tblMap.get(t.table_number);
+            const hintStdId = resolveStdId(t.standard_code);
+            const row = (hintStdId && tblMap.get(`${hintStdId}::${t.table_number}`)) || tblMapByNum.get(t.table_number);
             if (row?.image_url) return { ...t, image_url: row.image_url, caption: t.caption || row.caption, page_number: row.page_number, standard_id: row.standard_id };
-            const pi = findPageInChunks("Table", t.table_number);
-            return pi ? { ...t, page_number: pi.page_number, standard_id: pi.standard_id } : null;
+            const pi = findPageInChunks("Table", t.table_number, hintStdId ?? undefined);
+            if (pi) return { ...t, page_number: pi.page_number, standard_id: pi.standard_id };
+            if (hintStdId) return { ...t, standard_id: hintStdId, page_number: null };
+            return null;
           }).filter(Boolean);
         } else {
           parsedResponse.figures_referenced = [];
@@ -559,13 +588,6 @@ User's question/context: ${effectiveQuestion}` : "";
         // Attach the real standard_id + page to each citation from the matched
         // chunks. Prefer chunks from the same standard the AI cited (c.standard_code)
         // to avoid e.g. AS3000 clause 3.1.1 shadowing AS3017 clause 3.1.1.
-        const normCode = (s: string) => (s || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
-        const codeToStdId = new Map<string, string>();
-        for (const [id, s] of standardMap.entries()) {
-          const n = normCode((s as any).standard_code);
-          if (n) codeToStdId.set(n, id);
-        }
-
         if (parsedResponse.citations?.length) {
           for (const c of parsedResponse.citations) {
             const want = (c.clause_number || "").toString().trim();
@@ -618,9 +640,26 @@ User's question/context: ${effectiveQuestion}` : "";
           // high-similarity chunk so at least one clause badge appears
           const allRefs = [...new Set([...answerClauseRefs, ...bareClauseRefs])];
 
+          // Determine dominant standard from answer context — look for explicit standard
+          // mentions near each ref so auto-cited clauses pick the right standard.
+          const findNearbyStdId = (answer: string, ref: string): string | null => {
+            const idx = answer.search(new RegExp(`\\b${ref.replace(/\./g, "\\.")}\\b`));
+            if (idx === -1) return null;
+            const window = answer.slice(Math.max(0, idx - 120), idx + ref.length + 120);
+            const m = window.match(/\bAS(?:\/NZS)?\s*\d+(?:\.\d+)*(?::\d+)?\b/i);
+            if (!m) return null;
+            const norm = (m[0] || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+            return [...codeToStdId.entries()].find(([k]) => k.includes(norm) || norm.includes(k))?.[1] ?? null;
+          };
+
           for (const ref of allRefs) {
             if (citedNums.has(ref)) continue;
+            const hintStdId = findNearbyStdId(parsedResponse.answer || "", ref);
             const hit =
+              // Prefer chunk from the hinted standard
+              (hintStdId && matchedChunks.find((mc: any) => mc.standard_id === hintStdId && (mc.clause_number || "").toString().trim() === ref)) ||
+              (hintStdId && matchedChunks.find((mc: any) => mc.standard_id === hintStdId && (mc.clause_number || "").toString().trim().startsWith(ref + "."))) ||
+              // Fallback: any standard
               matchedChunks.find((mc: any) => (mc.clause_number || "").toString().trim() === ref) ||
               matchedChunks.find((mc: any) => (mc.clause_number || "").toString().trim().startsWith(ref + ".")) ||
               matchedChunks.find((mc: any) => ref.startsWith(((mc.clause_number || "").toString().trim()) + "."));
