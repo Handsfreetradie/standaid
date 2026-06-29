@@ -498,11 +498,11 @@ User's question/context: ${effectiveQuestion}` : "";
           const [figRows, tblRows] = await Promise.all([
             figNums.length > 0
               ? supabase.from("standard_figures").select("figure_number, image_url, caption, page_number, standard_id")
-                  .eq("user_id", userId).in("figure_number", figNums)
+                  .eq("user_id", userId).in("figure_number", figNums).in("standard_id", standardIds)
               : Promise.resolve({ data: [] }),
             tblNums.length > 0
               ? supabase.from("standard_tables").select("table_number, image_url, caption, page_number, standard_id")
-                  .eq("user_id", userId).in("table_number", tblNums)
+                  .eq("user_id", userId).in("table_number", tblNums).in("standard_id", standardIds)
               : Promise.resolve({ data: [] }),
           ]);
           const figMap = new Map((figRows.data || []).map((r: any) => [r.figure_number, r]));
