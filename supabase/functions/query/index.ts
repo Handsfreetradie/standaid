@@ -575,22 +575,23 @@ User's question/context: ${effectiveQuestion}` : "";
               ? ([...codeToStdId.entries()].find(([code]) => code.includes(cHint) || cHint.includes(code))?.[1] ?? null)
               : null;
 
-            const hit =
-              // Prefer: exact clause match in the hinted standard
-              (hintStdId && matchedChunks.find((mc: any) => mc.standard_id === hintStdId && (mc.clause_number || "").toString().trim() === want)) ||
-              // Then: prefix clause match in the hinted standard
-              (hintStdId && matchedChunks.find((mc: any) => mc.standard_id === hintStdId && want && (mc.clause_number || "").toString().trim().startsWith(want))) ||
-              // Fallback: any standard with exact match
-              matchedChunks.find((mc: any) => (mc.clause_number || "").toString().trim() === want) ||
-              matchedChunks.find((mc: any) => want && (mc.clause_number || "").toString().trim().startsWith(want));
-
-            if (hit) {
-              c.standard_id = hit.standard_id;
-              if (c.page_number == null) c.page_number = hit.page_number;
-            } else if (hintStdId) {
+            if (hintStdId) {
+              // Always trust the AI's standard_code over a chunk hit — avoids same clause
+              // number in a different standard (e.g. AS3000 3.1.1) poisoning the page lookup.
+              // Set page_number to null so fetch-pdf does a fresh DB lookup for the right page.
               c.standard_id = hintStdId;
-            } else if (standardIds.length === 1) {
-              c.standard_id = standardIds[0];
+              c.page_number = null;
+            } else {
+              // No standard hint — fall back to chunk matching
+              const hit =
+                matchedChunks.find((mc: any) => (mc.clause_number || "").toString().trim() === want) ||
+                matchedChunks.find((mc: any) => want && (mc.clause_number || "").toString().trim().startsWith(want));
+              if (hit) {
+                c.standard_id = hit.standard_id;
+                if (c.page_number == null) c.page_number = hit.page_number;
+              } else if (standardIds.length === 1) {
+                c.standard_id = standardIds[0];
+              }
             }
           }
         }
