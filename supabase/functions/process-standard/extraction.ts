@@ -48,6 +48,23 @@ export interface ClauseHeading {
 // exact clause-number lookups.
 const TOC_LEADER = /\.{4,}\s*\d*\s*$/;
 
+// Natural sort for table/figure numbers, including appendix forms like
+// "C1" or "B2.1": letterless numbers first, then by letter, then numerically.
+export function compareRefNumbers(a: string, b: string): number {
+  const pa = a.match(/^([A-Z]?)(\d+(?:\.\d+)*)$/i);
+  const pb = b.match(/^([A-Z]?)(\d+(?:\.\d+)*)$/i);
+  if (!pa || !pb) return a.localeCompare(b);
+  const letterCmp = pa[1].toUpperCase().localeCompare(pb[1].toUpperCase());
+  if (letterCmp !== 0) return letterCmp;
+  const na = pa[2].split(".").map(Number);
+  const nb = pb[2].split(".").map(Number);
+  for (let i = 0; i < Math.max(na.length, nb.length); i++) {
+    const d = (na[i] ?? 0) - (nb[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
 export function matchClauseHeading(line: string): ClauseHeading | null {
   const m = line.match(CLAUSE_PATTERN);
   if (!m) return null;
@@ -323,12 +340,15 @@ export function extractTableChunks(text: string, standardCode: string, version: 
   // calculated examples of..."). Prefer uppercase, and reject candidates whose
   // "title" starts with a lowercase word — those are sentences, and anchoring
   // to them sends the PDF link to the wrong page.
-  const captionPattern = /^(?:\*{0,2})TABLE\s+(\d+(?:\.\d+)*)\s*(?:—|–|-|:)?\s*(.*)$/i;
+  // Number accepts an optional letter prefix for appendix tables ("TABLE C1",
+  // "TABLE C2.1") — these hold values like maximum demand that tradies ask
+  // about constantly, and the old numeric-only pattern skipped them entirely.
+  const captionPattern = /^(?:\*{0,2})TABLE\s+([A-Z]?\d+(?:\.\d+)*)\s*(?:—|–|-|:)?\s*(.*)$/i;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].replace(/\r$/, "").trim();
     const match = line.match(captionPattern);
     if (!match) continue;
-    const tableNum = match[1].trim();
+    const tableNum = match[1].trim().toUpperCase();
     let title = (match[2] || "").trim().replace(/[*—–\-:\s]+$/, "");
     if (/^[a-z]/.test(title)) continue; // sentence reference, not a caption
     const rank = /^[*\s]*TABLE\b/.test(line) ? 2 : 1;
@@ -350,12 +370,12 @@ export function extractTableChunks(text: string, standardCode: string, version: 
   }
 
   // ── Pass 2: references ("see Table 8.1") only for tables with no caption ──
-  const refPattern = /\bTABLES?\s+(\d+(?:\.\d+)*)/gi;
+  const refPattern = /\bTABLES?\s+([A-Z]?\d+(?:\.\d+)*)/gi;
   for (let i = 0; i < lines.length; i++) {
     let refMatch: RegExpExecArray | null;
     refPattern.lastIndex = 0;
     while ((refMatch = refPattern.exec(lines[i])) !== null) {
-      const tableNum = refMatch[1].trim();
+      const tableNum = refMatch[1].trim().toUpperCase();
       if (!tables.has(tableNum)) {
         tables.set(tableNum, { title: "", lineIdx: i, rank: 0 });
       }
@@ -363,15 +383,7 @@ export function extractTableChunks(text: string, standardCode: string, version: 
   }
 
   // ── Build one chunk per unique table, sorted naturally ────────────────────
-  const sortedNums = [...tables.keys()].sort((a, b) => {
-    const pa = a.split(".").map(Number);
-    const pb = b.split(".").map(Number);
-    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-      const d = (pa[i] ?? 0) - (pb[i] ?? 0);
-      if (d !== 0) return d;
-    }
-    return 0;
-  });
+  const sortedNums = [...tables.keys()].sort(compareRefNumbers);
 
   const chunks: Chunk[] = [];
   for (const tableNum of sortedNums) {
@@ -434,12 +446,13 @@ export function extractFigureChunks(text: string, standardCode: string, version:
 
   // ── Pass 1: caption lines (line STARTS with "Figure X.X") ─────────────────
   // Accepts dash, colon or plain-space separators and optional **markdown**.
-  const captionLinePattern = /^(?:\*{0,2})FIGURE\s+(\d+(?:\.\d+)*)\s*(?:—|–|-|:)?\s*(.*)$/i;
+  // Optional letter prefix covers appendix figures ("FIGURE B1")
+  const captionLinePattern = /^(?:\*{0,2})FIGURE\s+([A-Z]?\d+(?:\.\d+)*)\s*(?:—|–|-|:)?\s*(.*)$/i;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].replace(/\r$/, "").trim();
     const match = line.match(captionLinePattern);
     if (!match) continue;
-    const figNum = match[1].trim();
+    const figNum = match[1].trim().toUpperCase();
     let caption = (match[2] || "").trim().replace(/[*—–\-:\s]+$/, "");
     // If the caption ran onto the next line, pull it in.
     if (!caption) {
@@ -461,11 +474,11 @@ export function extractFigureChunks(text: string, standardCode: string, version:
 
   // ── Pass 2: any "Figure X.X" referenced anywhere (incl. lists like
   //    "Figures 3.7, 3.8, 3.9 and 3.13"). Adds figures we didn't see a caption for.
-  const refPattern = /\bFIGURES?\s+(\d+(?:\.\d+)*(?:\s*(?:,|and|&)\s*\d+(?:\.\d+)*)*)/gi;
+  const refPattern = /\bFIGURES?\s+([A-Z]?\d+(?:\.\d+)*(?:\s*(?:,|and|&)\s*[A-Z]?\d+(?:\.\d+)*)*)/gi;
   let refMatch: RegExpExecArray | null;
   while ((refMatch = refPattern.exec(text)) !== null) {
     // Split a possible list ("3.7, 3.8 and 3.13") into individual numbers.
-    const nums = refMatch[1].match(/\d+(?:\.\d+)*/g) || [];
+    const nums = (refMatch[1].match(/[A-Z]?\d+(?:\.\d+)*/gi) || []).map((n) => n.toUpperCase());
     const charPos = refMatch.index;
     let lineIdx = 0;
     for (let j = pageOffsets.length - 1; j >= 0; j--) {
@@ -477,15 +490,7 @@ export function extractFigureChunks(text: string, standardCode: string, version:
   }
 
   // ── Build one chunk per unique figure, sorted naturally (1.1, 3.1, 3.2 …) ──
-  const sortedNums = [...figures.keys()].sort((a, b) => {
-    const pa = a.split(".").map(Number);
-    const pb = b.split(".").map(Number);
-    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-      const d = (pa[i] ?? 0) - (pb[i] ?? 0);
-      if (d !== 0) return d;
-    }
-    return 0;
-  });
+  const sortedNums = [...figures.keys()].sort(compareRefNumbers);
 
   for (const figNum of sortedNums) {
     const { caption, lineIdx } = figures.get(figNum)!;

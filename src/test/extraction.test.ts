@@ -113,6 +113,23 @@ describe("extractTableChunks", () => {
     expect(t92[0].page_number).toBe(55);
   });
 
+  it("captures appendix tables with letter prefixes (TABLE C1)", () => {
+    const doc = [
+      "[PAGE 555]",
+      "TABLE C1",
+      "MAXIMUM DEMAND — SINGLE AND MULTIPLE DOMESTIC ELECTRICAL INSTALLATIONS",
+      "Load group A: lighting 3 A plus 2 A per additional circuit",
+      "[PAGE 560]",
+      "See Table C2 for energy demand values.",
+    ].join("\n");
+    const chunks = extractTableChunks(doc, "AS/NZS 3000", "2018");
+    const c1 = chunks.find((c) => c.clause_number === "TABLE C1");
+    expect(c1).toBeDefined();
+    expect(c1!.page_number).toBe(555);
+    expect(c1!.clause_title).toContain("MAXIMUM DEMAND");
+    expect(chunks.some((c) => c.clause_number === "TABLE C2")).toBe(true);
+  });
+
   it("prefers the uppercase caption over a sentence starting with 'Table X.X'", () => {
     // Found in the real AS/NZS 3000: "Table 8.1 contains calculated examples..."
     // starts a line on p318 but the real TABLE 8.1 caption is on p431.

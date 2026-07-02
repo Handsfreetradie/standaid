@@ -5,6 +5,10 @@ export interface ValidationInput {
   chunks: Array<{ content: string; metadata?: Record<string, unknown> }>;
   query: string;
   trade: TradeType;
+  // Clause numbers confirmed to exist in the user's uploaded standards (DB
+  // lookup) — citations of these are never treated as hallucinated, even if
+  // the retrieved chunks happen not to contain the number.
+  knownClauseNumbers?: Set<string>;
 }
 
 export interface ValidationIssue {
@@ -47,6 +51,9 @@ export function validateResponse(input: ValidationInput): ValidationResult {
 
   // Derive shared chunk data once — passed to both citation and grounding checks
   const chunkClauseNumbers = buildChunkClauseSet(input.chunks);
+  if (input.knownClauseNumbers) {
+    for (const n of input.knownClauseNumbers) chunkClauseNumbers.add(n);
+  }
   const chunkWords = buildChunkWordSet(input.chunks);
 
   const citationResult = validateCitations(input.response, input.chunks, chunkClauseNumbers);

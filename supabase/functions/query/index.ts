@@ -213,6 +213,32 @@ serve(async (req) => {
     const matchedChunks = [...clauseChunks, ...uniqueVector, ...uniqueKeyword].slice(0, 15);
     const topSimilarity = matchedChunks[0]?.similarity || 0;
 
+    // One-hop expansion: pull the actual TABLE/FIGURE chunks for any table or
+    // figure referenced by the question or the retrieved clauses. Clauses
+    // constantly point at tables ("...in accordance with Table 8.1") — without
+    // the table chunk in context the AI can't quote the values and the
+    // validator flags the reference as ungrounded.
+    const refScan = `${effectiveQuestion}\n${matchedChunks.map((c: any) => c.content).join("\n")}`;
+    const refKeys = new Set<string>();
+    for (const m of refScan.matchAll(/\b(TABLE|FIGURE)S?\s+([A-Z]?\d+(?:\.\d+)*)\b/gi)) {
+      refKeys.add(`${m[1].toUpperCase()} ${m[2].toUpperCase()}`);
+    }
+    if (refKeys.size > 0) {
+      const { data: refChunks } = await supabase
+        .from("standard_chunks")
+        .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
+        .eq("user_id", userId)
+        .in("clause_number", [...refKeys].slice(0, 12))
+        .limit(8);
+      const haveIds = new Set(matchedChunks.map((c: any) => c.id));
+      for (const rc of refChunks || []) {
+        if (!haveIds.has(rc.id) && matchedChunks.length < 20) {
+          haveIds.add(rc.id);
+          matchedChunks.push({ ...rc, similarity: 0.9 });
+        }
+      }
+    }
+
     // Get standard details
     const standardIds = [...new Set(matchedChunks.map((c: any) => c.standard_id))];
     const standards = standardIds.length > 0
@@ -565,12 +591,31 @@ User's question/context: ${effectiveQuestion}` : "";
           parsedResponse.tables_referenced = [];
         }
 
+        // Verify clause numbers cited in the answer against the user's whole
+        // standard library, not just the retrieved chunks — a clause that
+        // exists in the uploaded standard is not a hallucination just because
+        // its chunk didn't make the retrieval cut.
+        const answerNums = [...new Set(
+          [...(parsedResponse.answer || "").matchAll(/\b\d+(?:\.\d+)+\b/g)].map((m: any) => m[0])
+        )].slice(0, 25) as string[];
+        let dbClauseNumbers = new Set<string>();
+        if (answerNums.length > 0) {
+          const { data: verifiedRows } = await supabase
+            .from("standard_chunks")
+            .select("clause_number")
+            .eq("user_id", userId)
+            .in("clause_number", answerNums)
+            .limit(50);
+          dbClauseNumbers = new Set((verifiedRows || []).map((r: any) => r.clause_number));
+        }
+
         // Validate answer
         const validation = validateResponse({
           response: parsedResponse.answer || "",
           chunks: matchedChunks,
           query: effectiveQuestion,
           trade,
+          knownClauseNumbers: dbClauseNumbers,
         });
         parsedResponse.answer = validation.cleanedResponse;
 
