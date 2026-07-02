@@ -51,6 +51,12 @@ describe("matchClauseHeading", () => {
     expect(matchClauseHeading("16 A socket-outlets in damp situations")).toBeNull();
     expect(matchClauseHeading("3.5 kg/m² loading applies")).toBeNull();
   });
+
+  it("rejects table-of-contents entries with dotted leaders", () => {
+    // These created ~500 junk chunks per standard that shadowed real clauses
+    expect(matchClauseHeading("8.3 TESTING .............................. 419")).toBeNull();
+    expect(matchClauseHeading("2.2 ARRANGEMENT OF INSTALLATION..........45")).toBeNull();
+  });
 });
 
 describe("sortIntoSections + chunkSections", () => {
@@ -105,6 +111,22 @@ describe("extractTableChunks", () => {
     const t92 = chunks.filter((c) => c.clause_number === "TABLE 9.2");
     expect(t92).toHaveLength(1);
     expect(t92[0].page_number).toBe(55);
+  });
+
+  it("prefers the uppercase caption over a sentence starting with 'Table X.X'", () => {
+    // Found in the real AS/NZS 3000: "Table 8.1 contains calculated examples..."
+    // starts a line on p318 but the real TABLE 8.1 caption is on p431.
+    const doc = [
+      "[PAGE 318]",
+      "Table 8.1 contains calculated examples of the maximum values of earth",
+      "[PAGE 431]",
+      "TABLE   8.1",
+      "MAXIMUM EARTH FAULT-LOOP IMPEDANCE",
+    ].join("\n");
+    const chunks = extractTableChunks(doc, "AS/NZS 3000", "2018");
+    const t81 = chunks.filter((c) => c.clause_number === "TABLE 8.1");
+    expect(t81).toHaveLength(1);
+    expect(t81[0].page_number).toBe(431);
   });
 });
 

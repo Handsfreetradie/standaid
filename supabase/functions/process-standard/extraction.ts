@@ -42,6 +42,12 @@ export interface ClauseHeading {
 //    top-level clauses
 //  - dotted numbers followed by a unit word ("1.5 Times the rated current")
 //    are measurements in body text, not headings
+// Table-of-contents entries look exactly like clause headings but end in a
+// dotted leader + page number ("8.3 TESTING ....... 419"). Treating them as
+// headings creates hundreds of junk chunks that shadow the real clause in
+// exact clause-number lookups.
+const TOC_LEADER = /\.{4,}\s*\d*\s*$/;
+
 export function matchClauseHeading(line: string): ClauseHeading | null {
   const m = line.match(CLAUSE_PATTERN);
   if (!m) return null;
@@ -49,6 +55,7 @@ export function matchClauseHeading(line: string): ClauseHeading | null {
   const number = m[1] || m[3];
   const title = (m[2] || m[4] || "").trim();
   if (UNIT_WORD_TITLE.test(title)) return null;
+  if (TOC_LEADER.test(title)) return null;
   if (!number.includes(".") && title !== title.toUpperCase()) return null;
   return { number, title };
 }
@@ -157,7 +164,8 @@ export function sortIntoSections(markedText: string): Section[] {
     const pm = line.match(pageMarker);
     if (pm) { currentPage = parseInt(pm[1], 10) || currentPage; continue; }
 
-    const sectionMatch = line.match(SECTION_HEADING);
+    // ToC lines ("SECTION 2 ........ 45") must never open a section
+    const sectionMatch = TOC_LEADER.test(line) ? null : line.match(SECTION_HEADING);
     const clauseMatch = matchClauseHeading(line);
 
     if (sectionMatch) {
@@ -204,8 +212,11 @@ export function chunkSections(sections: Section[], standardCode: string, version
   for (const section of sections) {
     const sectionText = section.lines.join("\n").trim();
     // Drop tiny fragments — but never a real SECTION/PART/APPENDIX heading, even
-    // a short one like "SECTION 3 TESTS" (needed for the exam-helper section list).
-    const isHeading = section.clauseNumber === null && SECTION_HEADING.test(section.heading || "");
+    // a short one like "SECTION 3 TESTS" (needed for the exam-helper section list),
+    // and never a clause heading: parent clauses like "8.3 TESTING" carry all
+    // their content in sub-clauses, but the heading chunk is what exact
+    // clause-number lookups resolve to.
+    const isHeading = section.clauseNumber !== null || SECTION_HEADING.test(section.heading || "");
     if (sectionText.length < 20 && !isHeading) continue;
 
     const breadcrumb = buildBreadcrumb(standardCode, version, section.clauseNumber, section.heading);
@@ -302,10 +313,16 @@ export function extractTableChunks(text: string, standardCode: string, version: 
     linePages.push(currentPage);
   }
 
-  // tableNum -> { title, lineIdx, isCaption }
-  const tables = new Map<string, { title: string; lineIdx: number; isCaption: boolean }>();
+  // tableNum -> { title, lineIdx, rank }  (rank 2 = uppercase caption,
+  // rank 1 = title-case caption, rank 0 = reference-only)
+  const tables = new Map<string, { title: string; lineIdx: number; rank: number }>();
 
   // ── Pass 1: caption lines (line STARTS with "TABLE X.X") ──────────────────
+  // Real captions in AU/NZ standards are uppercase ("TABLE 8.1"); sentence
+  // references at line start are title-case prose ("Table 8.1 contains
+  // calculated examples of..."). Prefer uppercase, and reject candidates whose
+  // "title" starts with a lowercase word — those are sentences, and anchoring
+  // to them sends the PDF link to the wrong page.
   const captionPattern = /^(?:\*{0,2})TABLE\s+(\d+(?:\.\d+)*)\s*(?:—|–|-|:)?\s*(.*)$/i;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].replace(/\r$/, "").trim();
@@ -313,6 +330,8 @@ export function extractTableChunks(text: string, standardCode: string, version: 
     if (!match) continue;
     const tableNum = match[1].trim();
     let title = (match[2] || "").trim().replace(/[*—–\-:\s]+$/, "");
+    if (/^[a-z]/.test(title)) continue; // sentence reference, not a caption
+    const rank = /^[*\s]*TABLE\b/.test(line) ? 2 : 1;
     // Caption text sometimes runs onto the next line
     if (!title) {
       for (let j = i + 1; j < Math.min(i + 3, lines.length); j++) {
@@ -325,8 +344,8 @@ export function extractTableChunks(text: string, standardCode: string, version: 
       }
     }
     const existing = tables.get(tableNum);
-    if (!existing || (!existing.isCaption)) {
-      tables.set(tableNum, { title, lineIdx: i, isCaption: true });
+    if (!existing || existing.rank < rank) {
+      tables.set(tableNum, { title, lineIdx: i, rank });
     }
   }
 
@@ -338,7 +357,7 @@ export function extractTableChunks(text: string, standardCode: string, version: 
     while ((refMatch = refPattern.exec(lines[i])) !== null) {
       const tableNum = refMatch[1].trim();
       if (!tables.has(tableNum)) {
-        tables.set(tableNum, { title: "", lineIdx: i, isCaption: false });
+        tables.set(tableNum, { title: "", lineIdx: i, rank: 0 });
       }
     }
   }
