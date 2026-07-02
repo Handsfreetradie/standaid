@@ -169,6 +169,7 @@ serve(async (req) => {
         }),
         supabase.rpc("match_feedback_corrections", {
           query_embedding: queryEmbedding,
+          match_user_id: userId,
           match_threshold: 0.82,
           match_count: 3,
         }),
@@ -725,7 +726,7 @@ User's question/context: ${effectiveQuestion}` : "";
             trade,
             retrieved_chunk_ids: matchedChunks.map((c: any) => c.id).filter(Boolean),
             retrieved_chunk_count: matchedChunks.length,
-            model_used: "gpt-4o-mini",
+            model_used: "claude-opus-4-8",
             response_text: parsedResponse.answer,
             confidence_score: validation.confidenceScore,
             validation_issues: validation.issues,

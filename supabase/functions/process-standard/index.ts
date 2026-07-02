@@ -1,152 +1,117 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { extractText } from "https://esm.sh/unpdf@0.12.0";
+import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 import { getAllowedOrigin } from "../_shared/cors.ts";
+import {
+  type Chunk,
+  SCANNED_PAGE_THRESHOLD,
+  hasGoodTextQuality,
+  computeQualityScore,
+  parseExtractedText,
+  convertPdfToBase64,
+  sortIntoSections,
+  chunkSections,
+  extractTableChunks,
+  extractFigureChunks,
+} from "./extraction.ts";
 
-interface Section {
-  heading: string | null;
-  clauseNumber: string | null;
-  lines: string[];
-  pageNumber: number;
-}
-
-interface Chunk {
-  clause_number: string | null;
-  clause_title: string | null;
-  content: string;
-  page_number: number;
-  chunk_index: number;
-}
-
-// Heading patterns for AU/NZ standards
-const SECTION_HEADING = /^(SECTION\s+\d+|PART\s+\d+|APPENDIX\s+[A-Z])/i;
-
-// Require: clause number + whitespace + capital letter + alpha char
-// Relaxed from 2+ spaces to 1+ spaces so AI OCR output (single space) also matches.
-// The [A-Z][A-Za-z] guard already prevents unit matches like "3.5 kg/m²" (lowercase k).
-const CLAUSE_PATTERN = /^(\d{1,2}(?:\.\d{1,2}){0,4})\t+([A-Z][A-Za-z].*)|^(\d{1,2}(?:\.\d{1,2}){0,4})\s+([A-Z][A-Za-z].*)/;
-
-const TARGET_CHUNK_CHARS = 2000;
-const MAX_CHUNK_CHARS = 2500;
-const SCANNED_PAGE_THRESHOLD = 15;
 const SCANNED_DOC_RATIO = 0.85;
 const AI_EXTRACTION_SIZE_LIMIT = 10 * 1024 * 1024;
-
-// Detect encoding corruption common in SAI Global / licensed PDFs.
-// Symptoms: Ω glyph swallows adjacent digits → "0.5 Ω" becomes "0. "
-// and custom fonts drop characters like "AS" from "AS/NZS".
-function hasGoodTextQuality(text: string): boolean {
-  if (text.length < 300) return false;
-
-  const digits = (text.match(/\d/g) || []).length;
-  const letters = (text.match(/[a-zA-Z]/g) || []).length;
-  if (letters === 0) return false;
-
-  // Technical standards should have at least 3% digit density vs letters
-  if (digits / letters < 0.03) return false;
-
-  // Count truncated decimals: digit followed by period then whitespace/end-of-line
-  // e.g. "0. " or "3.\n" — these indicate a digit was swallowed by a glyph
-  const truncated = (text.match(/\d\.(?:\s|$)/gm) || []).length;
-  const normal = (text.match(/\d\.\d/g) || []).length;
-  const totalDecimals = truncated + normal;
-
-  // If >15% of decimal-point sequences look truncated, fall back to batched AI OCR.
-  // The batched AI approach now processes pages in groups of 15 so there's no
-  // truncation — it's safe to use for any document size.
-  if (totalDecimals > 4 && truncated / totalDecimals > 0.15) {
-    console.log(`Text quality check FAILED: ${truncated}/${totalDecimals} decimal sequences appear truncated`);
-    return false;
-  }
-
-  return true;
-}
 
 // Mark jobs as failed if processing exceeds this — must be under Supabase's 150s limit.
 const PROCESSING_TIMEOUT_MS = 110_000;
 
-// ── Quality scoring ──────────────────────────────────────────────────────────
-
-function computeQualityScore(text: string, totalPages: number, pagesWithContent: number): number {
-  const pageCoverage = totalPages > 0 ? pagesWithContent / totalPages : 0;
-  const clauseMatches = (text.match(/\b\d{1,2}(?:\.\d{1,2}){1,4}\b/g) || []).length;
-  const clauseDensity = Math.min(clauseMatches / Math.max(text.length / 500, 1), 1);
-  const alphaCount = (text.match(/[a-zA-Z]/g) || []).length;
-  const alphaRatio = text.length > 0 ? alphaCount / text.length : 0;
-
-  const score = Math.round(
-    (pageCoverage * 40) +
-    (clauseDensity * 30) +
-    (Math.min(alphaRatio * 1.2, 1) * 30)
-  );
-  return Math.min(score, 100);
-}
-
-// ── Client-provided text parsing ─────────────────────────────────────────────
-
-function parseExtractedText(rawText: string): { text: string; pages: string[]; totalPages: number; pagesWithContent: number } {
-  // Split on [PAGE N] markers inserted by client-side PDF.js extraction
-  const pageRegex = /\[PAGE \d+\]\n?([\s\S]*?)(?=\n?\[PAGE \d+\]|$)/g;
-  const pages: string[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = pageRegex.exec(rawText)) !== null) {
-    pages.push(match[1] || "");
-  }
-
-  const finalPages = pages.length > 0 ? pages : [rawText];
-  const cleanText = rawText.replace(/\[PAGE \d+\]/g, "").trim();
-  const pagesWithContent = finalPages.filter(p => p.trim().length >= SCANNED_PAGE_THRESHOLD).length;
-
-  return {
-    text: cleanText,
-    pages: finalPages,
-    totalPages: finalPages.length,
-    pagesWithContent,
-  };
-}
-
 // ── PDF extraction ───────────────────────────────────────────────────────────
 
-const PAGES_PER_AI_BATCH = 15; // pages per gpt-4o call — stays well within 8k token output limit
+const PAGES_PER_AI_BATCH = 15; // pages per OCR call — stays well within the 8k token output limit
 
-function convertPdfToBase64(fileBytes: Uint8Array): string {
-  const binary = String.fromCharCode(...fileBytes);
-  return btoa(binary);
+// Copy a page range into a fresh PDF so each OCR call only carries the pages it
+// needs. Sending the whole document per batch both re-uploads megabytes every
+// call and hits the API's 100-page-per-document limit on full standards.
+async function slicePdfPages(srcDoc: PDFDocument, startPage: number, endPage: number): Promise<Uint8Array | null> {
+  try {
+    const out = await PDFDocument.create();
+    const lastPage = Math.min(endPage, srcDoc.getPageCount());
+    const indices: number[] = [];
+    for (let p = startPage - 1; p < lastPage; p++) indices.push(p);
+    if (indices.length === 0) return null;
+    const pages = await out.copyPages(srcDoc, indices);
+    for (const pg of pages) out.addPage(pg);
+    return await out.save();
+  } catch (e) {
+    console.warn(`PDF slice ${startPage}–${endPage} failed, falling back to whole document:`, e);
+    return null;
+  }
 }
 
-// Batched page-by-page AI OCR — sends PAGES_PER_AI_BATCH pages at a time so
+// Batched page-by-page AI OCR — slices PAGES_PER_AI_BATCH pages per call so
 // long documents are never truncated. Reads the PDF visually so special characters
 // like Ω are transcribed correctly rather than corrupted by font encoding.
-async function extractTextWithAI(fileBytes: Uint8Array, anthropicApiKey: string, totalPages = 0): Promise<string> {
-  const base64Pdf = convertPdfToBase64(fileBytes);
+// Stops at `deadline` and returns what it has — partial text either passes the
+// quality gate or gets rejected there with a clear message.
+async function extractTextWithAI(
+  fileBytes: Uint8Array,
+  anthropicApiKey: string,
+  totalPages = 0,
+  deadline = Number.POSITIVE_INFINITY,
+): Promise<string> {
+  let srcDoc: PDFDocument | null = null;
+  try {
+    srcDoc = await PDFDocument.load(fileBytes, { ignoreEncryption: true });
+    if (totalPages === 0) totalPages = srcDoc.getPageCount();
+  } catch (e) {
+    console.warn("pdf-lib could not load document — OCR will send the whole file per batch:", e);
+  }
 
   const batchCount = totalPages > 0
     ? Math.ceil(totalPages / PAGES_PER_AI_BATCH)
-    : 1; // unknown page count — try single call first
+    : 1; // unknown page count — try single call
 
-  const batchPrompt = (start: number, end: number) =>
-    `This is an Australian/New Zealand technical Standards document. ` +
-    `Transcribe ONLY pages ${start} to ${end} completely and accurately. ` +
+  const wholeDocBase64 = srcDoc ? null : convertPdfToBase64(fileBytes);
+
+  const transcriptionRules =
     `Include every clause number, heading, value, table, note, and figure caption exactly as written. ` +
     `Format: clause headings as "X.X HEADING TITLE" on their own line. ` +
     `Figure captions as "Figure X.X — Caption text" on their own line. ` +
-    `Insert [PAGE N] at the start of each page. ` +
     `Do NOT summarise, paraphrase, or skip any content. ` +
     `Pay special attention to numerical values and units (e.g. 0.5 Ω, 1 MΩ, 500 V).`;
 
   let fullText = "";
 
   for (let batch = 0; batch < batchCount; batch++) {
+    if (Date.now() > deadline) {
+      console.warn(`AI OCR stopping at batch ${batch}/${batchCount} — time budget reached`);
+      break;
+    }
+
     const startPage = batch * PAGES_PER_AI_BATCH + 1;
     const endPage = totalPages > 0
       ? Math.min((batch + 1) * PAGES_PER_AI_BATCH, totalPages)
-      : 9999; // open-ended for unknown page count
+      : 9999;
 
-    const prompt = totalPages > 0
-      ? batchPrompt(startPage, endPage)
-      : `This is an Australian/New Zealand technical Standards document. Transcribe ALL content completely and accurately. Include every clause number, heading, value, table, note, and figure caption exactly as written. Format clause headings as "X.X HEADING" on their own line. Insert [PAGE N] markers between pages. Do NOT summarise or skip anything. Pay special attention to numerical values and units (e.g. 0.5 Ω, 1 MΩ, 500 V).`;
+    let base64Pdf: string;
+    let prompt: string;
 
-    console.log(`AI OCR batch ${batch + 1}/${batchCount}: pages ${startPage}–${endPage}`);
+    const sliced = srcDoc && totalPages > 0 ? await slicePdfPages(srcDoc, startPage, endPage) : null;
+    if (sliced) {
+      base64Pdf = convertPdfToBase64(sliced);
+      prompt =
+        `This document contains pages ${startPage} to ${endPage} of an Australian/New Zealand technical Standards document. ` +
+        `Transcribe ALL pages completely and accurately. ` +
+        `Insert [PAGE N] at the start of each page using the ORIGINAL page numbers — the first page here is page ${startPage}. ` +
+        transcriptionRules;
+    } else {
+      base64Pdf = wholeDocBase64 ?? convertPdfToBase64(fileBytes);
+      prompt = totalPages > 0
+        ? `This is an Australian/New Zealand technical Standards document. ` +
+          `Transcribe ONLY pages ${startPage} to ${endPage} completely and accurately. ` +
+          `Insert [PAGE N] at the start of each page. ` + transcriptionRules
+        : `This is an Australian/New Zealand technical Standards document. Transcribe ALL content completely and accurately. ` +
+          `Insert [PAGE N] markers between pages. ` + transcriptionRules;
+    }
+
+    console.log(`AI OCR batch ${batch + 1}/${batchCount}: pages ${startPage}–${endPage}${sliced ? " (sliced)" : " (whole doc)"}`);
 
     const completionResponse = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -183,14 +148,15 @@ async function extractTextWithAI(fileBytes: Uint8Array, anthropicApiKey: string,
   }
 
   if (fullText.length < 50) throw new Error("AI extraction returned insufficient text");
-  console.log(`Total AI OCR extraction: ${fullText.length} chars across ${batchCount} batch(es)`);
+  console.log(`Total AI OCR extraction: ${fullText.length} chars`);
   return fullText;
 }
 
 
 async function extractTextFromPdf(
   fileBytes: Uint8Array,
-  anthropicApiKey: string
+  anthropicApiKey: string,
+  deadline: number,
 ): Promise<{ text: string; pages: string[]; totalPages: number; pagesWithContent: number }> {
   // Use unpdf to extract text page-by-page
   let pageTexts: string[] = [];
@@ -226,7 +192,7 @@ async function extractTextFromPdf(
 
     if (scannedRatio <= SCANNED_DOC_RATIO) {
       // Mostly digital PDF — check text quality before accepting unpdf output
-      const pages = pageTexts.map((t, i) => (t.trim().length > 0 ? t : ""));
+      const pages = pageTexts.map((t) => (t.trim().length > 0 ? t : ""));
       const fullText = pages
         .map((t, i) => (t.trim().length > 0 ? `\n[PAGE ${i + 1}]\n${t}` : ""))
         .join("")
@@ -258,7 +224,7 @@ async function extractTextFromPdf(
   const knownPageCount = pageTexts.length > 0 ? pageTexts.length : 0;
   console.log(`Attempting batched AI OCR (${knownPageCount > 0 ? knownPageCount + " pages" : "unknown length"})...`);
   try {
-    const aiText = await extractTextWithAI(fileBytes, anthropicApiKey, knownPageCount);
+    const aiText = await extractTextWithAI(fileBytes, anthropicApiKey, knownPageCount, deadline);
     console.log(`Batched AI OCR complete: ${aiText.length} chars`);
 
     const pageMarkerRegex = /\[PAGE\s+\d+\]/gi;
@@ -277,308 +243,10 @@ async function extractTextFromPdf(
   }
 }
 
-// ── Sectioning ───────────────────────────────────────────────────────────────
-
-// Splits text into sections, tracking the real page from inline [PAGE N] markers.
-// This is accurate (marker-driven) rather than estimating from character offsets,
-// which used to drift further off the deeper into a document you got — the cause
-// of clauses opening on the wrong PDF page.
-function sortIntoSections(markedText: string): Section[] {
-  const lines = markedText.split("\n");
-  const sections: Section[] = [];
-  let current: Section = { heading: null, clauseNumber: null, lines: [], pageNumber: 1 };
-  let currentPage = 1;
-  const pageMarker = /^\[PAGE\s+(\d+)\]/i;
-
-  for (const line of lines) {
-    // Update the running page from the marker, but never treat it as content
-    const pm = line.match(pageMarker);
-    if (pm) { currentPage = parseInt(pm[1], 10) || currentPage; continue; }
-
-    const sectionMatch = line.match(SECTION_HEADING);
-    const clauseMatch = line.match(CLAUSE_PATTERN);
-
-    if (sectionMatch) {
-      if (current.lines.length > 0) sections.push({ ...current });
-      current = { heading: line.trim(), clauseNumber: null, lines: [line], pageNumber: currentPage };
-    } else if (clauseMatch) {
-      if (current.lines.length > 0) sections.push({ ...current });
-      // Groups: [1]=number (tab variant), [2]=title (tab variant), [3]=number (space variant), [4]=title (space variant)
-      const clauseNumber = clauseMatch[1] || clauseMatch[3];
-      const clauseTitle = (clauseMatch[2] || clauseMatch[4] || "").trim();
-      current = {
-        heading: clauseTitle,
-        clauseNumber,
-        lines: [line],
-        pageNumber: currentPage,
-      };
-    } else {
-      current.lines.push(line);
-    }
-  }
-
-  if (current.lines.length > 0) sections.push(current);
-  return sections;
-}
-
-// ── Chunking with overlap and breadcrumb context ─────────────────────────────
-
-function buildBreadcrumb(standardCode: string, version: string, clauseNumber: string | null, clauseTitle: string | null): string {
-  const clausePart = clauseNumber
-    ? `Clause ${clauseNumber}${clauseTitle ? `: ${clauseTitle}` : ""}`
-    : clauseTitle || "";
-  return `[${standardCode}${version ? ` ${version}` : ""}]${clausePart ? ` ${clausePart}` : ""}\n\n`;
-}
-
-function getOverlapTail(text: string, approxChars = 200): string {
-  if (text.length <= approxChars) return text;
-  // Find the last sentence boundary before approxChars from end
-  const tail = text.slice(-approxChars);
-  const sentenceBreak = tail.search(/(?<=[.!?])\s/);
-  return sentenceBreak > -1 ? tail.slice(sentenceBreak).trimStart() : tail;
-}
-
-function chunkSections(sections: Section[], standardCode: string, version: string): Chunk[] {
-  const chunks: Chunk[] = [];
-  let chunkIndex = 0;
-
-  for (const section of sections) {
-    const sectionText = section.lines.join("\n").trim();
-    // Drop tiny fragments — but never a real SECTION/PART/APPENDIX heading, even
-    // a short one like "SECTION 3 TESTS" (needed for the exam-helper section list).
-    const isHeading = section.clauseNumber === null && SECTION_HEADING.test(section.heading || "");
-    if (sectionText.length < 20 && !isHeading) continue;
-
-    const breadcrumb = buildBreadcrumb(standardCode, version, section.clauseNumber, section.heading);
-
-    if (sectionText.length <= MAX_CHUNK_CHARS) {
-      chunks.push({
-        clause_number: section.clauseNumber,
-        clause_title: section.heading,
-        content: breadcrumb + sectionText,
-        page_number: section.pageNumber,
-        chunk_index: chunkIndex++,
-      });
-    } else {
-      // Split on paragraph boundaries with overlap carry-forward
-      const paragraphs = sectionText.split(/\n\s*\n/);
-      let buffer = "";
-      let prevTail = "";
-
-      for (const para of paragraphs) {
-        if (buffer.length + para.length + 2 > TARGET_CHUNK_CHARS && buffer.length > 0) {
-          prevTail = getOverlapTail(buffer);
-          chunks.push({
-            clause_number: section.clauseNumber,
-            clause_title: section.heading,
-            content: breadcrumb + buffer.trim(),
-            page_number: section.pageNumber,
-            chunk_index: chunkIndex++,
-          });
-          // Start next chunk with overlap from previous
-          buffer = prevTail ? `[...continued from above]\n${prevTail}\n\n${para}` : para;
-        } else {
-          buffer += (buffer ? "\n\n" : "") + para;
-        }
-      }
-
-      if (buffer.trim().length > 20) {
-        chunks.push({
-          clause_number: section.clauseNumber,
-          clause_title: section.heading,
-          content: breadcrumb + buffer.trim(),
-          page_number: section.pageNumber,
-          chunk_index: chunkIndex++,
-        });
-      }
-    }
-  }
-
-  // Fallback if nothing was detected
-  if (chunks.length === 0) {
-    const fullText = sections.map(s => s.lines.join("\n")).join("\n");
-    const paragraphs = fullText.split(/\n\s*\n/);
-    let buffer = "";
-    for (const para of paragraphs) {
-      buffer += para + "\n\n";
-      if (buffer.length > TARGET_CHUNK_CHARS) {
-        chunks.push({
-          clause_number: null,
-          clause_title: null,
-          content: buffer.trim(),
-          page_number: 1,
-          chunk_index: chunkIndex++,
-        });
-        buffer = "";
-      }
-    }
-    if (buffer.trim().length > 20) {
-      chunks.push({ clause_number: null, clause_title: null, content: buffer.trim(), page_number: 1, chunk_index: chunkIndex++ });
-    }
-  }
-
-  return chunks;
-}
-
-// ── Table extraction ─────────────────────────────────────────────────────────
-
-function extractTableChunks(text: string, standardCode: string, version: string): Chunk[] {
-  const chunks: Chunk[] = [];
-  const lines = text.split("\n");
-  const tablePattern = /TABLE\s+(\d+(?:\.\d+)*)(.*)?/i;
-  const pageMarker = /^\[PAGE\s+(\d+)\]/i;
-
-  // Track the current page as we scan down through the [PAGE N] markers.
-  let currentPage = 1;
-
-  for (let i = 0; i < lines.length; i++) {
-    const pm = lines[i].match(pageMarker);
-    if (pm) { currentPage = parseInt(pm[1], 10); continue; }
-
-    const match = lines[i].match(tablePattern);
-    if (!match) continue;
-
-    const tableNumber = match[1].trim();
-    const title = (match[2] || "").replace(/^[\s—\-:]+/, "").trim();
-
-    // Grab up to ~500 chars of surrounding content (next lines), skipping markers.
-    let surrounding = "";
-    let charCount = 0;
-    for (let j = i + 1; j < lines.length && charCount < 500; j++) {
-      if (pageMarker.test(lines[j])) continue;
-      surrounding += lines[j] + "\n";
-      charCount += lines[j].length + 1;
-    }
-
-    const label = `[${standardCode}${version ? ` ${version}` : ""}]`;
-    const content = `${label} Table ${tableNumber}${title ? `: ${title}` : ""}\n\n${surrounding.trim()}`;
-
-    chunks.push({
-      clause_number: `TABLE ${tableNumber}`,
-      clause_title: title || null,
-      content,
-      page_number: currentPage,
-      chunk_index: 0, // will be reassigned after merge
-    });
-  }
-
-  return chunks;
-}
-
-// ── Figure extraction ─────────────────────────────────────────────────────────
-
-function extractFigureChunks(text: string, standardCode: string, version: string): Chunk[] {
-  const chunks: Chunk[] = [];
-  const seenFigures = new Set<string>();
-  const label = `[${standardCode}${version ? ` ${version}` : ""}]`;
-  const lines = text.split("\n");
-
-  // Build page map from [PAGE N] markers
-  const pageMarkerRegex = /\[PAGE\s+(\d+)\]/gi;
-  const pageMap: { charPos: number; page: number }[] = [];
-  let pm: RegExpExecArray | null;
-  while ((pm = pageMarkerRegex.exec(text)) !== null) {
-    pageMap.push({ charPos: pm.index, page: parseInt(pm[1], 10) });
-  }
-  const pageOffsets: number[] = [];
-  let off = 0;
-  for (const line of lines) { pageOffsets.push(off); off += line.length + 1; }
-  function getPage(lineIdx: number): number {
-    const charPos = pageOffsets[lineIdx] || 0;
-    let page = 1;
-    for (const entry of pageMap) { if (entry.charPos <= charPos) page = entry.page; else break; }
-    return page;
-  }
-
-  // A figure number can appear two ways in a standard:
-  //   1. As a CAPTION — the line starts with "Figure 3.1 — ..." (the real diagram)
-  //   2. As a REFERENCE — "see Figure 3.1" or "(Figures 3.3, 3.4 and 3.5)" inside a sentence
-  // We want one chunk per unique figure, preferring the caption (it has the best
-  // title + page) but still capturing figures that are only ever referenced.
-
-  // figNum -> { caption, lineIdx }  (caption is "" for reference-only figures)
-  const figures = new Map<string, { caption: string; lineIdx: number }>();
-
-  // ── Pass 1: caption lines (line STARTS with "Figure X.X") ─────────────────
-  // Accepts dash, colon or plain-space separators and optional **markdown**.
-  const captionLinePattern = /^(?:\*{0,2})FIGURE\s+(\d+(?:\.\d+)*)\s*(?:—|–|-|:)?\s*(.*)$/i;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].replace(/\r$/, "").trim();
-    const match = line.match(captionLinePattern);
-    if (!match) continue;
-    const figNum = match[1].trim();
-    let caption = (match[2] || "").trim().replace(/[*—–\-:\s]+$/, "");
-    // If the caption ran onto the next line, pull it in.
-    if (!caption) {
-      for (let j = i + 1; j < Math.min(i + 3, lines.length); j++) {
-        const next = lines[j].replace(/\r$/, "").trim();
-        if (/^\[PAGE\s+\d+\]/i.test(next)) continue;
-        if (next && !/^\d+\.\d/.test(next) && next.length < 120) {
-          caption = next.replace(/^[—\-–:]+\s*/, "").trim();
-          break;
-        }
-      }
-    }
-    // Prefer the entry that actually has a caption.
-    const existing = figures.get(figNum);
-    if (!existing || (!existing.caption && caption)) {
-      figures.set(figNum, { caption, lineIdx: i });
-    }
-  }
-
-  const captionCount = figures.size;
-
-  // ── Pass 2: any "Figure X.X" referenced anywhere (incl. lists like
-  //    "Figures 3.7, 3.8, 3.9 and 3.13"). Adds figures we didn't see a caption for.
-  // Matches "Figure 3.1" or a list head "Figures 3.7, 3.8 and 3.13".
-  const refPattern = /\bFIGURES?\s+(\d+(?:\.\d+)*(?:\s*(?:,|and|&)\s*\d+(?:\.\d+)*)*)/gi;
-  let refMatch: RegExpExecArray | null;
-  while ((refMatch = refPattern.exec(text)) !== null) {
-    // Split a possible list ("3.7, 3.8 and 3.13") into individual numbers.
-    const nums = refMatch[1].match(/\d+(?:\.\d+)*/g) || [];
-    const charPos = refMatch.index;
-    let lineIdx = 0;
-    for (let j = pageOffsets.length - 1; j >= 0; j--) {
-      if (pageOffsets[j] <= charPos) { lineIdx = j; break; }
-    }
-    for (const figNum of nums) {
-      if (!figures.has(figNum)) figures.set(figNum, { caption: "", lineIdx });
-    }
-  }
-
-  // ── Build one chunk per unique figure, sorted naturally (1.1, 3.1, 3.2 …) ──
-  const sortedNums = [...figures.keys()].sort((a, b) => {
-    const pa = a.split(".").map(Number);
-    const pb = b.split(".").map(Number);
-    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-      const d = (pa[i] ?? 0) - (pb[i] ?? 0);
-      if (d !== 0) return d;
-    }
-    return 0;
-  });
-
-  for (const figNum of sortedNums) {
-    const { caption, lineIdx } = figures.get(figNum)!;
-    const page = getPage(lineIdx);
-    const surrounding = lines.slice(lineIdx + 1, lineIdx + 6).map(l => l.trim()).filter(Boolean).filter(l => !/^\[PAGE\s+\d+\]/i.test(l)).join(" ");
-    chunks.push({
-      clause_number: `FIGURE ${figNum}`,
-      clause_title: caption || null,
-      content: `${label} Figure ${figNum}${caption ? ` — ${caption}` : ""}\n\nThis figure appears on page ${page} of the standard. A visual description will be generated shortly.\n\nContext: ${surrounding}`,
-      page_number: page,
-      chunk_index: 0,
-    });
-    seenFigures.add(figNum);
-  }
-
-  console.log(`[${label}] Figures: ${captionCount} with captions, ${figures.size} total → ${sortedNums.join(", ")}`);
-
-  return chunks;
-}
-
 // ── Main handler ─────────────────────────────────────────────────────────────
 
 serve(async (req) => {
+  const requestStart = Date.now();
   const origin = req.headers.get("Origin") || "";
   const corsHeaders = {
     "Access-Control-Allow-Origin": getAllowedOrigin(origin),
@@ -695,7 +363,9 @@ serve(async (req) => {
       const fileBytes = new Uint8Array(await fileData.arrayBuffer());
       console.log(`[${standard_id}] File size: ${fileBytes.length} bytes, starting extraction`);
       try {
-        extracted = await extractTextFromPdf(fileBytes, ANTHROPIC_API_KEY);
+        // Leave ~20s of the processing window for chunking + DB writes
+        const extractionDeadline = requestStart + PROCESSING_TIMEOUT_MS - 20_000;
+        extracted = await extractTextFromPdf(fileBytes, ANTHROPIC_API_KEY, extractionDeadline);
       } catch (e) {
         console.error("Text extraction failed:", e);
         clearTimeout(timeoutHandle);

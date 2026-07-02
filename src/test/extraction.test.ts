@@ -1,0 +1,150 @@
+import { describe, it, expect } from "vitest";
+import {
+  convertPdfToBase64,
+  matchClauseHeading,
+  sortIntoSections,
+  chunkSections,
+  extractTableChunks,
+  extractFigureChunks,
+  parseExtractedText,
+  computeQualityScore,
+} from "../../supabase/functions/process-standard/extraction";
+
+describe("convertPdfToBase64", () => {
+  it("handles files far larger than the call-stack limit", () => {
+    // The old spread-based version crashed with RangeError above ~125KB
+    const bytes = new Uint8Array(2 * 1024 * 1024);
+    bytes.set([0x25, 0x50, 0x44, 0x46]); // %PDF
+    const b64 = convertPdfToBase64(bytes);
+    expect(b64.length).toBeGreaterThan(0);
+    expect(atob(b64.slice(0, 8)).startsWith("%PDF")).toBe(true);
+  });
+
+  it("round-trips content correctly", () => {
+    const bytes = new TextEncoder().encode("AS/NZS 3000:2018 test content");
+    expect(atob(convertPdfToBase64(bytes))).toBe("AS/NZS 3000:2018 test content");
+  });
+});
+
+describe("matchClauseHeading", () => {
+  it("matches genuine clause headings", () => {
+    expect(matchClauseHeading("2.5 Selection of protective devices")).toEqual({
+      number: "2.5",
+      title: "Selection of protective devices",
+    });
+    expect(matchClauseHeading("8.3.9.2 Insulation resistance")).toEqual({
+      number: "8.3.9.2",
+      title: "Insulation resistance",
+    });
+    // Undotted top-level clauses are ALL CAPS in AU/NZ standards
+    expect(matchClauseHeading("2 SCOPE AND GENERAL")).toEqual({
+      number: "2",
+      title: "SCOPE AND GENERAL",
+    });
+  });
+
+  it("rejects body text that starts with a number", () => {
+    expect(matchClauseHeading("30 Amp circuits shall be protected")).toBeNull();
+    expect(matchClauseHeading("3 Phase supplies require")).toBeNull();
+    expect(matchClauseHeading("1.5 Times the rated current")).toBeNull();
+    expect(matchClauseHeading("0.4 Seconds maximum disconnection time")).toBeNull();
+    expect(matchClauseHeading("16 A socket-outlets in damp situations")).toBeNull();
+    expect(matchClauseHeading("3.5 kg/m² loading applies")).toBeNull();
+  });
+});
+
+describe("sortIntoSections + chunkSections", () => {
+  const sample = [
+    "[PAGE 3]",
+    "SECTION 2 GENERAL ARRANGEMENT",
+    "Intro text for the section.",
+    "2.1 Scope",
+    "This clause covers the scope of the section in detail.",
+    "[PAGE 4]",
+    "2.2 Application",
+    "Application details continue here with enough length to keep the chunk.",
+  ].join("\n");
+
+  it("tracks pages from [PAGE N] markers and detects clauses", () => {
+    const sections = sortIntoSections(sample);
+    const clause21 = sections.find((s) => s.clauseNumber === "2.1");
+    const clause22 = sections.find((s) => s.clauseNumber === "2.2");
+    expect(clause21?.pageNumber).toBe(3);
+    expect(clause22?.pageNumber).toBe(4);
+  });
+
+  it("prefixes chunks with the standard breadcrumb", () => {
+    const chunks = chunkSections(sortIntoSections(sample), "AS/NZS 3000", "2018");
+    const c = chunks.find((ch) => ch.clause_number === "2.1");
+    expect(c?.content.startsWith("[AS/NZS 3000 2018] Clause 2.1: Scope")).toBe(true);
+  });
+});
+
+describe("extractTableChunks", () => {
+  const sample = [
+    "[PAGE 10]",
+    "TABLE 8.1 — MINIMUM INSULATION RESISTANCE",
+    "Circuit type | Minimum value",
+    "All circuits | 1 MΩ",
+    "[PAGE 42]",
+    "The insulation resistance shall comply with Table 8.1 as noted.",
+    "[PAGE 55]",
+    "Refer to Table 8.1 for minimum values, and see Table 9.2 for test currents.",
+  ].join("\n");
+
+  it("creates exactly one chunk per table, anchored to the caption page", () => {
+    const chunks = extractTableChunks(sample, "AS/NZS 3000", "2018");
+    const t81 = chunks.filter((c) => c.clause_number === "TABLE 8.1");
+    expect(t81).toHaveLength(1);
+    expect(t81[0].page_number).toBe(10); // caption page, not a reference page
+    expect(t81[0].clause_title).toBe("MINIMUM INSULATION RESISTANCE");
+  });
+
+  it("still captures reference-only tables once", () => {
+    const chunks = extractTableChunks(sample, "AS/NZS 3000", "2018");
+    const t92 = chunks.filter((c) => c.clause_number === "TABLE 9.2");
+    expect(t92).toHaveLength(1);
+    expect(t92[0].page_number).toBe(55);
+  });
+});
+
+describe("extractFigureChunks", () => {
+  it("dedupes figures and prefers the caption", () => {
+    const sample = [
+      "[PAGE 7]",
+      "Figure 3.1 — Zone dimensions for baths",
+      "diagram content",
+      "[PAGE 20]",
+      "See Figures 3.1 and 3.4 for details.",
+    ].join("\n");
+    const chunks = extractFigureChunks(sample, "AS/NZS 3000", "2018");
+    const f31 = chunks.filter((c) => c.clause_number === "FIGURE 3.1");
+    expect(f31).toHaveLength(1);
+    expect(f31[0].page_number).toBe(7);
+    expect(f31[0].clause_title).toBe("Zone dimensions for baths");
+    expect(chunks.some((c) => c.clause_number === "FIGURE 3.4")).toBe(true);
+  });
+});
+
+describe("parseExtractedText", () => {
+  it("splits client-extracted text on page markers", () => {
+    const raw = "[PAGE 1]\nfirst page content here\n[PAGE 2]\nsecond page content here";
+    const result = parseExtractedText(raw);
+    expect(result.totalPages).toBe(2);
+    expect(result.pagesWithContent).toBe(2);
+    expect(result.text).not.toContain("[PAGE");
+  });
+});
+
+describe("computeQualityScore", () => {
+  it("scores a realistic clause-dense extract well above the 35 reject line", () => {
+    const good = Array.from({ length: 40 }, (_, i) =>
+      `${(i % 8) + 1}.${(i % 5) + 1} Requirements for circuit ${i} rated at 20 A with 2.5 mm conductors installed per the wiring rules.`
+    ).join("\n");
+    expect(computeQualityScore(good, 10, 10)).toBeGreaterThan(35);
+  });
+
+  it("scores empty extraction at or below the reject line", () => {
+    expect(computeQualityScore("", 100, 0)).toBeLessThan(35);
+  });
+});
