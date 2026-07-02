@@ -1,0 +1,50 @@
+# Runs the live QA suite (qa-test.mjs) against production from a GitHub runner.
+# Credentials are passed as workflow_dispatch inputs and masked in logs —
+# they are never committed to the repository.
+name: QA Live Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      email:
+        description: "Supabase account email"
+        required: true
+        type: string
+      password:
+        description: "Supabase account password (masked in logs)"
+        required: true
+        type: string
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run QA suite
+        env:
+          SUPABASE_EMAIL: ${{ inputs.email }}
+          SUPABASE_PASSWORD: ${{ inputs.password }}
+        run: |
+          echo "::add-mask::$SUPABASE_PASSWORD"
+          node qa-test.mjs
+
+      - name: Print report
+        if: always()
+        run: |
+          echo "===== QA REPORT START ====="
+          cat qa-report.md || echo "no report generated"
+          echo "===== QA REPORT END ====="
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-report
+          path: qa-report.md
+          if-no-files-found: ignore
