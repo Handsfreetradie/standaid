@@ -219,7 +219,24 @@ async function runQuery(question, token) {
     body: JSON.stringify({ question }),
   });
 
-  const data = await res.json();
+  const text = await res.text();
+
+  // The query endpoint streams SSE ("data: {...}" lines). The final event with
+  // done:true carries the full answer + metadata. Fall back to plain JSON for
+  // error responses and older endpoint versions.
+  let data = {};
+  if (text.trimStart().startsWith("data:")) {
+    for (const line of text.split("\n")) {
+      if (!line.startsWith("data: ")) continue;
+      try {
+        const evt = JSON.parse(line.slice(6));
+        if (evt.done || evt.error) data = evt;
+      } catch { /* ignore partial lines */ }
+    }
+  } else {
+    try { data = JSON.parse(text); } catch { data = { error: text.slice(0, 200) }; }
+  }
+
   return { status: res.status, data };
 }
 
