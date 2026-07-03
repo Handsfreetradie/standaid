@@ -116,7 +116,7 @@ serve(async (req) => {
       .eq("user_id", user_id)
       .single();
 
-    const tier = profile?.subscription_tier || "pro";
+    const tier = profile?.subscription_tier || "free"; // least privilege — a missing profile must never grant pro
     const totalChunks = standard.total_chunks || 0;
     const indexLimit = tier === "free"
       ? Math.max(1, Math.ceil(totalChunks * 0.25))

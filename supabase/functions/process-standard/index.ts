@@ -415,7 +415,7 @@ serve(async (req) => {
     console.log(`[${standard_id}] Chunking done: ${Date.now() - t0}ms, ${totalChunks} chunks`);
 
     const { data: profile } = await supabaseAdmin.from("profiles").select("subscription_tier").eq("user_id", userId).single();
-    const tier = profile?.subscription_tier || "pro";
+    const tier = profile?.subscription_tier || "free"; // least privilege — a missing profile must never grant pro
     const isPartial = tier === "free";
 
     const DB_BATCH_SIZE = 100;

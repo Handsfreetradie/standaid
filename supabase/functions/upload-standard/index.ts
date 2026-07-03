@@ -38,7 +38,7 @@ serve(async (req) => {
       .eq("user_id", userId)
       .single();
 
-    const tier = profile?.subscription_tier || "pro";
+    const tier = profile?.subscription_tier || "free"; // least privilege — a missing profile must never grant pro
 
     // Parse JSON body — file was uploaded directly to storage by the browser
     const body = await req.json();

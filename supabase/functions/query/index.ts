@@ -81,11 +81,20 @@ serve(async (req) => {
     ]);
 
     const profile = profileResult.data;
-    const tier = profile?.subscription_tier || "pro";
+    const tier = profile?.subscription_tier || "free"; // least privilege — a missing profile must never grant pro
     const todayCount = countResult.count ?? 0;
 
     if (tier === "free" && todayCount >= 5) {
       return new Response(JSON.stringify({ error: "You've reached your daily limit of 5 queries. Upgrade to Pro for unlimited queries." }), {
+        status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Fair-use ceiling for paid tiers — far above any genuine daily usage, but
+    // stops a runaway client loop or abused account burning unbounded AI spend.
+    const PRO_DAILY_CAP = 200;
+    if (tier !== "free" && todayCount >= PRO_DAILY_CAP) {
+      return new Response(JSON.stringify({ error: "You've hit today's fair-use limit. Your quota resets at midnight UTC — if you're hitting this genuinely, get in touch." }), {
         status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
