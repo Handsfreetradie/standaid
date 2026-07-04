@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { X, ChevronLeft, ChevronRight, Loader2, AlertTriangle, FileText, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -191,14 +192,18 @@ export function PDFViewerModal({ isOpen, onClose: rawOnClose, clauseNumber, stan
     : pageNumber ? `Page ${pageNumber}` : null;
   const title = clauseLabel ? `${resolvedStandardCode} — ${clauseLabel}` : resolvedStandardCode;
 
-  return (
+  // Rendered through a portal to document.body so it escapes the app's
+  // <main z-10> stacking context — otherwise the mobile header (z-40) paints
+  // over the modal's top bar, hiding the title behind the logo and blocking
+  // taps on the close button.
+  return createPortal(
     <>
       {/* Backdrop — full viewport, closes modal on click */}
-      <div className="fixed inset-0 z-[60] bg-black/60" onClick={onClose} />
+      <div className="fixed inset-0 z-[100] bg-black/60" onClick={onClose} />
 
       {/* Modal container — sits above bottom nav, stops backdrop clicks via stopPropagation */}
       <div
-        className="fixed inset-x-0 top-0 z-[61] flex items-end justify-center sm:items-center"
+        className="fixed inset-x-0 top-0 z-[101] flex items-end justify-center sm:items-center"
         style={{ bottom: `calc(4rem + env(safe-area-inset-bottom, 0px))` }}
         onClick={onClose}
       >
@@ -284,6 +289,7 @@ export function PDFViewerModal({ isOpen, onClose: rawOnClose, clauseNumber, stan
           )}
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }
