@@ -60,7 +60,9 @@ interface Message {
 
 function FeedbackButtons({ queryId }: { queryId: string }) {
   const [submitted, setSubmitted] = useState<FeedbackRating | null>(null);
-  const [showComment, setShowComment] = useState(false);
+  // Which negative rating opened the comment box — previously the submit
+  // button hardcoded "wrong", so "unclear" feedback was misrecorded.
+  const [pendingRating, setPendingRating] = useState<FeedbackRating | null>(null);
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -75,6 +77,7 @@ function FeedbackButtons({ queryId }: { queryId: string }) {
       setSubmitted(rating);
     } catch (err) {
       console.error("Feedback error:", err);
+      toast.error("Couldn't send feedback — please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -82,7 +85,7 @@ function FeedbackButtons({ queryId }: { queryId: string }) {
 
   function handleQuick(rating: FeedbackRating) {
     if (rating === "wrong" || rating === "unclear") {
-      setShowComment(true);
+      setPendingRating(rating);
     } else {
       void submit(rating);
     }
@@ -97,28 +100,30 @@ function FeedbackButtons({ queryId }: { queryId: string }) {
     );
   }
 
-  if (showComment) {
+  if (pendingRating) {
     return (
       <div className="mt-2 space-y-2">
-        <p className="text-xs text-muted-foreground">What was wrong? (optional)</p>
+        <p className="text-xs text-muted-foreground">
+          {pendingRating === "unclear" ? "What was confusing? (optional)" : "What was wrong? (optional)"}
+        </p>
         <textarea
           value={comment}
           onChange={(e) => setComment(e.target.value)}
           maxLength={2000}
-          placeholder="e.g. Wrong clause number..."
+          placeholder={pendingRating === "unclear" ? "e.g. Too much jargon..." : "e.g. Wrong clause number..."}
           className="w-full bg-background border border-border rounded-md px-3 py-2 text-xs text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary resize-none"
           rows={2}
         />
         <div className="flex gap-2">
           <button
-            onClick={() => { void submit("wrong", comment.trim() || undefined); setShowComment(false); }}
+            onClick={() => { void submit(pendingRating, comment.trim() || undefined); setPendingRating(null); }}
             disabled={submitting}
             className="px-3 py-1 bg-destructive text-destructive-foreground text-xs rounded-md hover:opacity-90 disabled:opacity-50"
           >
             Submit
           </button>
           <button
-            onClick={() => { setShowComment(false); setComment(""); }}
+            onClick={() => { setPendingRating(null); setComment(""); }}
             className="px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
           >
             Cancel
