@@ -6,7 +6,7 @@ This service extracts Australian Standards PDFs with 100% accuracy for the Stand
 Tradies need to trust this data with their lives and livelihoods — no room for error.
 
 **Parent Project:** StandAid (AI-powered standards access for Australian tradies)  
-**Current Stack:** Lovable (frontend), Supabase (backend), OpenAI (embeddings)  
+**Current Stack:** React + Vite (frontend, hosted on Vercel), Supabase (backend), OpenAI (embeddings)  
 **This Service:** Standalone Python extraction → feeds validated JSON to Supabase  
 
 ---

@@ -17,7 +17,7 @@ An app for Australian tradies to:
 - Suite of onsite tools for tradies
 
 **Stack:**
-- Frontend: Lovable (lovable.dev)
+- Frontend: React + TypeScript + Vite (originally built with Lovable, now developed directly), hosted on Vercel
 - Backend: Supabase (database, auth, edge functions)
 - Language: TypeScript / JavaScript
 
@@ -76,7 +76,7 @@ An app for Australian tradies to:
 
 ## Locked Fixes — DO NOT REVERT
 
-These have been broken repeatedly by Lovable regenerating files. Do not change without understanding the reason.
+These were broken repeatedly by automated file regeneration when the app was built with Lovable. Do not change without understanding the reason.
 
 ### Chat input position (src/index.css + src/pages/Chat.tsx)
 - The chat input wrapper uses CSS class `chat-input-wrapper` defined in `index.css`

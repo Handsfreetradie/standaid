@@ -11,40 +11,58 @@ interface VoiceModeProps {
 
 type VoiceState = "idle" | "listening" | "processing" | "speaking";
 
+const MAX_LISTEN_MS = 30_000; // safety net — never listen forever
+
 const VoiceMode = ({ onTranscript, isQuerying, onClose }: VoiceModeProps) => {
   const [state, setState] = useState<VoiceState>("idle");
   const [transcript, setTranscript] = useState("");
   const [aiResponse, setAiResponse] = useState("");
   const recognitionRef = useRef<any>(null);
   const synthRef = useRef<SpeechSynthesisUtterance | null>(null);
+  // Refs so the recognition callbacks always see current values — the old
+  // implementation captured a stale (empty) transcript in onend, which made
+  // the overlay hang after speaking instead of submitting the question.
+  const transcriptRef = useRef("");
+  const listenTimeoutRef = useRef<number | null>(null);
+  const closedRef = useRef(false);
+
+  const clearListenTimeout = useCallback(() => {
+    if (listenTimeoutRef.current !== null) {
+      clearTimeout(listenTimeoutRef.current);
+      listenTimeoutRef.current = null;
+    }
+  }, []);
 
   const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
-  }, []);
+    clearListenTimeout();
+    try { recognitionRef.current?.stop(); } catch { /* already stopped */ }
+  }, [clearListenTimeout]);
 
   const stopSpeaking = useCallback(() => {
     window.speechSynthesis.cancel();
     setState("idle");
   }, []);
 
+  // After the answer finishes speaking, hand back to the chat screen so the
+  // user can read their question and the full answer.
   const speak = useCallback((text: string) => {
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = 1.0;
     utterance.pitch = 1.0;
-    utterance.onend = () => setState("idle");
-    utterance.onerror = () => setState("idle");
+    utterance.onend = () => { if (!closedRef.current) onClose(); };
+    utterance.onerror = () => { if (!closedRef.current) onClose(); };
     synthRef.current = utterance;
     setState("speaking");
     window.speechSynthesis.speak(utterance);
-  }, []);
+  }, [onClose]);
 
   const startListening = useCallback(() => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      setAiResponse("Voice recognition is not supported in this browser. Please try Chrome.");
+      setAiResponse("Voice recognition is not supported in this browser. Please try Chrome or Safari.");
       return;
     }
 
@@ -56,7 +74,13 @@ const VoiceMode = ({ onTranscript, isQuerying, onClose }: VoiceModeProps) => {
     recognition.onstart = () => {
       setState("listening");
       setTranscript("");
+      transcriptRef.current = "";
       setAiResponse("");
+      // Hard stop if the engine never ends on its own (seen on some phones)
+      clearListenTimeout();
+      listenTimeoutRef.current = window.setTimeout(() => {
+        try { recognition.stop(); } catch { /* noop */ }
+      }, MAX_LISTEN_MS);
     };
 
     recognition.onresult = (event: any) => {
@@ -69,48 +93,18 @@ const VoiceMode = ({ onTranscript, isQuerying, onClose }: VoiceModeProps) => {
           interimTranscript += event.results[i][0].transcript;
         }
       }
-      setTranscript(finalTranscript || interimTranscript);
-    };
-
-    recognition.onend = async () => {
-      // Get the final transcript from state via a ref trick
-      const finalText = transcript;
-      if (!finalText.trim()) {
-        setState("idle");
-        return;
-      }
-      setState("processing");
-      try {
-        const response = await onTranscript(finalText);
-        if (response) {
-          setAiResponse(response);
-          speak(response);
-        } else {
-          setState("idle");
-        }
-      } catch {
-        setState("idle");
+      const text = finalTranscript || interimTranscript;
+      setTranscript(text);
+      transcriptRef.current = text;
+      // Once we have a final result, stop straight away — don't leave the mic
+      // hanging open waiting for the engine's own silence detection.
+      if (finalTranscript) {
+        try { recognition.stop(); } catch { /* noop */ }
       }
     };
 
-    recognition.onerror = () => {
-      setState("idle");
-    };
-
-    recognitionRef.current = recognition;
-    recognition.start();
-  }, [onTranscript, speak, transcript]);
-
-  // We need to handle the transcript in onend properly
-  // Use a ref to track the latest transcript
-  const transcriptRef = useRef(transcript);
-  transcriptRef.current = transcript;
-
-  useEffect(() => {
-    const recognition = recognitionRef.current;
-    if (!recognition) return;
-
     recognition.onend = async () => {
+      clearListenTimeout();
       const finalText = transcriptRef.current;
       if (!finalText.trim()) {
         setState("idle");
@@ -119,30 +113,44 @@ const VoiceMode = ({ onTranscript, isQuerying, onClose }: VoiceModeProps) => {
       setState("processing");
       try {
         const response = await onTranscript(finalText);
+        if (closedRef.current) return;
         if (response) {
           setAiResponse(response);
           speak(response);
         } else {
-          setState("idle");
+          // Question was submitted — return to the chat to read the result
+          onClose();
         }
       } catch {
-        setState("idle");
+        if (!closedRef.current) onClose();
       }
     };
-  }, [onTranscript, speak]);
+
+    recognition.onerror = () => {
+      clearListenTimeout();
+      setState("idle");
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  }, [onTranscript, speak, onClose, clearListenTimeout]);
 
   useEffect(() => {
     return () => {
-      recognitionRef.current?.stop();
+      closedRef.current = true;
+      clearListenTimeout();
+      try { recognitionRef.current?.stop(); } catch { /* noop */ }
       window.speechSynthesis.cancel();
     };
-  }, []);
+  }, [clearListenTimeout]);
 
   const handleMicClick = () => {
     if (state === "listening") {
       stopListening();
     } else if (state === "speaking") {
-      stopSpeaking();
+      // Tap while speaking = "let me read it" — stop talking, back to chat
+      window.speechSynthesis.cancel();
+      onClose();
     } else if (state === "idle") {
       startListening();
     }

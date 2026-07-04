@@ -41,9 +41,10 @@ serve(async (req) => {
   };
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabaseAdmin = createClient(
     Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    serviceRoleKey
   );
 
   const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
@@ -56,20 +57,49 @@ serve(async (req) => {
   const t0 = Date.now();
 
   try {
-    const body = await req.json();
-    const { standard_id, user_id } = body;
+    // Auth: internal calls (process-standard / self-retrigger) use the service
+    // role key; the frontend stall-recovery kick uses the user's JWT. This
+    // endpoint spends OpenAI credits, so it must never run unauthenticated.
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const isInternalCall = authHeader === `Bearer ${serviceRoleKey}`;
+    let callerUserId: string | null = null;
+    if (!isInternalCall) {
+      const token = authHeader.replace("Bearer ", "");
+      const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
+      if (userError || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      callerUserId = user.id;
+    }
 
-    if (!standard_id || !user_id) {
-      return new Response(JSON.stringify({ error: "standard_id and user_id are required" }), {
+    const body = await req.json();
+    const { standard_id } = body;
+
+    if (!standard_id) {
+      return new Response(JSON.stringify({ error: "standard_id is required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const { data: standard } = await supabaseAdmin
       .from("standards")
-      .select("total_chunks, extraction_status")
+      .select("total_chunks, extraction_status, user_id")
       .eq("id", standard_id)
       .single();
+
+    // User-JWT callers can only kick embedding for their own standard
+    if (callerUserId && standard && standard.user_id !== callerUserId) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     if (!standard || standard.extraction_status === "complete" || standard.extraction_status === "failed") {
       return new Response(JSON.stringify({ status: "skipped" }), {
@@ -77,13 +107,16 @@ serve(async (req) => {
       });
     }
 
+    // Tier is always looked up from the standard's owner, never a body value
+    const user_id = standard.user_id;
+
     const { data: profile } = await supabaseAdmin
       .from("profiles")
       .select("subscription_tier")
       .eq("user_id", user_id)
       .single();
 
-    const tier = profile?.subscription_tier || "pro";
+    const tier = profile?.subscription_tier || "free"; // least privilege — a missing profile must never grant pro
     const totalChunks = standard.total_chunks || 0;
     const indexLimit = tier === "free"
       ? Math.max(1, Math.ceil(totalChunks * 0.25))

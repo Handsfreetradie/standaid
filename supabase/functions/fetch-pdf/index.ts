@@ -62,13 +62,20 @@ serve(async (req) => {
     let clause_title: string | null = null;
 
     if (page_number === null && clause_number) {
-      const { data: chunk } = await supabase
+      const { data: chunks } = await supabase
         .from("standard_chunks")
-        .select("page_number, clause_title")
+        .select("page_number, clause_title, content, chunk_index")
         .eq("standard_id", standard.id)
         .eq("clause_number", clause_number)
-        .limit(1)
-        .single();
+        .order("chunk_index", { ascending: true })
+        .limit(5);
+
+      // Skip table-of-contents chunks (dotted leaders like "TESTING .... 419")
+      // so the viewer opens on the actual clause, not its ToC entry near the
+      // front of the document. Fall back to the first match if every candidate
+      // looks like a ToC entry.
+      const chunk =
+        (chunks || []).find((c) => !/\.{4,}/.test(c.content || "")) || (chunks || [])[0];
 
       if (chunk) {
         page_number = chunk.page_number;

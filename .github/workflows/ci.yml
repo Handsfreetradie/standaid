@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npx vitest run
+
+      - name: Typecheck edge functions (syntax)
+        run: |
+          for f in supabase/functions/*/index.ts supabase/functions/*/*.ts; do
+            npx esbuild "$f" --outfile=/dev/null --log-level=error
+          done
+
+      - name: Production build
+        run: npm run build

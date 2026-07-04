@@ -118,11 +118,19 @@ function validateQueryResponse(query, apiResponse) {
   const answer = apiResponse.answer || "";
 
   // ── Criterion 1: Clause citation present ─────────────────────────────────
-  const citations = answer.match(CLAUSE_REGEX) ?? [];
-  result.citationCount = citations.length;
+  // The system prompt deliberately keeps formal clause references OUT of the
+  // answer text — they belong in the citations metadata array (rendered as
+  // chips in the UI). So a citation counts if it appears inline OR in the
+  // structured citations array. Only fail when neither has one.
+  const inlineCitations = answer.match(CLAUSE_REGEX) ?? [];
+  const structuredCitations = Array.isArray(apiResponse.citations)
+    ? apiResponse.citations.filter(c => c && (c.clause_number || c.standard_code))
+    : [];
+  result.citationCount = inlineCitations.length + structuredCitations.length;
 
-  if (citations.length === 0 && !answer.toLowerCase().includes("not covered") && !answer.toLowerCase().includes("don't cover")) {
-    issues.push("FAIL: No clause citation in response (expected AS/NZS XXXX Clause Y.Y format)");
+  if (inlineCitations.length === 0 && structuredCitations.length === 0 &&
+      !answer.toLowerCase().includes("not covered") && !answer.toLowerCase().includes("don't cover")) {
+    issues.push("FAIL: No clause citation in response text or citations array");
     result.pass = false;
   }
 
@@ -219,7 +227,24 @@ async function runQuery(question, token) {
     body: JSON.stringify({ question }),
   });
 
-  const data = await res.json();
+  const text = await res.text();
+
+  // The query endpoint streams SSE ("data: {...}" lines). The final event with
+  // done:true carries the full answer + metadata. Fall back to plain JSON for
+  // error responses and older endpoint versions.
+  let data = {};
+  if (text.trimStart().startsWith("data:")) {
+    for (const line of text.split("\n")) {
+      if (!line.startsWith("data: ")) continue;
+      try {
+        const evt = JSON.parse(line.slice(6));
+        if (evt.done || evt.error) data = evt;
+      } catch { /* ignore partial lines */ }
+    }
+  } else {
+    try { data = JSON.parse(text); } catch { data = { error: text.slice(0, 200) }; }
+  }
+
   return { status: res.status, data };
 }
 

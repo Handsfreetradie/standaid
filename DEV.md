@@ -18,7 +18,7 @@
 
 ### Frontend
 - **Framework:** React + TypeScript
-- **Build/Deploy:** Lovable (lovable.dev) — generates and manages the UI
+- **Build:** Vite
 - **Hosting:** Vercel
 - **Key packages:** Supabase JS client, React Query, shadcn/ui
 
@@ -321,7 +321,7 @@ OPENAI_API_KEY=<still used for embeddings>
 
 ## Important Locked Fixes (DO NOT REVERT)
 
-These have been broken repeatedly by Lovable regeneration. Understand before changing:
+These were broken repeatedly by automated file regeneration when the app was built with Lovable. Understand before changing:
 
 ### 1. Chat input position (`src/index.css` + `src/pages/Chat.tsx`)
 - `.chat-input-wrapper` uses `!important` rules to prevent `pb-safe` padding inside
