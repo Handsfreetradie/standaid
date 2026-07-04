@@ -37,6 +37,19 @@ describe("mvPerAm — voltage drop values vs AS/NZS 3008.1.1", () => {
     const three = mvPerAm("copper", "10", "ac", "three", 75)!;
     expect(single / three).toBeCloseTo(2 / Math.sqrt(3), 2);
   });
+
+  it("agrees with AS/NZS 3000 Table C8 (simplified voltage drop, verified from the PDF)", () => {
+    // Table C8 lists A·m per %Vd. mV/A·m = (V × 10) / (A·m per %Vd).
+    // Single-phase 230V column: 2.5mm²=128, 4mm²=205, 16mm²=818, 25mm²=1289
+    const c8Single: Record<string, number> = { "2.5": 128, "4": 205, "16": 818, "25": 1289 };
+    for (const [size, am] of Object.entries(c8Single)) {
+      const expected = 2300 / am;
+      expect(mvPerAm("copper", size, "ac", "single", 75)!).toBeCloseTo(expected, 1);
+    }
+    // Three-phase 400V column: 2.5mm²=256, 16mm²=1643
+    expect(mvPerAm("copper", "2.5", "ac", "three", 75)!).toBeCloseTo(4000 / 256, 1);
+    expect(mvPerAm("copper", "16", "ac", "three", 75)!).toBeCloseTo(4000 / 1643, 1);
+  });
 });
 
 describe("temperature derating — 40°C ambient base per AS/NZS 3008", () => {
@@ -91,8 +104,11 @@ describe("maximum demand — AS/NZS 3000 Table C1 single domestic", () => {
     expect(r.totalDemandA).toBe(10);
   });
 
-  it("counts 15A socket outlets at 10A each", () => {
-    expect(calculateMaxDemandC1({ socket15: 2 }).totalDemandA).toBe(20);
+  it("applies flat allowances for 15A and 20A socket outlets (verified against Table C1 text)", () => {
+    // C1 b(ii)/b(iii): "one or more" outlets → flat 10 A / 15 A, NOT per outlet
+    expect(calculateMaxDemandC1({ socket15: 1 }).totalDemandA).toBe(10);
+    expect(calculateMaxDemandC1({ socket15: 3 }).totalDemandA).toBe(10);
+    expect(calculateMaxDemandC1({ socket20: 2 }).totalDemandA).toBe(15);
   });
 
   it("ignores empty inputs", () => {
