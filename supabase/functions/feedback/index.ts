@@ -46,21 +46,27 @@ serve(async (req: Request) => {
     const validationError = validateFeedbackBody(body);
     if (validationError) return jsonResponse({ error: validationError }, 400, corsHeaders);
 
+    // Verify the query being rated exists and belongs to this user — feedback
+    // must not be attachable to another user's queries.
+    const { data: logRow, error: logError } = await supabase
+      .from("query_log")
+      .select("query_text, user_id")
+      .eq("id", body.queryId)
+      .single();
+
+    if (logError || !logRow || logRow.user_id !== userId) {
+      return jsonResponse({ error: "Query not found" }, 404, corsHeaders);
+    }
+
     const isNegative = (body.rating === "wrong" || body.rating === "unclear") && !!body.userComment;
 
-    // For negative feedback with a comment, look up the original question and embed it
-    // so similar future queries can receive this correction as context.
+    // For negative feedback with a comment, embed the original question so
+    // similar future queries can receive this correction as context.
     let questionText: string | null = null;
     let questionEmbedding: number[] | null = null;
 
     if (isNegative) {
-      const { data: logRow } = await supabase
-        .from("query_log")
-        .select("query_text")
-        .eq("id", body.queryId)
-        .single();
-
-      questionText = logRow?.query_text ?? null;
+      questionText = logRow.query_text ?? null;
 
       if (questionText) {
         const openaiKey = Deno.env.get("OPENAI_API_KEY");
