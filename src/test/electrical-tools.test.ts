@@ -41,14 +41,16 @@ describe("mvPerAm — voltage drop values vs AS/NZS 3008.1.1", () => {
   it("agrees with AS/NZS 3000 Table C8 (simplified voltage drop, verified from the PDF)", () => {
     // Table C8 lists A·m per %Vd. mV/A·m = (V × 10) / (A·m per %Vd).
     // Single-phase 230V column: 2.5mm²=128, 4mm²=205, 16mm²=818, 25mm²=1289
+    // C8 rounds A·m to whole numbers, so compare with a 1% relative tolerance
+    const within1pc = (actual: number, expected: number) =>
+      expect(Math.abs(actual - expected) / expected).toBeLessThan(0.01);
     const c8Single: Record<string, number> = { "2.5": 128, "4": 205, "16": 818, "25": 1289 };
     for (const [size, am] of Object.entries(c8Single)) {
-      const expected = 2300 / am;
-      expect(mvPerAm("copper", size, "ac", "single", 75)!).toBeCloseTo(expected, 1);
+      within1pc(mvPerAm("copper", size, "ac", "single", 75)!, 2300 / am);
     }
     // Three-phase 400V column: 2.5mm²=256, 16mm²=1643
-    expect(mvPerAm("copper", "2.5", "ac", "three", 75)!).toBeCloseTo(4000 / 256, 1);
-    expect(mvPerAm("copper", "16", "ac", "three", 75)!).toBeCloseTo(4000 / 1643, 1);
+    within1pc(mvPerAm("copper", "2.5", "ac", "three", 75)!, 4000 / 256);
+    within1pc(mvPerAm("copper", "16", "ac", "three", 75)!, 4000 / 1643);
   });
 });
 
