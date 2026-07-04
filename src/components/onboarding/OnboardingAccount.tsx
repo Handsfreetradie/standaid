@@ -152,8 +152,8 @@ const OnboardingAccount = ({ onNext, onBack, onSignIn }: Props) => {
 
         <p className="text-xs text-muted-foreground text-center mt-6 leading-relaxed">
           By creating an account you agree to our{" "}
-          <span className="text-primary underline cursor-pointer">Terms of Service</span> and{" "}
-          <span className="text-primary underline cursor-pointer">Privacy Policy</span>
+          <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-primary underline">Terms of Service</a> and{" "}
+          <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-primary underline">Privacy Policy</a>
         </p>
 
         <p className="text-sm text-center text-muted-foreground mt-4">
