@@ -130,47 +130,86 @@ export const CURRENT_CAPACITY: Record<string, Record<string, number>> = {
   },
 };
 
-// --- mV/A/m voltage drop values per AS/NZS 3008.1.1 Table 40/42 ---
-// Keys: `${material}-${phase}` for PVC cables
+// --- Voltage drop (mV/A·m) computed the same way AS/NZS 3008.1.1 derives
+// Tables 40-51: conductor resistance at operating temperature plus cable
+// reactance. The previous hand-typed tables ignored reactance, which made
+// large cables (≥120mm²) read up to 21% LOW — a compliance risk on submains.
+//
+// R20 values are the standard conductor resistances (IEC 60228 / AS 1125).
+export const R20_OHM_PER_KM: Record<CableMaterial, Record<string, number>> = {
+  copper: {
+    "1": 18.1, "1.5": 12.1, "2.5": 7.41, "4": 4.61, "6": 3.08, "10": 1.83,
+    "16": 1.15, "25": 0.727, "35": 0.524, "50": 0.387, "70": 0.268,
+    "95": 0.193, "120": 0.153, "150": 0.124, "185": 0.0991, "240": 0.0754,
+  },
+  aluminium: {
+    "16": 1.91, "25": 1.20, "35": 0.868, "50": 0.641, "70": 0.443,
+    "95": 0.320, "120": 0.253, "150": 0.206, "185": 0.164, "240": 0.125,
+  },
+};
+
+// Typical multicore cable reactance (Ω/km) — near-constant across sizes
+const REACTANCE_OHM_PER_KM = 0.08;
+
+// mV/A·m for a run: single-phase = 2·Zc, three-phase = √3·Zc, DC = 2·R.
+// conductorTempC should be the insulation's operating temperature
+// (75 for V-75, 90 for XLPE/V-90) — resistance rises ~6% from 75→90°C.
+export function mvPerAm(
+  material: CableMaterial,
+  size: string,
+  system: SystemType,
+  phase?: PhaseType,
+  conductorTempC = 75,
+): number | null {
+  const r20 = R20_OHM_PER_KM[material]?.[size];
+  if (!r20) return null;
+  const alpha = material === "copper" ? 0.00393 : 0.00403;
+  const r = r20 * (1 + alpha * (conductorTempC - 20));
+  if (system === "dc") return 2 * r;
+  const z = Math.sqrt(r * r + REACTANCE_OHM_PER_KM * REACTANCE_OHM_PER_KM);
+  return phase === "three" ? Math.sqrt(3) * z : 2 * z;
+}
+
+// Backwards-compatible lookup tables, generated at 75°C conductor temperature.
+// Prefer calling mvPerAm() directly with the cable's real operating temp.
+function buildMvTable(material: CableMaterial, system: SystemType, phase?: PhaseType): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const size of Object.keys(R20_OHM_PER_KM[material])) {
+    const v = mvPerAm(material, size, system, phase, 75);
+    if (v !== null) out[size] = Math.round(v * 1000) / 1000;
+  }
+  return out;
+}
+
 export const MV_PER_AM: Record<string, Record<string, number>> = {
-  "copper-single-ac": {
-    "1": 44, "1.5": 29, "2.5": 18, "4": 11, "6": 7.3, "10": 4.4, "16": 2.8,
-    "25": 1.75, "35": 1.25, "50": 0.93, "70": 0.63, "95": 0.47, "120": 0.37,
-    "150": 0.30, "185": 0.25, "240": 0.19,
-  },
-  "copper-three-ac": {
-    "1": 38, "1.5": 25, "2.5": 15.5, "4": 9.5, "6": 6.4, "10": 3.8, "16": 2.4,
-    "25": 1.5, "35": 1.1, "50": 0.81, "70": 0.55, "95": 0.41, "120": 0.32,
-    "150": 0.26, "185": 0.22, "240": 0.165,
-  },
-  "aluminium-single-ac": {
-    "16": 4.6, "25": 2.85, "35": 2.05, "50": 1.5, "70": 1.05,
-    "95": 0.77, "120": 0.61, "150": 0.50, "185": 0.41, "240": 0.315,
-  },
-  "aluminium-three-ac": {
-    "16": 4.0, "25": 2.5, "35": 1.8, "50": 1.3, "70": 0.91,
-    "95": 0.67, "120": 0.53, "150": 0.43, "185": 0.35, "240": 0.27,
-  },
-  // DC uses same resistive values as single-phase (no reactance component)
-  "copper-dc": {
-    "1": 44, "1.5": 29, "2.5": 18, "4": 11, "6": 7.3, "10": 4.4, "16": 2.8,
-    "25": 1.75, "35": 1.25, "50": 0.93, "70": 0.63, "95": 0.47, "120": 0.37,
-    "150": 0.30, "185": 0.25, "240": 0.19,
-  },
-  "aluminium-dc": {
-    "16": 4.6, "25": 2.85, "35": 2.05, "50": 1.5, "70": 1.05,
-    "95": 0.77, "120": 0.61, "150": 0.50, "185": 0.41, "240": 0.315,
-  },
+  "copper-single-ac": buildMvTable("copper", "ac", "single"),
+  "copper-three-ac": buildMvTable("copper", "ac", "three"),
+  "aluminium-single-ac": buildMvTable("aluminium", "ac", "single"),
+  "aluminium-three-ac": buildMvTable("aluminium", "ac", "three"),
+  "copper-dc": buildMvTable("copper", "dc"),
+  "aluminium-dc": buildMvTable("aluminium", "dc"),
 };
 
-// --- Temperature derating factors (AS/NZS 3008 Table 27) ---
-export const TEMP_DERATING_PVC: Record<string, number> = {
-  "25": 1.10, "30": 1.04, "35": 1.0, "40": 0.94, "45": 0.87, "50": 0.79, "55": 0.71, "60": 0.61,
-};
+// --- Temperature derating factors (AS/NZS 3008 Table 27a method) ---
+// Derived as √((Top − Tambient) / (Top − 40)) — the air tables in AS/NZS
+// 3008.1.1 are based on 40°C ambient air, not 35°C as previously coded
+// (the old tables under-derated PVC at 40°C+ and were optimistic for XLPE).
+function tempFactor(operatingTemp: number, ambient: number): number {
+  const f = Math.sqrt((operatingTemp - ambient) / (operatingTemp - 40));
+  return Math.round(f * 100) / 100;
+}
 
-export const TEMP_DERATING_XLPE: Record<string, number> = {
-  "25": 1.07, "30": 1.04, "35": 1.02, "40": 1.0, "45": 0.96, "50": 0.93, "55": 0.89, "60": 0.84, "65": 0.79, "70": 0.73,
-};
+function buildTempTable(operatingTemp: number, ambients: number[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const a of ambients) out[String(a)] = tempFactor(operatingTemp, a);
+  return out;
+}
+
+export const TEMP_DERATING_PVC: Record<string, number> =
+  buildTempTable(75, [25, 30, 35, 40, 45, 50, 55, 60]);
+
+export const TEMP_DERATING_XLPE: Record<string, number> =
+  buildTempTable(90, [25, 30, 35, 40, 45, 50, 55, 60, 65, 70]);
 
 // --- Installation method derating (AS/NZS 3008 Tables 22-25) ---
 export interface InstallMethod {
@@ -252,10 +291,18 @@ export const CONDUIT_FILL_RATIOS: Record<string, { label: string; ratio: number 
 
 // --- Utility functions ---
 export function getTempDerating(insulation: string, temp: string): number {
+  if (insulation.includes("Mineral")) return 1.0; // MICC unaffected at these ambients
   if (insulation.includes("XLPE") || insulation.includes("90°C") || insulation.includes("Cross-linked")) {
     return TEMP_DERATING_XLPE[temp] ?? 1.0;
   }
   return TEMP_DERATING_PVC[temp] ?? 1.0;
+}
+
+// Conductor operating temperature for voltage drop — capped at 90°C (MICC's
+// 250°C sheath rating is not a normal conductor operating temperature).
+export function conductorTempFor(cableMaxTemp: number | undefined): number {
+  const t = cableMaxTemp ?? 75;
+  return Math.min(t, 90);
 }
 
 export function getGroupingDerating(circuits: number): number {
