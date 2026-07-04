@@ -7,9 +7,9 @@ import ToolLayout from "./ToolLayout";
 import ResultRow from "./ResultRow";
 import {
   SystemType, PhaseType, CableMaterial,
-  CABLE_TYPES, CURRENT_CAPACITY, MV_PER_AM,
+  CABLE_TYPES, CURRENT_CAPACITY,
   INSTALL_METHODS, AC_VOLTAGES, DC_VOLTAGES,
-  getTempDerating, getGroupingDerating, getMvKey,
+  getTempDerating, getGroupingDerating, mvPerAm, conductorTempFor,
   getCapacityKey, getAvailableSizes,
   TEMP_DERATING_PVC, TEMP_DERATING_XLPE,
 } from "./electricalData";
@@ -104,9 +104,8 @@ const VoltageDropTool = ({ onBack }: Props) => {
       }
     }
 
-    const mvKey = getMvKey(material, system, phase);
-    const mvTable = MV_PER_AM[mvKey] || {};
-    const mv = mvTable[cableSize];
+    const conductorTemp = conductorTempFor(ct?.maxTemp);
+    const mv = mvPerAm(material, cableSize, system, phase, conductorTemp);
     if (!mv) return;
 
     const vdVolts = (mv * I * L) / 1000;
@@ -135,7 +134,7 @@ const VoltageDropTool = ({ onBack }: Props) => {
     let recommendedSize: string | null = null;
     if (vdPercent > 5 || !capacityOk) {
       for (const size of availableSizes) {
-        const testMv = mvTable[size];
+        const testMv = mvPerAm(material, size, system, phase, conductorTemp);
         if (!testMv) continue;
         const testVd = ((testMv * I * L) / 1000 / V) * 100;
         const testCap = CURRENT_CAPACITY[getCapacityKey(cableType, material)]?.[size];

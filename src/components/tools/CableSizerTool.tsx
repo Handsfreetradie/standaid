@@ -7,9 +7,9 @@ import ToolLayout from "./ToolLayout";
 import ResultRow from "./ResultRow";
 import {
   SystemType, PhaseType, CableMaterial,
-  CABLE_TYPES, CURRENT_CAPACITY, MV_PER_AM,
+  CABLE_TYPES, CURRENT_CAPACITY,
   INSTALL_METHODS, AC_VOLTAGES, DC_VOLTAGES,
-  getTempDerating, getGroupingDerating, getMvKey,
+  getTempDerating, getGroupingDerating, mvPerAm, conductorTempFor,
   getCapacityKey, getAvailableSizes,
   TEMP_DERATING_PVC, TEMP_DERATING_XLPE,
 } from "./electricalData";
@@ -97,8 +97,12 @@ const CableSizerTool = ({ onBack }: Props) => {
     const groupFactor = getGroupingDerating(parseInt(circuits) || 1);
     const totalDerating = tempFactor * installFactor * groupFactor;
 
-    const mvKey = getMvKey(material, system, phase);
-    const mvTable = MV_PER_AM[mvKey] || {};
+    const conductorTemp = conductorTempFor(ct?.maxTemp);
+    const mvTable: Record<string, number> = {};
+    for (const size of availableSizes) {
+      const v = mvPerAm(material, size, system, phase, conductorTemp);
+      if (v !== null) mvTable[size] = v;
+    }
     const capKey = getCapacityKey(cableType, material);
     const capTable = CURRENT_CAPACITY[capKey] || {};
 
