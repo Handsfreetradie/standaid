@@ -6,9 +6,44 @@ type StandardChunk = {
   content: string;
   clause_number: string | null;
   clause_title: string | null;
+  chunk_index?: number;
 };
 
-const FIGURE_PLACEHOLDER = "A full description will be generated shortly";
+// Matches both placeholder wordings the pipeline has used over time
+const FIGURE_PLACEHOLDER = "description will be generated shortly";
+
+// Unbiased in-place shuffle — Math.random()-0.5 in sort() is biased and was
+// making "random" question selection lean heavily on insertion order.
+function shuffle<T>(arr: T[]): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+// The AI sometimes returns correct_answer as a letter ("B") or slightly
+// reworded text. The frontend compares option text exactly, so any mismatch
+// makes a question impossible to answer correctly. Normalise to the exact
+// option text, or drop the question rather than serve a broken one.
+function normaliseQuestions(raw: any[]): any[] {
+  const letters = ["A", "B", "C", "D"];
+  return (raw || []).flatMap((q: any) => {
+    if (!q?.question || !Array.isArray(q.options) || q.options.length !== 4) return [];
+    let ca = (q.correct_answer ?? "").toString().trim();
+    if (!q.options.includes(ca)) {
+      const letterIdx = letters.indexOf(ca.toUpperCase().replace(/[).:\s]/g, ""));
+      const caLower = ca.toLowerCase();
+      const match =
+        (letterIdx >= 0 ? q.options[letterIdx] : undefined) ??
+        q.options.find((o: string) => o.toLowerCase().trim() === caLower) ??
+        q.options.find((o: string) => o.toLowerCase().includes(caLower) || caLower.includes(o.toLowerCase().trim()));
+      if (!match) return [];
+      ca = match;
+    }
+    return [{ ...q, correct_answer: ca }];
+  });
+}
 
 async function fetchStandardChunks(
   supabase: any,
@@ -17,13 +52,15 @@ async function fetchStandardChunks(
   topic?: string,
   sectionFilter?: string,
 ): Promise<StandardChunk[]> {
-  // Fetch a larger pool so topic filtering has something to work with
-  const poolSize = topic ? Math.max(limit * 10, 300) : limit;
+  // Always fetch a large pool and sample from it — taking the first N chunks
+  // meant every quiz was generated from the front of the standard (scope and
+  // definitions) and never reached earthing, testing, or the appendices.
+  const poolSize = Math.max(limit * 10, 300);
 
   const buildQuery = (indexed: boolean) => {
     let q = supabase
       .from("standard_chunks")
-      .select("content, clause_number, clause_title")
+      .select("content, clause_number, clause_title, chunk_index")
       .eq("standard_id", standardId)
       .order("chunk_index", { ascending: true })
       .limit(poolSize);
@@ -47,24 +84,38 @@ async function fetchStandardChunks(
     chunks = fallbackChunks;
   }
 
+  // Drop chunks with no substance for question generation: bare headings and
+  // figure placeholders make for empty or misleading questions.
+  const usable = ((chunks || []) as StandardChunk[]).filter((c) => {
+    const content = c.content || "";
+    if (content.length < 150) return false;
+    if (content.toLowerCase().includes(FIGURE_PLACEHOLDER.toLowerCase())) return false;
+    return true;
+  });
+
   // If a topic is given, score by keyword relevance and take the top N
-  if (topic && chunks?.length) {
+  if (topic && usable.length) {
     const words = topic.toLowerCase().split(/[\s,\/\-]+/).filter((w) => w.length > 3);
     if (words.length > 0) {
-      const scored = (chunks as StandardChunk[]).map((c) => {
+      const scored = usable.map((c) => {
         const hay = ((c.content || "") + " " + (c.clause_title || "")).toLowerCase();
         const score = words.reduce((acc, w) => acc + (hay.includes(w) ? 1 : 0), 0);
         return { chunk: c, score };
       });
       const relevant = scored.filter((s) => s.score > 0).sort((a, b) => b.score - a.score);
-      // Use topic-relevant chunks if we have enough; otherwise fall back to first N
+      // Use topic-relevant chunks if we have enough; otherwise fall back to sampling
       if (relevant.length >= Math.min(limit, 5)) {
         return relevant.slice(0, limit).map((s) => s.chunk);
       }
     }
   }
 
-  return (chunks || []).slice(0, limit);
+  // No topic (or not enough topical matches): random sample across the whole
+  // pool so questions cover the full standard, not just its opening pages —
+  // then restore document order so study guides and prompts read coherently.
+  return shuffle(usable)
+    .slice(0, limit)
+    .sort((a, b) => (a.chunk_index ?? 0) - (b.chunk_index ?? 0));
 }
 
 // Fetch described figure chunks (those that have been processed by describe-figures)
@@ -313,7 +364,8 @@ serve(async (req) => {
       const aiData = await aiResponse.json();
       const input = getToolInput(aiData);
       if (!input) throw new Error("No questions generated");
-      const { questions } = input;
+      const questions = normaliseQuestions(input.questions);
+      if (!questions.length) throw new Error("No valid questions generated. Please try again.");
 
       const inserts = questions.map((q: any) => ({
         user_id: user.id, standard_id: standardId, question: q.question, options: q.options,
@@ -525,6 +577,9 @@ Rules:
         const genData = await genResponse.json();
         const genInput = getToolInput(genData);
         if (genInput?.questions?.length) {
+          genInput.questions = normaliseQuestions(genInput.questions);
+        }
+        if (genInput?.questions?.length) {
           const inserts = genInput.questions.map((q: any) => ({
             user_id: user.id, standard_id: standardId, question: q.question, options: q.options,
             correct_answer: q.correct_answer, explanation: q.explanation, clause_reference: q.clause_reference,
@@ -538,7 +593,7 @@ Rules:
 
       if (!existingQuestions?.length) throw new Error("Failed to generate questions. Please try again.");
 
-      const shuffled = existingQuestions.sort(() => Math.random() - 0.5).slice(0, count);
+      const shuffled = shuffle([...existingQuestions]).slice(0, count);
 
       const { data: exam, error: examErr } = await supabase.from("capstone_exams").insert({
         user_id: user.id, title: "Mock Exam", total_questions: shuffled.length,
@@ -568,9 +623,25 @@ Rules:
 
       const isCorrect = userAnswer === question.correct_answer;
 
-      await supabase.from("capstone_exam_answers").insert({
-        exam_id: examId, question_id: questionId, user_answer: userAnswer, is_correct: isCorrect,
-      });
+      // Idempotent: a double-tap must update the existing answer, not insert a
+      // duplicate row that inflates the exam total and skews the score.
+      const { data: existingAns } = await supabase
+        .from("capstone_exam_answers")
+        .select("id")
+        .eq("exam_id", examId)
+        .eq("question_id", questionId)
+        .limit(1)
+        .maybeSingle();
+
+      if (existingAns) {
+        await supabase.from("capstone_exam_answers")
+          .update({ user_answer: userAnswer, is_correct: isCorrect })
+          .eq("id", existingAns.id);
+      } else {
+        await supabase.from("capstone_exam_answers").insert({
+          exam_id: examId, question_id: questionId, user_answer: userAnswer, is_correct: isCorrect,
+        });
+      }
 
       return new Response(JSON.stringify({ is_correct: isCorrect, correct_answer: question.correct_answer, explanation: question.explanation, clause_reference: question.clause_reference }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -744,6 +815,7 @@ Rules:
       const aiData = await aiResponse.json();
       const result = getToolInput(aiData);
       if (!result) throw new Error("No exam prep generated");
+      result.questions = normaliseQuestions(result.questions);
 
       const { data: guide } = await supabase.from("capstone_study_guides").insert({
         user_id: user.id, standard_id: standardId || null,

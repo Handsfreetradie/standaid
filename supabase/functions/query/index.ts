@@ -76,8 +76,12 @@ serve(async (req) => {
 
     const [profileResult, countResult] = await Promise.all([
       supabase.from("profiles").select("*").eq("user_id", userId).single(),
+      // Exclude the exam helper's cached clause explanations (stored in this
+      // table with an "explain_<uuid>" question) — they must not eat into the
+      // user's daily chat query limit.
       supabase.from("queries").select("*", { count: "exact", head: true })
-        .eq("user_id", userId).gte("created_at", startOfToday.toISOString()),
+        .eq("user_id", userId).gte("created_at", startOfToday.toISOString())
+        .not("question", "like", "explain\\_%"),
     ]);
 
     const profile = profileResult.data;

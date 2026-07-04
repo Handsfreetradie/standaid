@@ -106,6 +106,7 @@ export function useQueries() {
         .from("queries")
         .select("*")
         .eq("user_id", user.id)
+        .not("question", "like", "explain\\_%") // hide exam-helper explanation cache rows
         .order("created_at", { ascending: false })
         .limit(20);
       if (error) throw error;

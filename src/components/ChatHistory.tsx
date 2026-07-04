@@ -50,6 +50,7 @@ export function ChatHistory({ open, onOpenChange, onSelect }: ChatHistoryProps) 
       const { data, error } = await supabase
         .from("queries")
         .select("id, question, response, citations, safety_flagged, created_at")
+        .not("question", "like", "explain\\_%") // hide exam-helper explanation cache rows
         .order("created_at", { ascending: false })
         .limit(10);
 
