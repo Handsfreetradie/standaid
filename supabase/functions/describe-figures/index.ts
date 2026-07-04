@@ -1,8 +1,43 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 import { getAllowedOrigin } from "../_shared/cors.ts";
 
 const TIME_BUDGET_MS = 85_000;
+// Global ceiling on figures described per standard, enforced across
+// self-retriggers — covers real standards (AS/NZS 3000 has ~124 figures)
+// while capping a pathological/crafted document from driving unbounded
+// Opus vision spend.
+const MAX_FIGURES_PER_STANDARD = 200;
+
+// Convert bytes to base64 in fixed slices. Spreading a whole file into
+// String.fromCharCode(...bytes) overflows the call stack above ~125KB, which
+// crashed this function on every real (multi-MB) standard.
+function toBase64(bytes: Uint8Array): string {
+  const SLICE = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += SLICE) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + SLICE) as unknown as number[]);
+  }
+  return btoa(binary);
+}
+
+// Extract a single page as its own small PDF so each vision call carries one
+// page (~tens of KB) instead of re-uploading the entire multi-MB document per
+// figure — fixes both the crash and the per-figure cost blowout.
+async function extractPageBase64(srcDoc: PDFDocument, pageNumber: number): Promise<string | null> {
+  try {
+    const total = srcDoc.getPageCount();
+    const idx = Math.min(Math.max(pageNumber - 1, 0), total - 1);
+    const out = await PDFDocument.create();
+    const [pg] = await out.copyPages(srcDoc, [idx]);
+    out.addPage(pg);
+    return toBase64(await out.save());
+  } catch (e) {
+    console.warn(`Could not extract page ${pageNumber}:`, e);
+    return null;
+  }
+}
 
 serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
@@ -100,15 +135,22 @@ serve(async (req) => {
     const fileBytes = new Uint8Array(await fileData.arrayBuffer());
     console.log(`[describe-figures] Downloaded PDF: ${fileBytes.length} bytes`);
 
-    // Convert PDF to base64 for Claude
-    const base64Pdf = btoa(String.fromCharCode(...fileBytes));
-    console.log(`[describe-figures] Converted PDF to base64: ${base64Pdf.length} chars`);
+    // Load once; each figure gets only its own page sent to the vision model.
+    let srcDoc: PDFDocument;
+    try {
+      srcDoc = await PDFDocument.load(fileBytes, { ignoreEncryption: true });
+    } catch (e) {
+      console.error("[describe-figures] pdf-lib could not load document:", e);
+      return new Response(JSON.stringify({ error: "Could not read PDF" }), {
+        status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const t0 = Date.now();
     let described = 0;
 
     try {
-      for (const chunk of figureChunks) {
+      for (const chunk of figureChunks.slice(0, MAX_FIGURES_PER_STANDARD)) {
         // Check time budget before each figure
         if (Date.now() - t0 > TIME_BUDGET_MS) {
           console.log(`[describe-figures] Time budget reached after ${described} figures, will retrigger`);
@@ -119,6 +161,13 @@ serve(async (req) => {
           const figureNumber = chunk.clause_number.replace(/^FIGURE\s+/i, "").trim();
           const caption = chunk.clause_title || "";
           const page = chunk.page_number || 1;
+
+          // Send only the figure's page — not the whole document
+          const pageBase64 = await extractPageBase64(srcDoc, page);
+          if (!pageBase64) {
+            console.warn(`Figure ${figureNumber}: could not isolate page ${page}, skipping`);
+            continue;
+          }
 
           const prompt =
             `You are helping Australian tradies understand AS/NZS 3000:2018 Wiring Rules diagrams.\n\n` +
@@ -139,7 +188,7 @@ serve(async (req) => {
                 {
                   role: "user",
                   content: [
-                    { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64Pdf } },
+                    { type: "document", source: { type: "base64", media_type: "application/pdf", data: pageBase64 } },
                     { type: "text", text: prompt },
                   ],
                 },
@@ -199,14 +248,25 @@ serve(async (req) => {
       .like("clause_number", "FIGURE%")
       .eq("is_indexed", false);
 
-    if ((remaining || 0) > 0) {
-      // More figures to describe — retrigger self
+    // How many figures have already been described for this standard — the
+    // global ceiling that survives across self-retriggers.
+    const { count: totalDescribed } = await supabaseAdmin
+      .from("standard_chunks")
+      .select("*", { count: "exact", head: true })
+      .eq("standard_id", standard_id)
+      .like("clause_number", "FIGURE%")
+      .eq("is_indexed", true);
+
+    if ((remaining || 0) > 0 && (totalDescribed || 0) < MAX_FIGURES_PER_STANDARD) {
+      // More figures to describe and still under the ceiling — retrigger self
       console.log(`[describe-figures] ${remaining} figures remaining, retriggering`);
       fetch(`${baseUrl}/functions/v1/describe-figures`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceRoleKey}` },
         body: JSON.stringify({ standard_id, user_id }),
       }).catch(e => console.error("Failed to retrigger describe-figures:", e));
+    } else if ((remaining || 0) > 0) {
+      console.warn(`[describe-figures] Reached ${MAX_FIGURES_PER_STANDARD}-figure ceiling for ${standard_id}; ${remaining} left undescribed`);
     }
 
     if (described > 0) {

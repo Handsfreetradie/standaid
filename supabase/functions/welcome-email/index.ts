@@ -152,13 +152,21 @@ serve(async (req) => {
   }
 
   try {
+    // Fail-closed auth: this endpoint sends email and can enumerate user IDs,
+    // so it must never run unauthenticated. The public anon key (which the DB
+    // trigger carries as its Bearer token, and which ships in the frontend) is
+    // NOT sufficient — we require a shared secret that only the DB trigger and
+    // this function know.
     const webhookSecret = Deno.env.get("WELCOME_EMAIL_WEBHOOK_SECRET");
-    if (webhookSecret) {
-      const incomingSecret = req.headers.get("x-webhook-secret");
-      if (incomingSecret !== webhookSecret) {
-        console.error("[welcome-email] Invalid webhook secret");
-        return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
-      }
+    if (!webhookSecret) {
+      // No secret configured → refuse rather than allow anonymous sends.
+      console.error("[welcome-email] WELCOME_EMAIL_WEBHOOK_SECRET not set — refusing");
+      return new Response(JSON.stringify({ error: "Service not configured" }), { status: 503 });
+    }
+    const incomingSecret = req.headers.get("x-webhook-secret");
+    if (incomingSecret !== webhookSecret) {
+      console.error("[welcome-email] Invalid or missing webhook secret");
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
     }
 
     const payload = await req.json();

@@ -70,38 +70,40 @@ serve(async (req) => {
       });
     }
 
-    // Phase 1: profile + rate limit check in parallel (fast DB queries)
-    const startOfToday = new Date();
-    startOfToday.setUTCHours(0, 0, 0, 0);
-
-    const [profileResult, countResult] = await Promise.all([
-      supabase.from("profiles").select("*").eq("user_id", userId).single(),
-      // Exclude the exam helper's cached clause explanations (stored in this
-      // table with an "explain_<uuid>" question) — they must not eat into the
-      // user's daily chat query limit.
-      supabase.from("queries").select("*", { count: "exact", head: true })
-        .eq("user_id", userId).gte("created_at", startOfToday.toISOString())
-        .not("question", "like", "explain\\_%"),
-    ]);
-
-    const profile = profileResult.data;
+    // Phase 1: profile lookup, then an atomic rate-limit gate.
+    const { data: profile } = await supabase.from("profiles").select("*").eq("user_id", userId).single();
     const tier = profile?.subscription_tier || "free"; // least privilege — a missing profile must never grant pro
-    const todayCount = countResult.count ?? 0;
 
-    if (tier === "free" && todayCount >= 5) {
-      return new Response(JSON.stringify({ error: "You've reached your daily limit of 5 queries. Upgrade to Pro for unlimited queries." }), {
+    // Free: 5/day. Pro/business: 200/day fair-use ceiling (stops a runaway
+    // client loop or abused account burning unbounded AI spend).
+    const maxQueries = tier === "free" ? 5 : 200;
+
+    // Atomic count-and-record under an advisory lock — concurrent requests
+    // cannot race past the cap. Returns the usage count including this request,
+    // or -1 if over the limit. 24h rolling window.
+    const { data: usedRaw, error: rlError } = await supabase.rpc("check_and_record_ai_usage", {
+      p_user_id: userId,
+      p_kind: "query",
+      p_max: maxQueries,
+      p_window_seconds: 86400,
+    });
+    if (rlError) {
+      console.error("[query] rate-limit RPC failed:", rlError);
+      return new Response(JSON.stringify({ error: "Service temporarily unavailable" }), {
+        status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const used = typeof usedRaw === "number" ? usedRaw : 0;
+    if (used < 0) {
+      const msg = tier === "free"
+        ? "You've reached your daily limit of 5 queries. Upgrade to Pro for unlimited queries."
+        : "You've hit today's fair-use limit. Your quota resets in 24 hours — if you're hitting this genuinely, get in touch.";
+      return new Response(JSON.stringify({ error: msg }), {
         status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
-    // Fair-use ceiling for paid tiers — far above any genuine daily usage, but
-    // stops a runaway client loop or abused account burning unbounded AI spend.
-    const PRO_DAILY_CAP = 200;
-    if (tier !== "free" && todayCount >= PRO_DAILY_CAP) {
-      return new Response(JSON.stringify({ error: "You've hit today's fair-use limit. Your quota resets at midnight UTC — if you're hitting this genuinely, get in touch." }), {
-        status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    // Usage count including this request (drives queries_remaining below)
+    const todayCount = used;
 
     // Build retrieval query with conversation context
     const history: Array<{ role: string; content: string }> = Array.isArray(conversation_history)
@@ -130,7 +132,13 @@ serve(async (req) => {
     const clauseNumberMatches = effectiveQuestion.match(/\b[A-Za-z]?\d+(?:\.\d+){1,4}\b/g) || [];
 
     // Server-side keyword search: top 5 keywords via ilike (much faster than loading 2000 chunks)
-    const topKeywords = keywords.slice(0, 5).filter((kw: string) => kw.length > 2);
+    // Strip PostgREST filter metacharacters ( , ) . * : " and % so a keyword
+    // can't break out of the .or() filter string or inject extra conditions.
+    const sanitizeKw = (kw: string) => kw.replace(/[(),.*:"%\\]/g, " ").trim();
+    const topKeywords = keywords
+      .slice(0, 5)
+      .map(sanitizeKw)
+      .filter((kw: string) => kw.length > 2);
     const ilikeParts = topKeywords.length > 0
       ? topKeywords.map((kw: string) => `content.ilike.%${kw}%`).join(",")
       : null;
@@ -317,7 +325,7 @@ ${chunk.content}`;
         safety_critical: false,
         confidence: "low",
         low_confidence: true,
-        queries_remaining: tier === "free" ? 5 - todayCount : null,
+        queries_remaining: tier === "free" ? Math.max(0, maxQueries - todayCount) : null,
       };
       return new Response(
         `data: ${JSON.stringify(noChunksPayload)}\n\n`,
@@ -768,7 +776,7 @@ User's question/context: ${effectiveQuestion}` : "";
           done: true,
           ...parsedResponse,
           low_confidence: isLowConfidence,
-          queries_remaining: tier === "free" ? 5 - todayCount - 1 : null,
+          queries_remaining: tier === "free" ? Math.max(0, maxQueries - todayCount) : null,
           queryId,
           confidence_score: validation.confidenceScore,
           needs_review: validation.needsReview,

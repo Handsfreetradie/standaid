@@ -275,9 +275,17 @@ serve(async (req) => {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) throw new Error("Unauthorized");
 
-    const { action, standardId, topic, difficulty, questionCount, examId, questionId, userAnswer, imageBase64, chunkId, examTopics, examPdfText, sectionFilter, userClauseRef, modelAnswer, correctClause, questionText } = await req.json();
+    const { action, standardId, topic, difficulty, questionCount, examId, questionId, userAnswer, imageBase64, chunkId, examTopics, examPdfText, sectionFilter: rawSectionFilter, userClauseRef, modelAnswer, correctClause, questionText } = await req.json();
     const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
     if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
+
+    // sectionFilter is interpolated into PostgREST .or() filter strings, so it
+    // must be a bare section/clause number (e.g. "3", "8.3.1"). Reject anything
+    // else rather than let filter metacharacters through.
+    const sectionFilter: string | undefined =
+      typeof rawSectionFilter === "string" && /^[A-Za-z]?\d+(\.\d+)*$/.test(rawSectionFilter.trim())
+        ? rawSectionFilter.trim()
+        : undefined;
 
     const aiError = async (res: Response): Promise<Response> => {
       const body = await res.json().catch(() => null);
@@ -289,16 +297,24 @@ serve(async (req) => {
     };
 
     // ── RATE LIMIT: 20 AI calls per hour per user (applies to AI actions only) ──
+    // Atomic: the RPC records usage under an advisory lock, so concurrent
+    // requests can't race past the cap. Recorded at the gate (not post-call),
+    // so this replaces the old scattered capstone_usage inserts.
     const AI_ACTIONS = ["generate_questions", "analyze_photo", "explain_chunk", "generate_study_guide", "generate_short_answer", "generate_calculation", "grade_calculation", "grade_short_answer", "exam_prep"];
     if (AI_ACTIONS.includes(action)) {
-      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-      const { count: usageCount } = await supabase
-        .from("capstone_usage")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", user.id)
-        .gte("created_at", oneHourAgo);
-
-      if ((usageCount || 0) >= 20) {
+      const { data: used, error: rlError } = await supabase.rpc("check_and_record_ai_usage", {
+        p_user_id: user.id,
+        p_kind: "capstone",
+        p_max: 20,
+        p_window_seconds: 3600,
+      });
+      if (rlError) {
+        console.error("[capstone] rate-limit RPC failed:", rlError);
+        return new Response(JSON.stringify({ error: "Service temporarily unavailable" }), {
+          status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (typeof used === "number" && used < 0) {
         return new Response(JSON.stringify({
           error: "Hourly limit reached. You can make 20 AI requests per hour. Please try again later.",
         }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -375,8 +391,6 @@ serve(async (req) => {
 
       const { data: saved, error: saveErr } = await supabase.from("capstone_questions").insert(inserts).select();
       if (saveErr) throw saveErr;
-
-      try { await supabase.from("capstone_usage").insert({ user_id: user.id }); } catch (_) {}
       return new Response(JSON.stringify({ questions: saved }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -439,8 +453,6 @@ Max 4 bullet points. Be direct and honest about what is correct vs what needs wo
       const aiData = await aiResponse.json();
       const analysis = getText(aiData);
       if (!analysis) throw new Error("No analysis generated");
-
-      try { await supabase.from("capstone_usage").insert({ user_id: user.id }); } catch (_) {}
       return new Response(JSON.stringify({ analysis }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -507,8 +519,6 @@ Rules:
       if (cacheInsertError) {
         console.warn("Failed to cache explanation:", cacheInsertError.message);
       }
-
-      try { await supabase.from("capstone_usage").insert({ user_id: user.id }); } catch (_) {}
       return new Response(JSON.stringify({ explanation, cached: false }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -588,7 +598,6 @@ Rules:
           const { data: newQ } = await supabase.from("capstone_questions").insert(inserts).select();
           existingQuestions = [...(existingQuestions || []), ...(newQ || [])];
         }
-        try { await supabase.from("capstone_usage").insert({ user_id: user.id }); } catch (_) {}
       }
 
       if (!existingQuestions?.length) throw new Error("Failed to generate questions. Please try again.");
@@ -623,25 +632,15 @@ Rules:
 
       const isCorrect = userAnswer === question.correct_answer;
 
-      // Idempotent: a double-tap must update the existing answer, not insert a
-      // duplicate row that inflates the exam total and skews the score.
-      const { data: existingAns } = await supabase
+      // Idempotent via the (exam_id, question_id) unique constraint — a
+      // double-tap updates the existing answer instead of inserting a
+      // duplicate that would inflate the exam total and skew the score.
+      await supabase
         .from("capstone_exam_answers")
-        .select("id")
-        .eq("exam_id", examId)
-        .eq("question_id", questionId)
-        .limit(1)
-        .maybeSingle();
-
-      if (existingAns) {
-        await supabase.from("capstone_exam_answers")
-          .update({ user_answer: userAnswer, is_correct: isCorrect })
-          .eq("id", existingAns.id);
-      } else {
-        await supabase.from("capstone_exam_answers").insert({
-          exam_id: examId, question_id: questionId, user_answer: userAnswer, is_correct: isCorrect,
-        });
-      }
+        .upsert(
+          { exam_id: examId, question_id: questionId, user_answer: userAnswer, is_correct: isCorrect },
+          { onConflict: "exam_id,question_id" },
+        );
 
       return new Response(JSON.stringify({ is_correct: isCorrect, correct_answer: question.correct_answer, explanation: question.explanation, clause_reference: question.clause_reference }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -708,8 +707,6 @@ Rules:
         content, topics: topic ? [topic] : sectionFilter ? [`Section ${sectionFilter}`] : [],
       }).select().single();
       if (guideErr) throw guideErr;
-
-      try { await supabase.from("capstone_usage").insert({ user_id: user.id }); } catch (_) {}
       return new Response(JSON.stringify({ guide }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -921,8 +918,6 @@ Use realistic Australian values. Show clear step-by-step working in the model so
       const aiData = await aiResponse.json();
       const question = getToolInput(aiData);
       if (!question) throw new Error("No calculation generated");
-
-      try { await supabase.from("capstone_usage").insert({ user_id: user.id }); } catch (_) {}
       return new Response(JSON.stringify({ question }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -1042,8 +1037,6 @@ CRITICAL: Never mention any clause number in the question text itself. Clause nu
       const input = getToolInput(aiData);
       if (!input) throw new Error("No questions generated");
       const { questions } = input;
-
-      try { await supabase.from("capstone_usage").insert({ user_id: user.id }); } catch (_) {}
       return new Response(JSON.stringify({ questions: questions.map((q: any) => ({ ...q, marks: 2 })) }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
