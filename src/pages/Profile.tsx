@@ -210,8 +210,8 @@ const Profile = () => {
                       </div>
                       <p className="text-xs text-muted-foreground leading-relaxed">
                         To manage or cancel your subscription, contact us at{" "}
-                        <a href="mailto:support@standaid.com.au" className="text-primary underline">
-                          support@standaid.com.au
+                        <a href="mailto:hello@standaid.ai" className="text-primary underline">
+                          hello@standaid.ai
                         </a>
                       </p>
                       {!isPro && (
@@ -313,20 +313,31 @@ const Profile = () => {
                       <div className="rounded-lg bg-muted/50 p-3 space-y-2">
                         <p className="text-xs font-medium text-foreground">Contact us</p>
                         <a
-                          href="mailto:support@standaid.com.au"
+                          href="mailto:hello@standaid.ai"
                           className="flex items-center gap-2 text-xs text-primary hover:underline"
                         >
                           <Mail className="h-3.5 w-3.5" />
-                          support@standaid.com.au
+                          hello@standaid.ai
                         </a>
                         <a
-                          href="https://github.com/Handsfreetradie/standaid/issues"
-                          target="_blank"
-                          rel="noopener noreferrer"
+                          href="mailto:hello@standaid.ai?subject=Bug%20report"
                           className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
                         >
                           <ExternalLink className="h-3.5 w-3.5" />
-                          Report a bug on GitHub
+                          Report a bug
+                        </a>
+                      </div>
+
+                      {/* Legal */}
+                      <div className="rounded-lg bg-muted/50 p-3 space-y-2">
+                        <p className="text-xs font-medium text-foreground">Legal</p>
+                        <a href="/terms" className="flex items-center gap-2 text-xs text-primary hover:underline">
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          Terms of Service
+                        </a>
+                        <a href="/privacy" className="flex items-center gap-2 text-xs text-primary hover:underline">
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          Privacy Policy
                         </a>
                       </div>
                     </div>

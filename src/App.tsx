@@ -14,6 +14,7 @@ import Profile from "./pages/Profile";
 import Auth from "./pages/Auth";
 import StandardsUpload from "./pages/StandardsUpload";
 import Onboarding from "./pages/Onboarding";
+import Legal from "./pages/Legal";
 import NotFound from "./pages/NotFound";
 import React from "react";
 
@@ -81,6 +82,9 @@ function AuthRoute({ children }: { children: React.ReactNode }) {
 const AppRoutes = () => (
   <Routes>
     <Route path="/onboarding" element={<Onboarding />} />
+    {/* Public legal pages — must be readable before signing up */}
+    <Route path="/terms" element={<Legal kind="terms" />} />
+    <Route path="/privacy" element={<Legal kind="privacy" />} />
     <Route
       path="/auth"
       element={
