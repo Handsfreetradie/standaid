@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { User, ChevronRight, ChevronDown, Shield, Zap, HelpCircle, LogOut, CreditCard, Bell, Mail, ExternalLink, CheckCircle2 } from "lucide-react";
+import { useState, useEffect } from "react";
+import { User, ChevronRight, ChevronDown, Shield, Zap, HelpCircle, LogOut, CreditCard, Bell, Mail, ExternalLink, CheckCircle2, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,6 +8,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/hooks/useAuth";
 import { useProfile } from "@/hooks/useData";
+import { supabase } from "@/integrations/supabase/client";
 
 const TRADE_LABELS: Record<string, string> = {
   electrical: "Electrical",
@@ -77,6 +79,47 @@ const Profile = () => {
   const queriesUsed = profile?.daily_query_count || 0;
   const isPro = tier === "pro" || tier === "business";
 
+  const [billingBusy, setBillingBusy] = useState(false);
+
+  // Surface the outcome when Stripe redirects back to /profile.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const outcome = params.get("checkout");
+    if (outcome === "success") toast.success("Subscription active — thanks for upgrading!");
+    else if (outcome === "cancelled") toast("Checkout cancelled — no charge made.");
+    if (outcome) window.history.replaceState({}, "", "/profile");
+  }, []);
+
+  // Start a Stripe Checkout session for the chosen tier and redirect to it.
+  const startCheckout = async (chosenTier: "pro" | "business") => {
+    if (billingBusy) return;
+    setBillingBusy(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("create-checkout", { body: { tier: chosenTier } });
+      if (error || !data?.url) throw error ?? new Error("No checkout URL");
+      window.location.href = data.url;
+    } catch (e) {
+      console.error("[checkout] error:", e);
+      toast.error("Couldn't start checkout — please try again.");
+      setBillingBusy(false);
+    }
+  };
+
+  // Open the Stripe billing portal so the user can manage or cancel.
+  const openPortal = async () => {
+    if (billingBusy) return;
+    setBillingBusy(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("customer-portal", { body: {} });
+      if (error || !data?.url) throw error ?? new Error("No portal URL");
+      window.location.href = data.url;
+    } catch (e) {
+      console.error("[portal] error:", e);
+      toast.error("Couldn't open the billing portal — please try again.");
+      setBillingBusy(false);
+    }
+  };
+
   return (
     <div className="h-full overflow-y-auto">
       <div className="min-h-full px-5 py-6 pb-24 md:pb-10 max-w-5xl md:mx-auto flex flex-col">
@@ -127,8 +170,8 @@ const Profile = () => {
                 </div>
               </div>
               {!isPro && (
-                <Button className="w-full h-11 text-sm font-semibold gap-1.5">
-                  <Zap className="h-4 w-4" />
+                <Button className="w-full h-11 text-sm font-semibold gap-1.5" onClick={() => startCheckout("pro")} disabled={billingBusy}>
+                  {billingBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
                   Upgrade to Pro — $19.99/mo
                 </Button>
               )}
@@ -208,17 +251,24 @@ const Profile = () => {
                           </span>
                         </div>
                       </div>
-                      <p className="text-xs text-muted-foreground leading-relaxed">
-                        To manage or cancel your subscription, contact us at{" "}
-                        <a href="mailto:hello@standaid.ai" className="text-primary underline">
-                          hello@standaid.ai
-                        </a>
-                      </p>
-                      {!isPro && (
-                        <Button size="sm" className="w-full gap-1.5">
-                          <Zap className="h-3.5 w-3.5" />
-                          Upgrade to Pro — $19.99/mo
+                      {isPro ? (
+                        <Button size="sm" variant="outline" className="w-full gap-1.5" onClick={openPortal} disabled={billingBusy}>
+                          {billingBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
+                          Manage subscription
                         </Button>
+                      ) : (
+                        <div className="space-y-2">
+                          <Button size="sm" className="w-full gap-1.5" onClick={() => startCheckout("pro")} disabled={billingBusy}>
+                            {billingBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+                            Upgrade to Pro — $19.99/mo
+                          </Button>
+                          <Button size="sm" variant="outline" className="w-full gap-1.5" onClick={() => startCheckout("business")} disabled={billingBusy}>
+                            Upgrade to Business — $49.99/mo
+                          </Button>
+                          <p className="text-[10px] text-muted-foreground text-center">
+                            Secure payment via Stripe. Cancel anytime.
+                          </p>
+                        </div>
                       )}
                     </div>
                   )}
