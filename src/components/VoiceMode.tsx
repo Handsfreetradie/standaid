@@ -11,7 +11,8 @@ interface VoiceModeProps {
 
 type VoiceState = "idle" | "listening" | "processing" | "speaking";
 
-const MAX_LISTEN_MS = 30_000; // safety net — never listen forever
+const MAX_LISTEN_MS = 60_000;  // overall safety cap — never listen forever
+const SILENCE_MS = 2_500;      // finish after this much quiet (tolerates mid-sentence pauses)
 
 const VoiceMode = ({ onTranscript, isQuerying, onClose }: VoiceModeProps) => {
   const [state, setState] = useState<VoiceState>("idle");
@@ -19,24 +20,31 @@ const VoiceMode = ({ onTranscript, isQuerying, onClose }: VoiceModeProps) => {
   const [aiResponse, setAiResponse] = useState("");
   const recognitionRef = useRef<any>(null);
   const synthRef = useRef<SpeechSynthesisUtterance | null>(null);
-  // Refs so the recognition callbacks always see current values — the old
-  // implementation captured a stale (empty) transcript in onend, which made
-  // the overlay hang after speaking instead of submitting the question.
+  // Refs so the recognition callbacks always see current values (no stale closures).
   const transcriptRef = useRef("");
-  const listenTimeoutRef = useRef<number | null>(null);
+  // Confirmed text from previous recognition sessions. iOS Safari (and to a
+  // lesser extent others) ends a session after a single utterance, so we
+  // accumulate finals here and restart the engine to keep dictating.
+  const accumulatedRef = useRef("");
+  const sessionFinalRef = useRef("");   // finals within the CURRENT session
+  const wantListeningRef = useRef(false); // true while the user still wants to talk
+  const listenStartRef = useRef(0);
+  const hardCapRef = useRef<number | null>(null);
+  const silenceRef = useRef<number | null>(null);
   const closedRef = useRef(false);
 
-  const clearListenTimeout = useCallback(() => {
-    if (listenTimeoutRef.current !== null) {
-      clearTimeout(listenTimeoutRef.current);
-      listenTimeoutRef.current = null;
-    }
+  const clearTimers = useCallback(() => {
+    if (hardCapRef.current !== null) { clearTimeout(hardCapRef.current); hardCapRef.current = null; }
+    if (silenceRef.current !== null) { clearTimeout(silenceRef.current); silenceRef.current = null; }
   }, []);
 
+  // Finish for good: stop wanting to listen, then stop the engine so onend
+  // finalises and submits.
   const stopListening = useCallback(() => {
-    clearListenTimeout();
+    wantListeningRef.current = false;
+    clearTimers();
     try { recognitionRef.current?.stop(); } catch { /* already stopped */ }
-  }, [clearListenTimeout]);
+  }, [clearTimers]);
 
   const stopSpeaking = useCallback(() => {
     window.speechSynthesis.cancel();
@@ -67,82 +75,95 @@ const VoiceMode = ({ onTranscript, isQuerying, onClose }: VoiceModeProps) => {
     }
 
     const recognition = new SpeechRecognition();
-    recognition.continuous = false;
+    recognition.continuous = true;      // keep going across pauses where supported
     recognition.interimResults = true;
     recognition.lang = "en-AU";
 
+    // Reset the silence countdown — fired whenever we hear speech; when it
+    // elapses with no new speech, we treat the user as finished.
+    const bumpSilence = () => {
+      if (silenceRef.current !== null) clearTimeout(silenceRef.current);
+      silenceRef.current = window.setTimeout(() => stopListening(), SILENCE_MS);
+    };
+
     recognition.onstart = () => {
       setState("listening");
-      setTranscript("");
-      transcriptRef.current = "";
       setAiResponse("");
-      // Hard stop if the engine never ends on its own (seen on some phones)
-      clearListenTimeout();
-      listenTimeoutRef.current = window.setTimeout(() => {
-        try { recognition.stop(); } catch { /* noop */ }
-      }, MAX_LISTEN_MS);
+      bumpSilence();
     };
 
     recognition.onresult = (event: any) => {
-      let finalTranscript = "";
-      let interimTranscript = "";
+      let sessionFinal = "";
+      let interim = "";
       for (let i = 0; i < event.results.length; i++) {
-        if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript;
-        } else {
-          interimTranscript += event.results[i][0].transcript;
-        }
+        if (event.results[i].isFinal) sessionFinal += event.results[i][0].transcript;
+        else interim += event.results[i][0].transcript;
       }
-      const text = finalTranscript || interimTranscript;
-      setTranscript(text);
-      transcriptRef.current = text;
-      // Once we have a final result, stop straight away — don't leave the mic
-      // hanging open waiting for the engine's own silence detection.
-      if (finalTranscript) {
-        try { recognition.stop(); } catch { /* noop */ }
-      }
+      sessionFinalRef.current = sessionFinal;
+      const combined = `${accumulatedRef.current} ${sessionFinal} ${interim}`.replace(/\s+/g, " ").trim();
+      setTranscript(combined);
+      transcriptRef.current = `${accumulatedRef.current} ${sessionFinal}`.replace(/\s+/g, " ").trim();
+      bumpSilence(); // heard something → reset the quiet timer
     };
 
     recognition.onend = async () => {
-      clearListenTimeout();
-      const finalText = transcriptRef.current;
-      if (!finalText.trim()) {
-        setState("idle");
-        return;
+      // Fold this session's finalised text into the running transcript.
+      accumulatedRef.current = `${accumulatedRef.current} ${sessionFinalRef.current}`.replace(/\s+/g, " ").trim();
+      sessionFinalRef.current = "";
+
+      // If the user still wants to talk and we're under the cap, the engine
+      // just auto-stopped (iOS does this per utterance) — restart it.
+      if (wantListeningRef.current && Date.now() - listenStartRef.current < MAX_LISTEN_MS && !closedRef.current) {
+        try { recognition.start(); return; } catch { /* fall through to finalise */ }
       }
+
+      // Finished — submit whatever we captured.
+      clearTimers();
+      const finalText = accumulatedRef.current;
+      transcriptRef.current = finalText;
+      if (!finalText.trim()) { setState("idle"); return; }
       setState("processing");
       try {
         const response = await onTranscript(finalText);
         if (closedRef.current) return;
-        if (response) {
-          setAiResponse(response);
-          speak(response);
-        } else {
-          // Question was submitted — return to the chat to read the result
-          onClose();
-        }
+        if (response) { setAiResponse(response); speak(response); }
+        else onClose(); // submitted — back to chat to read the result
       } catch {
         if (!closedRef.current) onClose();
       }
     };
 
-    recognition.onerror = () => {
-      clearListenTimeout();
-      setState("idle");
+    recognition.onerror = (e: any) => {
+      // "no-speech"/"aborted" are benign mid-session; only give up on real errors.
+      if (e?.error === "not-allowed" || e?.error === "service-not-allowed" || e?.error === "audio-capture") {
+        wantListeningRef.current = false;
+        clearTimers();
+        setAiResponse("Microphone unavailable — check the app has mic permission.");
+        setState("idle");
+      }
     };
 
     recognitionRef.current = recognition;
+    accumulatedRef.current = "";
+    sessionFinalRef.current = "";
+    transcriptRef.current = "";
+    setTranscript("");
+    wantListeningRef.current = true;
+    listenStartRef.current = Date.now();
+    // Overall safety cap
+    hardCapRef.current = window.setTimeout(() => stopListening(), MAX_LISTEN_MS);
     recognition.start();
-  }, [onTranscript, speak, onClose, clearListenTimeout]);
+  }, [onTranscript, speak, onClose, clearTimers, stopListening]);
 
   useEffect(() => {
     return () => {
       closedRef.current = true;
-      clearListenTimeout();
+      wantListeningRef.current = false;
+      clearTimers();
       try { recognitionRef.current?.stop(); } catch { /* noop */ }
       window.speechSynthesis.cancel();
     };
-  }, [clearListenTimeout]);
+  }, [clearTimers]);
 
   const handleMicClick = () => {
     if (state === "listening") {
@@ -175,7 +196,7 @@ const VoiceMode = ({ onTranscript, isQuerying, onClose }: VoiceModeProps) => {
       {/* State label */}
       <p className="text-sm font-medium text-muted-foreground mb-8 uppercase tracking-wider">
         {state === "idle" && "Tap to speak"}
-        {state === "listening" && "Listening..."}
+        {state === "listening" && "Listening… tap to send"}
         {state === "processing" && "Thinking..."}
         {state === "speaking" && "Speaking..."}
       </p>
