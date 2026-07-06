@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Calculator, ChevronRight } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Calculator, ChevronRight, ClipboardCheck, Sparkles } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import VoltageDropTool from "@/components/tools/VoltageDropTool";
 import ConcreteVolumeTool from "@/components/tools/ConcreteVolumeTool";
@@ -56,6 +57,7 @@ const TOOL_COMPONENTS: Record<string, React.FC<{ onBack: () => void }>> = {
 
 const Tools = () => {
   const [mode, setMode] = useState<ToolMode>("menu");
+  const navigate = useNavigate();
 
   if (mode !== "menu") {
     const ToolComponent = TOOL_COMPONENTS[mode];
@@ -75,6 +77,26 @@ const Tools = () => {
           <p className="text-sm text-muted-foreground">{TOOLS.length} professional calculators</p>
         </div>
       </div>
+
+      {/* Featured: AI Site Audit */}
+      <Card
+        className="p-4 mb-5 cursor-pointer border-primary/30 bg-primary/5 hover:border-primary/60 transition-colors active:scale-[0.99]"
+        onClick={() => navigate("/audits")}
+      >
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+            <ClipboardCheck className="h-5 w-5 text-primary" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-bold text-foreground text-sm flex items-center gap-1.5">
+              Site Audit <Sparkles className="h-3 w-3 text-primary" />
+              <span className="text-[10px] font-semibold text-primary bg-primary/10 rounded px-1.5 py-0.5">PRO</span>
+            </p>
+            <p className="text-xs text-muted-foreground">Photograph an install, get an AI compliance check against your standards</p>
+          </div>
+          <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+        </div>
+      </Card>
 
       {categories.map(cat => (
         <div key={cat} className="mb-5">
