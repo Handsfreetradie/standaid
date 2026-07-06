@@ -10,8 +10,10 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/useAuth";
 import { useProfile } from "@/hooks/useData";
+import { useProgress } from "@/hooks/useProgress";
 import { supabase, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { retryWithBackoff, getUserMessage } from "@/lib/network";
 
 interface Citation {
   clause_number: string;
@@ -245,6 +247,8 @@ const Chat = () => {
   };
 
   const runQuery = async (question: string, imageBase64?: string, isComplianceCheck?: boolean): Promise<string | undefined> => {
+    const { start, update, done } = useProgress();
+
     if (!session) {
       toast.error("Please sign in to use the chat");
       return undefined;
@@ -255,99 +259,106 @@ const Chat = () => {
       .slice(-6)
       .map((m) => ({ role: m.role === "ai" ? "assistant" : "user", content: m.content }));
 
-    // Add AI placeholder immediately — user sees typing cursor straight away
     const aiMsgId = crypto.randomUUID();
     setMessages((prev) => [...prev, { id: aiMsgId, role: "ai" as const, content: "", isTyping: true }]);
     scrollToBottom();
+    start("searching", "Searching standards...");
 
     try {
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/query`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${session.access_token}`,
-          "apikey": SUPABASE_PUBLISHABLE_KEY,
+      await retryWithBackoff(
+        async () => {
+          const response = await fetch(`${SUPABASE_URL}/functions/v1/query`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${session.access_token}`,
+              "apikey": SUPABASE_PUBLISHABLE_KEY,
+            },
+            body: JSON.stringify({ question, conversation_history: history, ...(imageBase64 ? { image_base64: imageBase64 } : {}) }),
+          });
+
+          if (!response.ok || !response.body) {
+            const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+            throw new Error(err.error || `HTTP ${response.status}`);
+          }
+
+          update("Reading answer...", 20);
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let sseBuffer = "";
+          let streamedAnswer = "";
+          let tokenCount = 0;
+
+          while (true) {
+            const { done: isDone, value } = await reader.read();
+            if (isDone) break;
+
+            sseBuffer += decoder.decode(value, { stream: true });
+            const lines = sseBuffer.split("\n");
+            sseBuffer = lines.pop() || "";
+
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue;
+              const data = line.slice(6).trim();
+              if (!data) continue;
+
+              try {
+                const event = JSON.parse(data);
+
+                if (event.error) throw new Error(event.error);
+
+                if (event.token !== undefined) {
+                  streamedAnswer += event.token;
+                  tokenCount++;
+                  setMessages((prev) => prev.map((m) =>
+                    m.id === aiMsgId ? { ...m, content: streamedAnswer } : m
+                  ));
+                  update("Generating answer...", Math.min(90, 20 + (tokenCount % 70)));
+                  if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+                }
+
+                if (event.done) {
+                  const finalAnswer = event.answer || streamedAnswer;
+                  setMessages((prev) => prev.map((m) =>
+                    m.id === aiMsgId ? {
+                      ...m,
+                      content: finalAnswer,
+                      isTyping: false,
+                      isComplianceCheck: isComplianceCheck || false,
+                      citations: event.citations || [],
+                      figures_referenced: (event.figures_referenced || []).filter((f: ImageRef) => f.image_url || (f.standard_id && f.page_number)),
+                      tables_referenced: (event.tables_referenced || []).filter((t: ImageRef) => t.image_url || (t.standard_id && t.page_number)),
+                      safety_critical: event.safety_critical || false,
+                      safety_message: event.safety_message,
+                      confidence: event.confidence,
+                      gated: event.gated || false,
+                      gated_message: event.gated_message,
+                      low_confidence: event.low_confidence || false,
+                      answer_found: event.answer_found,
+                      follow_up_questions: event.follow_up_questions || [],
+                      queryId: event.queryId || null,
+                    } : m
+                  ));
+                  scrollToBottom();
+                  update("Done!", 100);
+                  return finalAnswer;
+                }
+              } catch { /* ignore incomplete JSON lines */ }
+            }
+          }
+          throw new Error("Stream ended without completion");
         },
-        body: JSON.stringify({ question, conversation_history: history, ...(imageBase64 ? { image_base64: imageBase64 } : {}) }),
-      });
-
-      if (!response.ok || !response.body) {
-        const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-        setMessages((prev) => prev.map((m) =>
-          m.id === aiMsgId ? { ...m, content: err.error || "Request failed", isTyping: false } : m
-        ));
-        return undefined;
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let sseBuffer = "";
-      let streamedAnswer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        sseBuffer += decoder.decode(value, { stream: true });
-        const lines = sseBuffer.split("\n");
-        sseBuffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const data = line.slice(6).trim();
-          if (!data) continue;
-
-          try {
-            const event = JSON.parse(data);
-
-            if (event.error) {
-              setMessages((prev) => prev.map((m) =>
-                m.id === aiMsgId ? { ...m, content: event.error, isTyping: false } : m
-              ));
-              return undefined;
-            }
-
-            if (event.token !== undefined) {
-              streamedAnswer += event.token;
-              setMessages((prev) => prev.map((m) =>
-                m.id === aiMsgId ? { ...m, content: streamedAnswer } : m
-              ));
-              if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-            }
-
-            if (event.done) {
-              const finalAnswer = event.answer || streamedAnswer;
-              setMessages((prev) => prev.map((m) =>
-                m.id === aiMsgId ? {
-                  ...m,
-                  content: finalAnswer,
-                  isTyping: false,
-                  isComplianceCheck: isComplianceCheck || false,
-                  citations: event.citations || [],
-                  figures_referenced: (event.figures_referenced || []).filter((f: ImageRef) => f.image_url || (f.standard_id && f.page_number)),
-                  tables_referenced: (event.tables_referenced || []).filter((t: ImageRef) => t.image_url || (t.standard_id && t.page_number)),
-                  safety_critical: event.safety_critical || false,
-                  safety_message: event.safety_message,
-                  confidence: event.confidence,
-                  gated: event.gated || false,
-                  gated_message: event.gated_message,
-                  low_confidence: event.low_confidence || false,
-                  answer_found: event.answer_found,
-                  follow_up_questions: event.follow_up_questions || [],
-                  queryId: event.queryId || null,
-                } : m
-              ));
-              scrollToBottom();
-              return finalAnswer;
-            }
-          } catch { /* ignore incomplete JSON lines */ }
-        }
-      }
+        { maxRetries: 2, timeoutMs: 60000 }
+      );
     } catch (e: any) {
-      console.error("Stream error:", e);
+      const msg = getUserMessage(e);
+      console.error("Query error:", e);
       setMessages((prev) => prev.map((m) =>
-        m.id === aiMsgId ? { ...m, content: "Sorry, something went wrong. Please try again.", isTyping: false } : m
+        m.id === aiMsgId ? { ...m, content: msg, isTyping: false } : m
       ));
+      toast.error(msg);
+    } finally {
+      done();
     }
     return undefined;
   };
