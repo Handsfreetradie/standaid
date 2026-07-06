@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Calculator, BookOpen, GraduationCap, MessageSquare, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import BottomNav from "./BottomNav";
+import { ProgressBar } from "./ProgressBar";
 
 const NAV_TABS = [
   { path: "/tools", icon: Calculator, label: "Tools" },
@@ -26,7 +27,9 @@ const AppLayout = () => {
   }, []);
 
   return (
-    <div className="h-dvh flex overflow-hidden relative" style={{ background: 'linear-gradient(to right, #FFFFFF, #FFE8E8)' }}>
+    <>
+      <ProgressBar />
+      <div className="h-dvh flex overflow-hidden relative" style={{ background: 'linear-gradient(to right, #FFFFFF, #FFE8E8)' }}>
       {/* SVG Noise texture overlay */}
       <svg className="noise-overlay" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
         <filter id="noise">
@@ -97,6 +100,7 @@ const AppLayout = () => {
         <BottomNav />
       </div>
     </div>
+    </>
   );
 };
 

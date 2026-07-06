@@ -4,6 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
+import { ProgressProvider } from "@/hooks/useProgress";
 import AppLayout from "./components/AppLayout";
 import Index from "./pages/Index";
 import Standards from "./pages/Standards";
@@ -123,9 +124,11 @@ const App = () => (
         <Toaster />
         <Sonner />
         <AuthProvider>
-          <BrowserRouter>
-            <AppRoutes />
-          </BrowserRouter>
+          <ProgressProvider>
+            <BrowserRouter>
+              <AppRoutes />
+            </BrowserRouter>
+          </ProgressProvider>
         </AuthProvider>
       </TooltipProvider>
     </QueryClientProvider>
