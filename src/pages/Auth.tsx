@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Shield, Mail, Lock, Eye, EyeOff } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -68,12 +68,12 @@ const Auth = () => {
   if (isForgotPassword) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center px-5 bg-background">
-        <div className="flex items-center gap-2 mb-8">
-          <Shield className="h-8 w-8 text-primary" />
-          <h1 className="font-display text-3xl font-extrabold tracking-tight text-foreground">
-            StandardsAI
-          </h1>
-        </div>
+        <h1 className="mb-8 text-[32px] font-bold tracking-[-0.02em] leading-tight">
+          <span className="text-foreground">Stand</span>
+          <span className="text-primary">A</span>
+          <span className="text-primary">I</span>
+          <span className="text-foreground">d</span>
+        </h1>
 
         <Card className="w-full max-w-sm p-6">
           {resetSent ? (
@@ -130,12 +130,12 @@ const Auth = () => {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-5 bg-background">
-      <div className="flex items-center gap-2 mb-8">
-        <Shield className="h-8 w-8 text-primary" />
-        <h1 className="font-sans text-3xl font-extrabold tracking-tight text-foreground">
-          StandardsAI
-        </h1>
-      </div>
+      <h1 className="mb-8 text-[32px] font-bold tracking-[-0.02em] leading-tight">
+        <span className="text-foreground">Stand</span>
+        <span className="text-primary">A</span>
+        <span className="text-primary">I</span>
+        <span className="text-foreground">d</span>
+      </h1>
 
       <Card className="w-full max-w-sm p-6">
         <h2 className="font-sans text-xl font-bold text-foreground mb-1">
