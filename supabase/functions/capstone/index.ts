@@ -302,7 +302,13 @@ serve(async (req) => {
     // so this replaces the old scattered capstone_usage inserts.
     const AI_ACTIONS = ["generate_questions", "analyze_photo", "explain_chunk", "generate_study_guide", "generate_short_answer", "generate_calculation", "grade_calculation", "grade_short_answer", "exam_prep"];
     if (AI_ACTIONS.includes(action)) {
-      const { data: used, error: rlError } = await supabase.rpc("check_and_record_ai_usage", {
+      // check_and_record_ai_usage is locked to service_role (migration
+      // 20260706000001) — the user-scoped client would get permission denied.
+      const serviceClient = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+      );
+      const { data: used, error: rlError } = await serviceClient.rpc("check_and_record_ai_usage", {
         p_user_id: user.id,
         p_kind: "capstone",
         p_max: 20,
