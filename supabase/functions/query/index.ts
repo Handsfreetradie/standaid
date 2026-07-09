@@ -115,14 +115,54 @@ serve(async (req) => {
       .map((m) => m.content)
       .join(" ");
 
-    // When image is present with a short/generic question, boost retrieval with common
-    // onsite compliance topics so we pull relevant clauses even without a detailed query
-    const imageBoost = hasImage && (!question || question.trim().length < 40)
-      ? " socket outlet powerpoint bathroom kitchen installation compliance distance clearance zone IP rating earthing wiring rules"
+    // Vision pre-pass: when a photo is uploaded, get a fast description of what it
+    // actually shows (in standards terminology) and use that to drive retrieval.
+    // Without this, a generic question like "is this compliant?" retrieves chunks
+    // unrelated to the photo — e.g. a switchboard photo pulling wet-area clauses.
+    let imageDescription = "";
+    if (hasImage) {
+      try {
+        const visionController = new AbortController();
+        const visionTimeout = setTimeout(() => visionController.abort(), 20000);
+        try {
+          const visionRes = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: { "x-api-key": ANTHROPIC_API_KEY, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
+            body: JSON.stringify({
+              model: "claude-haiku-4-5-20251001",
+              max_tokens: 300,
+              messages: [{
+                role: "user",
+                content: [
+                  { type: "image", source: { type: "base64", media_type: "image/jpeg", data: image_base64 } },
+                  { type: "text", text: "This photo is from an Australian trade job site. In one sentence, state what installation it shows using Australian Standards (AS/NZS) terminology (e.g. switchboard, socket-outlet near a sink, hot water system). Then list 8-12 search keywords for the compliance topics that apply to it (e.g. RCD protection, main switch, MEN link, circuit protection, conductor identification). Plain text only, no markdown." },
+                ],
+              }],
+            }),
+            signal: visionController.signal,
+          });
+          if (visionRes.ok) {
+            const visionData = await visionRes.json();
+            imageDescription = (visionData.content?.[0]?.text || "").trim();
+          } else {
+            console.error(`[query] vision pre-pass HTTP ${visionRes.status}`);
+          }
+        } finally {
+          clearTimeout(visionTimeout);
+        }
+      } catch (e) {
+        console.error("[query] vision pre-pass failed:", e);
+      }
+    }
+
+    // Fallback boost only if the vision pre-pass failed AND the question is generic —
+    // deliberately topic-neutral so it can't steer retrieval to the wrong section.
+    const imageBoost = hasImage && !imageDescription && (!question || question.trim().length < 40)
+      ? "installation compliance requirements wiring rules clearance"
       : "";
-    const retrievalQuery = lastUserMessages
-      ? `${lastUserMessages} ${effectiveQuestion}${imageBoost}`
-      : `${effectiveQuestion}${imageBoost}`;
+    const retrievalQuery = [lastUserMessages, effectiveQuestion, imageDescription, imageBoost]
+      .filter(Boolean)
+      .join(" ");
 
     // Expand tradie terms to standards terminology
     const { keywords, expandedText, matchedPhrases } = expandQuery(retrievalQuery);
@@ -276,7 +316,11 @@ serve(async (req) => {
     const topStandardName = standardCounts.size > 0
       ? [...standardCounts.entries()].sort((a, b) => b[1] - a[1])[0][0]
       : null;
-    const trade: TradeType = detectTrade(effectiveQuestion, topStandardName);
+    // Include the photo description so e.g. a switchboard photo detects "electrical"
+    const trade: TradeType = detectTrade(
+      imageDescription ? `${effectiveQuestion} ${imageDescription}` : effectiveQuestion,
+      topStandardName,
+    );
 
     // Pre-call figure lookup — when question explicitly names a figure, fetch its
     // caption from the DB so Claude knows what it shows before it answers.
@@ -344,15 +388,18 @@ ${chunk.content}`;
 Analyse the photo above against the retrieved standard extracts. Structure your response exactly as follows:
 
 **What I can see:**
-Describe the installation shown in the photo — type of fitting, location, visible wiring, mounting position.
+2-4 sentences describing the installation — type of equipment, location, visible wiring, mounting. Don't inventory every component.
 
 **Compliance assessment:**
-For each compliance point, state: ✅ Compliant, ⚠️ Concern, or ❌ Non-compliant — with the relevant clause number from the standards. If something is not visible enough to assess, say so.
+ONLY assess points the retrieved extracts actually cover. For each of those, state: ✅ Compliant, ⚠️ Concern, or ❌ Non-compliant — with the clause number and what the extract requires. If something is not visible enough to assess, say so.
+If important aspects of the photo are NOT covered by the extracts, roll them into ONE short line naming where they live (e.g. "RCD protection and switchboard requirements aren't in these extracts — check the RCD and switchboard sections of AS/NZS 3000"). Do NOT walk through them point by point saying you can't cite each one.
+If the extracts are completely unrelated to what the photo shows, say so in one sentence, give a brief plain-English description of what a compliant installation of this type involves (no clause numbers or specific values from memory), then move on.
 
 **Need to know:**
-List specific measurements or details you need to give a definitive verdict. Be precise — e.g. "What is the horizontal distance from the socket outlet face to the nearest tap?" or "Is this circuit RCD protected?"
+The 3-5 most important measurements or details needed for a definitive verdict. Be precise — e.g. "What is the horizontal distance from the socket outlet face to the nearest tap?" or "Is this circuit RCD protected?"
 
 If everything visible appears compliant, state that clearly with the clauses that confirm it.
+Keep the whole response tight — a tradie reads this on site on a phone.
 
 User's question/context: ${effectiveQuestion}` : "";
 
@@ -373,7 +420,9 @@ User's question/context: ${effectiveQuestion}` : "";
         headers: { "x-api-key": ANTHROPIC_API_KEY, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
         body: JSON.stringify({
           model: "claude-opus-4-8",
-          max_tokens: 2000,
+          // Photo compliance answers are longer and structured — 2000 was getting
+          // truncated mid-sentence, losing the metadata separator entirely
+          max_tokens: hasImage ? 3500 : 2000,
           stream: true,
           messages: [
             { role: "user", content: systemPrompt },
