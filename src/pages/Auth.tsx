@@ -68,7 +68,7 @@ const Auth = () => {
   if (isForgotPassword) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center px-5 bg-background">
-        <h1 className="mb-8 text-[32px] font-bold tracking-[-0.02em] leading-tight">
+        <h1 className="mb-8 text-[64px] font-bold tracking-[-0.02em] leading-tight">
           <span className="text-foreground">Stand</span>
           <span className="text-primary">A</span>
           <span className="text-primary">I</span>
@@ -130,7 +130,7 @@ const Auth = () => {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-5 bg-background">
-      <h1 className="mb-8 text-[32px] font-bold tracking-[-0.02em] leading-tight">
+      <h1 className="mb-8 text-[64px] font-bold tracking-[-0.02em] leading-tight">
         <span className="text-foreground">Stand</span>
         <span className="text-primary">A</span>
         <span className="text-primary">I</span>
