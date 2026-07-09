@@ -3,10 +3,12 @@
 -- 1. Composite index on (user_id, clause_number) for standard_chunks —
 --    every clause-lookup in the query edge function filters by both columns.
 --
--- 2. Optimize vector search with ivfflat index.
---    ivfflat is the most stable pgvector index type across Supabase instances.
---    lists=100 is suitable for ~10k vectors. The ivfflat drop is guarded
---    so this is idempotent on fresh DBs.
+-- 2. ivfflat vector index on embeddings.
+--    The pgvector extension may live in either the `public` or `extensions`
+--    schema depending on how the project was provisioned, and the operator
+--    class (vector_cosine_ops) lives with it. Migrations run with a search
+--    path that may not include that schema, so we look it up from pg_extension
+--    and schema-qualify the operator class explicitly.
 
 -- ── clause_number composite index ─────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_standard_chunks_clause_number
@@ -15,19 +17,26 @@ CREATE INDEX IF NOT EXISTS idx_standard_chunks_clause_number
 
 -- ── ivfflat vector index ──────────────────────────────────────────────────
 DO $$
+DECLARE
+  ext_schema text;
 BEGIN
-  -- Only replace the old ivfflat index if it exists.
-  IF EXISTS (
-    SELECT 1 FROM pg_indexes
-    WHERE tablename = 'standard_chunks'
-      AND indexname  = 'idx_standard_chunks_embedding'
-  ) THEN
-    DROP INDEX IF EXISTS idx_standard_chunks_embedding;
+  SELECT n.nspname INTO ext_schema
+  FROM pg_extension e
+  JOIN pg_namespace n ON n.oid = e.extnamespace
+  WHERE e.extname = 'vector';
+
+  IF ext_schema IS NULL THEN
+    RAISE NOTICE 'pgvector extension not installed — skipping embedding index';
+    RETURN;
   END IF;
 
-  -- Create ivfflat index (compatible with all Supabase pgvector versions)
-  CREATE INDEX idx_standard_chunks_embedding
-    ON public.standard_chunks
-    USING ivfflat (embedding vector_cosine_ops)
-    WITH (lists = 100);
+  DROP INDEX IF EXISTS public.idx_standard_chunks_embedding;
+
+  EXECUTE format(
+    'CREATE INDEX idx_standard_chunks_embedding
+       ON public.standard_chunks
+       USING ivfflat (embedding %I.vector_cosine_ops)
+       WITH (lists = 100)',
+    ext_schema
+  );
 END $$;

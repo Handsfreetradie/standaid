@@ -1,43 +1,25 @@
--- Performance indices for production scale. These speed up the most common queries.
+-- Performance indices for production scale, written against the real schema.
+--
+-- Notes on what is deliberately NOT here:
+--   • Embedding (pgvector) index — created in 20260607000004 with the
+--     extension schema resolved dynamically.
+--   • audits / audit_photos (audit_id) indexes — created in 20260706000000.
+--   • ai_usage (user_id, kind, created_at) — created in 20260704000003.
+--   • queries (user_id, created_at) — already exists as idx_queries_user_created.
+--   • capstone_exam_answers unique constraint — added in 20260704000002.
 
--- pgvector search on embeddings (100x faster than full table scan)
-CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON chunks USING ivfflat (embedding vector_cosine_ops)
-  WITH (lists = 100);
+-- FK join: fetch all chunks for a standard (used by re-embedding + deletes)
+CREATE INDEX IF NOT EXISTS idx_standard_chunks_standard_id
+  ON public.standard_chunks (standard_id);
 
--- Standard lookups by ID (FK joins, search filtering)
-CREATE INDEX IF NOT EXISTS idx_chunks_standard_id ON chunks (standard_id);
+-- Audit photo status checks per user (pending/analysed filtering)
+CREATE INDEX IF NOT EXISTS idx_audit_photos_status
+  ON public.audit_photos (user_id, status);
 
--- Audit queries by user (fetch audit list)
-CREATE INDEX IF NOT EXISTS idx_audits_user_id ON audits (user_id, created_at DESC);
-
--- Audit photo queries (fetch photos for an audit)
-CREATE INDEX IF NOT EXISTS idx_audit_photos_audit_id ON audit_photos (audit_id, created_at ASC);
-CREATE INDEX IF NOT EXISTS idx_audit_photos_status ON audit_photos (user_id, status);
-
--- Query log lookups (fetch daily count for rate limiting)
-CREATE INDEX IF NOT EXISTS idx_query_log_user_kind ON query_log (user_id, kind, created_at DESC);
-
--- AI usage rate limiting (check daily usage)
-CREATE INDEX IF NOT EXISTS idx_ai_usage_user_kind ON ai_usage (user_id, kind, created_at DESC);
-
--- Chat history search
-CREATE INDEX IF NOT EXISTS idx_chat_history_user ON chat_history (user_id, created_at DESC);
-
--- Standard search by code
-CREATE INDEX IF NOT EXISTS idx_standards_code ON standards (code);
-
--- Ensure tables have proper unique constraints (prevents duplicates on retry)
-ALTER TABLE exam_answers
-  ADD CONSTRAINT unique_exam_question UNIQUE (exam_id, question_id)
-    ON CONFLICT DO NOTHING;
+-- Standard search by code (e.g. "AS/NZS 3000")
+CREATE INDEX IF NOT EXISTS idx_standards_standard_code
+  ON public.standards (standard_code);
 
 -- Cleanup: remove old indices that might exist from previous versions
-DROP INDEX IF EXISTS idx_chunks_standard_code;
-DROP INDEX IF EXISTS idx_query_log_user;
-
-COMMENT ON INDEX idx_chunks_embedding IS 'Accelerates pgvector similarity search for standard clause lookup';
-COMMENT ON INDEX idx_chunks_standard_id IS 'FK join optimization for filtering chunks by standard';
-COMMENT ON INDEX idx_audits_user_id IS 'Fetch user audits ordered by date';
-COMMENT ON INDEX idx_audit_photos_audit_id IS 'Fetch photos for a specific audit';
-COMMENT ON INDEX idx_query_log_user_kind IS 'Daily query rate limiting per user';
-COMMENT ON INDEX idx_ai_usage_user_kind IS 'AI call rate limiting per user per kind';
+DROP INDEX IF EXISTS public.idx_chunks_standard_code;
+DROP INDEX IF EXISTS public.idx_query_log_user;
