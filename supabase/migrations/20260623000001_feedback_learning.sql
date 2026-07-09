@@ -1,13 +1,20 @@
 -- Feedback learning: store question embeddings so similar past corrections
 -- can be surfaced to the AI before it answers a new query.
 
+-- pgvector lives in the `extensions` schema on Supabase, and migrations run
+-- without it on the search path — the VECTOR type and <=> operator would not
+-- resolve. Scoped to this migration's transaction only.
+SET LOCAL search_path = public, extensions;
+
 ALTER TABLE query_feedback
   ADD COLUMN IF NOT EXISTS question_text TEXT,
   ADD COLUMN IF NOT EXISTS question_embedding VECTOR(1536);
 
--- Partial index — only rows that have an embedding need the index
+-- Partial index — only rows that have an embedding need the index.
+-- pgvector lives in the `extensions` schema on Supabase, so the operator
+-- class must be schema-qualified.
 CREATE INDEX IF NOT EXISTS query_feedback_embedding_idx
-  ON query_feedback USING ivfflat (question_embedding vector_cosine_ops)
+  ON query_feedback USING hnsw (question_embedding extensions.vector_cosine_ops)
   WHERE question_embedding IS NOT NULL;
 
 -- RPC used by the query function to retrieve relevant past corrections

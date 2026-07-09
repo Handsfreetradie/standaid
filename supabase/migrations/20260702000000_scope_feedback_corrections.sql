@@ -3,6 +3,10 @@
 -- AI answer context. Corrections now surface only from the asking user's own
 -- feedback, plus corrections an admin has explicitly approved for training.
 
+-- pgvector lives in the `extensions` schema — needed to resolve the VECTOR
+-- type in the function signature. Scoped to this migration's transaction.
+SET LOCAL search_path = public, extensions;
+
 DROP FUNCTION IF EXISTS match_feedback_corrections(VECTOR, FLOAT, INT);
 
 CREATE OR REPLACE FUNCTION match_feedback_corrections(
