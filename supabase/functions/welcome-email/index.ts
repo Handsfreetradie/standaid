@@ -170,7 +170,9 @@ serve(async (req) => {
     }
 
     const payload = await req.json();
-    const record = payload?.record;
+    // The DB trigger posts { user_id } at the top level; database-webhook
+    // style payloads nest it under record. Accept both.
+    const record = payload?.record ?? payload;
     if (!record?.user_id) {
       console.error("[welcome-email] No user_id in payload:", JSON.stringify(payload));
       return new Response(JSON.stringify({ error: "No user_id" }), { status: 400 });
