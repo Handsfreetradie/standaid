@@ -212,6 +212,9 @@ const Chat = () => {
   const [pdfViewer, setPdfViewer] = useState<{ clauseNumber: string; standardCode?: string; standardId?: string; pageNumber?: number } | null>(null);
   const { session } = useAuth();
   const { data: profile } = useProfile();
+  // Hooks must run during render — calling useProgress() inside runQuery
+  // threw on every send and killed the chat before the request went out.
+  const { start, update, done } = useProgress();
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -247,8 +250,6 @@ const Chat = () => {
   };
 
   const runQuery = async (question: string, imageBase64?: string, isComplianceCheck?: boolean): Promise<string | undefined> => {
-    const { start, update, done } = useProgress();
-
     if (!session) {
       toast.error("Please sign in to use the chat");
       return undefined;
@@ -302,48 +303,52 @@ const Chat = () => {
               const data = line.slice(6).trim();
               if (!data) continue;
 
+              // Parse in its own try so only malformed/partial JSON is
+              // ignored — real error events from the server must propagate,
+              // not get swallowed by this catch.
+              let event;
               try {
-                const event = JSON.parse(data);
+                event = JSON.parse(data);
+              } catch { continue; }
 
-                if (event.error) throw new Error(event.error);
+              if (event.error) throw new Error(event.error);
 
-                if (event.token !== undefined) {
-                  streamedAnswer += event.token;
-                  tokenCount++;
-                  setMessages((prev) => prev.map((m) =>
-                    m.id === aiMsgId ? { ...m, content: streamedAnswer } : m
-                  ));
-                  update("Generating answer...", Math.min(90, 20 + (tokenCount % 70)));
-                  if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-                }
+              if (event.token !== undefined) {
+                streamedAnswer += event.token;
+                tokenCount++;
+                setMessages((prev) => prev.map((m) =>
+                  m.id === aiMsgId ? { ...m, content: streamedAnswer } : m
+                ));
+                update("Generating answer...", Math.min(90, 20 + (tokenCount % 70)));
+                if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+              }
 
-                if (event.done) {
-                  const finalAnswer = event.answer || streamedAnswer;
-                  setMessages((prev) => prev.map((m) =>
-                    m.id === aiMsgId ? {
-                      ...m,
-                      content: finalAnswer,
-                      isTyping: false,
-                      isComplianceCheck: isComplianceCheck || false,
-                      citations: event.citations || [],
-                      figures_referenced: (event.figures_referenced || []).filter((f: ImageRef) => f.image_url || (f.standard_id && f.page_number)),
-                      tables_referenced: (event.tables_referenced || []).filter((t: ImageRef) => t.image_url || (t.standard_id && t.page_number)),
-                      safety_critical: event.safety_critical || false,
-                      safety_message: event.safety_message,
-                      confidence: event.confidence,
-                      gated: event.gated || false,
-                      gated_message: event.gated_message,
-                      low_confidence: event.low_confidence || false,
-                      answer_found: event.answer_found,
-                      follow_up_questions: event.follow_up_questions || [],
-                      queryId: event.queryId || null,
-                    } : m
-                  ));
-                  scrollToBottom();
-                  update("Done!", 100);
-                  return finalAnswer;
-                }
-              } catch { /* ignore incomplete JSON lines */ }
+              if (event.done) {
+                const finalAnswer = event.answer || streamedAnswer;
+                setMessages((prev) => prev.map((m) =>
+                  m.id === aiMsgId ? {
+                    ...m,
+                    content: finalAnswer,
+                    isTyping: false,
+                    isComplianceCheck: isComplianceCheck || false,
+                    citations: event.citations || [],
+                    figures_referenced: (event.figures_referenced || []).filter((f: ImageRef) => f.image_url || (f.standard_id && f.page_number)),
+                    tables_referenced: (event.tables_referenced || []).filter((t: ImageRef) => t.image_url || (t.standard_id && t.page_number)),
+                    safety_critical: event.safety_critical || false,
+                    safety_message: event.safety_message,
+                    confidence: event.confidence,
+                    gated: event.gated || false,
+                    gated_message: event.gated_message,
+                    low_confidence: event.low_confidence || false,
+                    answer_found: event.answer_found,
+                    follow_up_questions: event.follow_up_questions || [],
+                    queryId: event.queryId || null,
+                  } : m
+                ));
+                scrollToBottom();
+                update("Done!", 100);
+                return finalAnswer;
+              }
             }
           }
           throw new Error("Stream ended without completion");
