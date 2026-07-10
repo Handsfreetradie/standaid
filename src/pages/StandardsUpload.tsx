@@ -54,19 +54,63 @@ async function extractPdfText(
       const page = await pdf.getPage(i + 1);
       const content = await page.getTextContent();
 
-      // Group text items by quantised Y coordinate to reconstruct lines.
-      // PDF Y-axis origin is bottom-left; 3pt buckets keep items on the same visual line together.
-      const lineMap = new Map<number, string[]>();
+      // Reconstruct lines geometry-aware. The old fixed 3pt Y-grid split
+      // same-line items across buckets (a decimal point 0.02pt off became its
+      // own "line", turning 0.5 into 05) and join("") fused adjacent table
+      // columns into one number. Instead: cluster by Y-gap relative to glyph
+      // height, sort by X within each line, and insert spaces from the real
+      // horizontal gap between items.
+      interface Positioned { str: string; x: number; y: number; w: number; h: number }
+      const items: Positioned[] = [];
       for (const item of content.items) {
         if (!("str" in item) || !item.str) continue;
-        const y = Math.round((item as any).transform[5] / 3) * 3;
-        if (!lineMap.has(y)) lineMap.set(y, []);
-        lineMap.get(y)!.push(item.str);
+        const t = (item as any).transform;
+        items.push({
+          str: item.str,
+          x: t[4],
+          y: t[5],
+          w: (item as any).width ?? 0,
+          h: (item as any).height || Math.hypot(t[2], t[3]) || 10,
+        });
       }
 
-      const sortedLines = [...lineMap.entries()]
-        .sort((a, b) => b[0] - a[0])
-        .map(([, words]) => words.join(""));
+      // Top-to-bottom, then left-to-right so clustering sees reading order.
+      items.sort((a, b) => (b.y - a.y) || (a.x - b.x));
+
+      const lines: Positioned[][] = [];
+      let current: Positioned[] = [];
+      let currentY = Infinity;
+      for (const it of items) {
+        // Same visual line if Y is within half a glyph height (min 2pt) —
+        // tolerant of kerned runs and superscripts, unlike a fixed grid.
+        const tol = Math.max(2, it.h * 0.5);
+        if (current.length === 0 || Math.abs(it.y - currentY) <= tol) {
+          current.push(it);
+          if (current.length === 1) currentY = it.y;
+        } else {
+          lines.push(current);
+          current = [it];
+          currentY = it.y;
+        }
+      }
+      if (current.length > 0) lines.push(current);
+
+      const sortedLines = lines.map((line) => {
+        line.sort((a, b) => a.x - b.x);
+        let text = "";
+        let prevEnd = Infinity;
+        for (const it of line) {
+          const gap = it.x - prevEnd;
+          // A real word/column gap is a decent fraction of the glyph height;
+          // kerned fragments of one word sit at gap ≈ 0 (or overlap).
+          if (text && gap > Math.max(1, it.h * 0.12) && !text.endsWith(" ") && !it.str.startsWith(" ")) {
+            text += " ";
+          }
+          text += it.str;
+          prevEnd = it.x + it.w;
+        }
+        return text;
+      });
 
       onProgress(++completed / numPages);
       return sortedLines.join("\n");

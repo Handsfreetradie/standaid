@@ -105,6 +105,17 @@ export function hasGoodTextQuality(text: string): boolean {
     return false;
   }
 
+  // Fused-token detection: text assembled without spaces (bad line
+  // reconstruction) glues digits to words ("0.5Where the installation") and
+  // words to each other ("theInstallation"). Clean standards text has almost
+  // none of these; corrupted extractions have them in nearly every line.
+  const fusedDigitWord = (text.match(/\d[A-Z][a-z]/g) || []).length;
+  const fusedWords = (text.match(/[a-z]{2}[A-Z][a-z]{2}/g) || []).length;
+  const wordCount = (text.match(/\S+/g) || []).length;
+  if (wordCount > 100 && (fusedDigitWord + fusedWords) / wordCount > 0.01) {
+    return false;
+  }
+
   return true;
 }
 

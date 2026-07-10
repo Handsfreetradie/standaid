@@ -8,6 +8,7 @@ import {
   extractFigureChunks,
   parseExtractedText,
   computeQualityScore,
+  hasGoodTextQuality,
 } from "../../supabase/functions/process-standard/extraction";
 
 describe("convertPdfToBase64", () => {
@@ -185,5 +186,36 @@ describe("computeQualityScore", () => {
 
   it("scores empty extraction at or below the reject line", () => {
     expect(computeQualityScore("", 100, 0)).toBeLessThan(35);
+  });
+});
+
+describe("hasGoodTextQuality", () => {
+  const cleanText = Array.from({ length: 40 }, (_, i) =>
+    `${(i % 8) + 1}.${(i % 5) + 1} Requirements for circuit ${i} rated at 20 A with 2.5 mm conductors and a maximum resistance of 0.5 ohms measured at the switchboard.`
+  ).join("\n");
+
+  it("passes clean standards text", () => {
+    expect(hasGoodTextQuality(cleanText)).toBe(true);
+  });
+
+  it("fails text with fused digit-word tokens (join-without-spaces corruption)", () => {
+    const fused = Array.from({ length: 40 }, (_, i) =>
+      `${(i % 8) + 1}.${(i % 5) + 1}Requirements for circuit ${i} rated at 20A with 2.5Selection of conductors shall comply with 0.5Where the installation permits.`
+    ).join("\n");
+    expect(hasGoodTextQuality(fused)).toBe(false);
+  });
+
+  it("fails text with fused word-word tokens", () => {
+    const fused = Array.from({ length: 40 }, (_, i) =>
+      `${(i % 8) + 1}.${(i % 5) + 1} Requirements 20 A for theInstallation of circuitProtection and cableSelection in dampSituations near swimmingPools.`
+    ).join("\n");
+    expect(hasGoodTextQuality(fused)).toBe(false);
+  });
+
+  it("fails text with truncated decimals (glyph-swallowed digits)", () => {
+    const truncated = Array.from({ length: 40 }, (_, i) =>
+      `${(i % 8) + 1}.${(i % 5) + 1} The maximum resistance shall be 0. measured with a resistance of 1. at the point of supply for circuit ${i}.`
+    ).join("\n");
+    expect(hasGoodTextQuality(truncated)).toBe(false);
   });
 });

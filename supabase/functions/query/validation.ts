@@ -2,7 +2,7 @@ import type { TradeType } from "./system-prompt.ts";
 
 export interface ValidationInput {
   response: string;
-  chunks: Array<{ content: string; metadata?: Record<string, unknown> }>;
+  chunks: Array<{ content: string; clause_number?: string | null; metadata?: Record<string, unknown> }>;
   query: string;
   trade: TradeType;
   // Clause numbers confirmed to exist in the user's uploaded standards (DB
@@ -92,11 +92,21 @@ const STANDALONE_CLAUSE_REGEX =
 
 const CLAUSE_NUMBER_REGEX = /\d+(?:\.\d+)+/;
 
-function buildChunkClauseSet(chunks: Array<{ content: string }>): Set<string> {
+function buildChunkClauseSet(
+  chunks: Array<{ content: string; clause_number?: string | null }>,
+): Set<string> {
+  // Only genuine clause identifiers count: the chunk's own clause_number
+  // metadata, and explicit "Clause/Table/Section/Figure X.X" mentions in the
+  // text. Matching every bare dotted number let measurements whitelist
+  // citations — "2.5 mm²" in any chunk legitimised a fabricated "Clause 2.5".
   const numbers = new Set<string>();
   for (const chunk of chunks) {
-    for (const match of chunk.content.matchAll(/\d+(?:\.\d+)+/g)) {
-      numbers.add(match[0]);
+    const own = (chunk.clause_number || "").match(CLAUSE_NUMBER_REGEX);
+    if (own) numbers.add(own[0]);
+    for (const match of chunk.content.matchAll(
+      /(?:Clause|Table|Section|Figure|Appendix)\s+([A-Z]?\d+(?:\.\d+)*)/gi,
+    )) {
+      numbers.add(match[1]);
     }
   }
   return numbers;
@@ -151,10 +161,10 @@ function validateCitations(
         severity: "warning",
         detail: `Citation "${citation}" not found in retrieved chunks`,
       });
-      cleaned = cleaned.replace(
-        citation,
-        "[citation unavailable — check the standard directly]",
-      );
+      // Replace with neutral wording — never the bracketed placeholder the
+      // system prompt itself forbids ("AS/NZS 3000 Clause 2.5.1 requires…"
+      // becomes "the standard requires…").
+      cleaned = cleaned.replace(citation, "the standard");
     }
   }
 

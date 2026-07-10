@@ -272,7 +272,15 @@ serve(async (req) => {
     uniqueVector.forEach((c: any) => seenIds.add(c.id));
     const uniqueKeyword = keywordChunks.filter((c: any) => !seenIds.has(c.id));
     const matchedChunks = [...clauseChunks, ...uniqueVector, ...uniqueKeyword].slice(0, 15);
-    const topSimilarity = matchedChunks[0]?.similarity || 0;
+
+    // Genuine relevance signal: the best REAL cosine similarity from vector
+    // search. Clause hits get a fabricated 1.0 and keyword hits a fabricated
+    // 0.5 for ranking, so matchedChunks[0].similarity is meaningless as a
+    // confidence measure — it made every clause-number match report full
+    // confidence and let stopword ilike hits defeat the refusal path.
+    const maxVectorSim = vectorChunks.reduce((m: number, c: any) => Math.max(m, c.similarity || 0), 0);
+    const hasExactClauseHit = clauseChunks.length > 0;
+    const topSimilarity = maxVectorSim;
 
     // One-hop expansion: pull the actual TABLE/FIGURE chunks for any table or
     // figure referenced by the question or the retrieved clauses. Clauses
@@ -357,8 +365,16 @@ ${chunk.content}`;
         }).join("\n\n") + figCaptionContext + correctionsContext
       : null;
 
-    // No-chunks fallback — refuse to fabricate, tell user to check their uploads
-    if (contextChunks === null) {
+    // Refusal gate — refuse to fabricate rather than answer from weak context.
+    // Fires when nothing was retrieved at all, OR when nothing genuinely
+    // relevant was retrieved: no exact clause-number hit and the best real
+    // vector similarity is below 0.40 (with text-embedding-3-small, unrelated
+    // text scores 0.2–0.35; real matches sit 0.45+). Previously only the
+    // zero-chunks case refused, and stopword keyword hits guaranteed chunks
+    // always existed — so questions about standards the user never uploaded
+    // sailed through to Claude with irrelevant context and got answered from
+    // training memory.
+    if (contextChunks === null || (!hasExactClauseHit && maxVectorSim < 0.40)) {
       const noChunksPayload = {
         done: true,
         answer: "I couldn't find relevant content in your uploaded standards for this query. Please check that the relevant standard has been uploaded and fully processed, or try rephrasing your question.",
@@ -379,7 +395,10 @@ ${chunk.content}`;
 
     const systemPrompt = buildSystemPrompt(trade, contextChunks, matchedPhrases);
     const queryId = crypto.randomUUID();
-    const isLowConfidence = topSimilarity < 0.80;
+    // Calibrated for genuine text-embedding-3-small similarities (real matches
+    // ~0.45–0.65; 0.80 was unreachable and flagged nearly every answer). An
+    // exact clause-number hit is high confidence regardless of vector score.
+    const isLowConfidence = !hasExactClauseHit && topSimilarity < 0.50;
 
     // Build user message content — include image if uploaded
     const complianceInstruction = hasImage ? `
@@ -661,19 +680,22 @@ User's question/context: ${effectiveQuestion}` : "";
           parsedResponse.tables_referenced = [];
         }
 
-        // Verify clause numbers cited in the answer against the user's whole
-        // standard library, not just the retrieved chunks — a clause that
-        // exists in the uploaded standard is not a hallucination just because
-        // its chunk didn't make the retrieval cut.
+        // Verify clause numbers cited in the answer against the standards the
+        // context actually came from — not the whole library. A clause that
+        // exists in the cited standard isn't a hallucination just because its
+        // chunk missed the retrieval cut; but a clause number that only exists
+        // in a DIFFERENT standard (AS 2870's "2.5.1" legitimising a cited
+        // AS/NZS 3000 "2.5.1") must not pass.
         const answerNums = [...new Set(
           [...(parsedResponse.answer || "").matchAll(/\b\d+(?:\.\d+)+\b/g)].map((m: any) => m[0])
         )].slice(0, 25) as string[];
         let dbClauseNumbers = new Set<string>();
-        if (answerNums.length > 0) {
+        if (answerNums.length > 0 && standardIds.length > 0) {
           const { data: verifiedRows } = await supabase
             .from("standard_chunks")
             .select("clause_number")
             .eq("user_id", userId)
+            .in("standard_id", standardIds)
             .in("clause_number", answerNums)
             .limit(50);
           dbClauseNumbers = new Set((verifiedRows || []).map((r: any) => r.clause_number));
@@ -771,14 +793,12 @@ User's question/context: ${effectiveQuestion}` : "";
           for (const ref of allRefs) {
             if (citedNums.has(ref)) continue;
             const hintStdId = findNearbyStdId(parsedResponse.answer || "", ref);
+            // Exact clause-number match ONLY. The old startsWith fallbacks
+            // attached a parent or sibling chunk (2.5.1.2 for "2.5.1") whose
+            // text may not support the claim — a manufactured citation.
             const hit =
-              // Prefer chunk from the hinted standard
               (hintStdId && matchedChunks.find((mc: any) => mc.standard_id === hintStdId && (mc.clause_number || "").toString().trim() === ref)) ||
-              (hintStdId && matchedChunks.find((mc: any) => mc.standard_id === hintStdId && (mc.clause_number || "").toString().trim().startsWith(ref + "."))) ||
-              // Fallback: any standard
-              matchedChunks.find((mc: any) => (mc.clause_number || "").toString().trim() === ref) ||
-              matchedChunks.find((mc: any) => (mc.clause_number || "").toString().trim().startsWith(ref + ".")) ||
-              matchedChunks.find((mc: any) => ref.startsWith(((mc.clause_number || "").toString().trim()) + "."));
+              matchedChunks.find((mc: any) => (mc.clause_number || "").toString().trim() === ref);
             if (hit) {
               const std = standardMap.get(hit.standard_id);
               parsedResponse.citations.push({
@@ -793,19 +813,10 @@ User's question/context: ${effectiveQuestion}` : "";
             }
           }
 
-          // Last resort: if still no citations, always surface the top retrieved chunk
-          if (parsedResponse.citations.length === 0 && matchedChunks.length > 0) {
-            const top = matchedChunks[0];
-            const std = standardMap.get(top.standard_id);
-            parsedResponse.citations.push({
-              standard_code: std?.standard_code || null,
-              standard_version: std?.version || null,
-              clause_number: top.clause_number,
-              relevant_text: (top.content || "").slice(0, 300).trim(),
-              page_number: top.page_number,
-              standard_id: top.standard_id,
-            });
-          }
+          // Deliberately NO last-resort citation. Surfacing the top retrieved
+          // chunk when the answer earned no citations attached a legitimate-
+          // looking clause badge to general-knowledge answers — manufactured
+          // authority. If the answer isn't grounded, it shows no citation.
         }
 
         // Free tier clause gating

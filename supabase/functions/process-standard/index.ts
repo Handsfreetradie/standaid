@@ -339,16 +339,25 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Service unavailable" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    let extracted: { text: string; pages: string[]; totalPages: number; pagesWithContent: number };
+    let extracted: { text: string; pages: string[]; totalPages: number; pagesWithContent: number } | null = null;
 
     if (clientExtractedText && clientExtractedText.length > 100) {
-      // Use pre-extracted text from the browser — bypasses server-side DRM decryption issues
-      console.log(`[${standard_id}] Using client-extracted text: ${clientExtractedText.length} chars`);
-      extracted = parseExtractedText(clientExtractedText);
-      console.log(`[${standard_id}] Parsed: ${extracted.totalPages} pages, ${extracted.pagesWithContent} with content`);
-    } else {
+      // Use pre-extracted text from the browser — bypasses server-side DRM decryption issues.
+      // It must pass the same quality gate as server extraction: corrupted
+      // client text (swallowed decimals, fused columns) previously flowed
+      // straight into chunks and produced wrong numbers in answers.
+      const parsed = parseExtractedText(clientExtractedText);
+      if (hasGoodTextQuality(parsed.text)) {
+        console.log(`[${standard_id}] Using client-extracted text: ${clientExtractedText.length} chars, ${parsed.totalPages} pages, ${parsed.pagesWithContent} with content`);
+        extracted = parsed;
+      } else {
+        console.warn(`[${standard_id}] Client-extracted text FAILED quality gate — falling back to server extraction`);
+      }
+    }
+
+    if (!extracted) {
       // Fall back to server-side extraction (unpdf → AI OCR)
-      console.log(`[${standard_id}] Starting download (no client text provided)`);
+      console.log(`[${standard_id}] Starting download (no usable client text)`);
       const { data: fileData, error: downloadError } = await supabaseAdmin.storage.from("standards").download(standard.file_path!);
       if (downloadError || !fileData) {
         clearTimeout(timeoutHandle);
