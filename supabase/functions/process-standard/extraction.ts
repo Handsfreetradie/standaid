@@ -65,16 +65,30 @@ export function compareRefNumbers(a: string, b: string): number {
   return 0;
 }
 
-export function matchClauseHeading(line: string): ClauseHeading | null {
-  const m = line.match(CLAUSE_PATTERN);
-  if (!m) return null;
-  // Groups: [1]=number (tab variant), [2]=title (tab variant), [3]=number (space variant), [4]=title (space variant)
-  const number = m[1] || m[3];
-  const title = (m[2] || m[4] || "").trim();
+// Appendix clause headings are letter-prefixed ("B1 SCOPE", "C2.1 Maximum
+// demand calculation"). Only matched while inside an APPENDIX section —
+// applying it globally would turn body-text cross-references ("B1 sets out
+// the requirements...") into headings.
+export const APPENDIX_CLAUSE_PATTERN = /^([A-Z]\d{1,2}(?:\.\d{1,2}){0,4})[\t ]+([A-Z][A-Za-z].*)/;
+
+function validateHeading(number: string, title: string): ClauseHeading | null {
   if (UNIT_WORD_TITLE.test(title)) return null;
   if (TOC_LEADER.test(title)) return null;
   if (!number.includes(".") && title !== title.toUpperCase()) return null;
   return { number, title };
+}
+
+export function matchClauseHeading(line: string, inAppendix = false): ClauseHeading | null {
+  const m = line.match(CLAUSE_PATTERN);
+  if (m) {
+    // Groups: [1]=number (tab variant), [2]=title (tab variant), [3]=number (space variant), [4]=title (space variant)
+    return validateHeading(m[1] || m[3], (m[2] || m[4] || "").trim());
+  }
+  if (inAppendix) {
+    const am = line.match(APPENDIX_CLAUSE_PATTERN);
+    if (am) return validateHeading(am[1], am[2].trim());
+  }
+  return null;
 }
 
 const TARGET_CHUNK_CHARS = 2000;
@@ -185,6 +199,7 @@ export function sortIntoSections(markedText: string): Section[] {
   const sections: Section[] = [];
   let current: Section = { heading: null, clauseNumber: null, lines: [], pageNumber: 1 };
   let currentPage = 1;
+  let inAppendix = false;
   const pageMarker = /^\[PAGE\s+(\d+)\]/i;
 
   for (const line of lines) {
@@ -194,9 +209,13 @@ export function sortIntoSections(markedText: string): Section[] {
 
     // ToC lines ("SECTION 2 ........ 45") must never open a section
     const sectionMatch = TOC_LEADER.test(line) ? null : line.match(SECTION_HEADING);
-    const clauseMatch = matchClauseHeading(line);
+    const clauseMatch = matchClauseHeading(line, inAppendix);
 
     if (sectionMatch) {
+      // Track appendix context so letter-prefixed clauses (B1, C2.1) are
+      // detected there — appendices used to collapse into one giant
+      // unlabelled section, hiding e.g. maximum-demand rules from retrieval.
+      inAppendix = /^APPENDIX/i.test(line.trim());
       if (current.lines.length > 0) sections.push({ ...current });
       current = { heading: line.trim(), clauseNumber: null, lines: [line], pageNumber: currentPage };
     } else if (clauseMatch) {
@@ -374,9 +393,15 @@ export function extractTableChunks(text: string, standardCode: string, version: 
         }
       }
     }
+    // A title-case "Table X" line with no title on it and only a lowercase
+    // continuation ("Table 40\nas 0.563 mV/A.m.") is a wrapped sentence
+    // reference, not a caption — treating it as one anchored table chunks to
+    // random prose at the wrong page. Demote it to reference rank.
+    if (/^[a-z]/.test(title)) title = "";
+    const effectiveRank = rank === 1 && !title ? 0 : rank;
     const existing = tables.get(tableNum);
-    if (!existing || existing.rank < rank) {
-      tables.set(tableNum, { title, lineIdx: i, rank });
+    if (!existing || existing.rank < effectiveRank) {
+      tables.set(tableNum, { title, lineIdx: i, rank: effectiveRank });
     }
   }
 
@@ -398,21 +423,39 @@ export function extractTableChunks(text: string, standardCode: string, version: 
 
   const chunks: Chunk[] = [];
   for (const tableNum of sortedNums) {
-    const { title, lineIdx } = tables.get(tableNum)!;
+    const { title, lineIdx, rank } = tables.get(tableNum)!;
 
-    // Grab up to ~500 chars of following content (the table body), skipping markers
+    // Capture the table body: for real captions (rank > 0), everything until
+    // the next table/figure caption or clause/section heading — the old
+    // ~500-char slice silently discarded most of every multi-page table.
+    // Reference-only entries (rank 0) anchor to prose, so keep those short.
+    const BODY_HARD_CAP = 6000;
+    const bodyCap = rank > 0 ? BODY_HARD_CAP : 400;
     let surrounding = "";
-    let charCount = 0;
-    for (let j = lineIdx + 1; j < lines.length && charCount < 500; j++) {
-      if (pageMarker.test(lines[j])) continue;
-      surrounding += lines[j] + "\n";
-      charCount += lines[j].length + 1;
+    for (let j = lineIdx + 1; j < lines.length && surrounding.length < bodyCap; j++) {
+      const raw = lines[j];
+      if (pageMarker.test(raw)) continue;
+      if (rank > 0) {
+        const trimmed = raw.trim();
+        if (captionPattern.test(trimmed)) break;
+        if (/^(?:\*{0,2})FIGURE\s+[A-Z]?\d/i.test(trimmed)) break;
+        if (!TOC_LEADER.test(raw) && (SECTION_HEADING.test(raw) || matchClauseHeading(raw))) break;
+      }
+      surrounding += raw + "\n";
     }
+
+    // The raw linear body is column-fused/unreliable, so like figures these
+    // chunks carry a placeholder that keeps embed-chunks away until
+    // describe-figures replaces the content with an accurate vision
+    // transcription of the table (matching magic string in embed-chunks).
+    const placeholder = rank > 0
+      ? "\n\n[A structured transcription of this table will be generated shortly.]"
+      : "";
 
     chunks.push({
       clause_number: `TABLE ${tableNum}`,
       clause_title: title || null,
-      content: `${label} Table ${tableNum}${title ? `: ${title}` : ""}\n\n${surrounding.trim()}`,
+      content: `${label} Table ${tableNum}${title ? `: ${title}` : ""}\n\n${surrounding.trim()}${placeholder}`,
       page_number: linePages[lineIdx] ?? 1,
       chunk_index: 0, // reassigned after merge
     });

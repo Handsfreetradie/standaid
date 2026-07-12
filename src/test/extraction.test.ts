@@ -219,3 +219,68 @@ describe("hasGoodTextQuality", () => {
     expect(hasGoodTextQuality(truncated)).toBe(false);
   });
 });
+
+describe("appendix clause detection", () => {
+  it("detects letter-prefixed clauses inside an appendix", () => {
+    const text = [
+      "[PAGE 90]",
+      "APPENDIX C",
+      "C1 SCOPE",
+      "This appendix sets out methods for calculating maximum demand.",
+      "C2.1 Maximum demand for domestic installations",
+      "The maximum demand shall be calculated in accordance with Table C1.",
+    ].join("\n");
+    const sections = sortIntoSections(text);
+    const nums = sections.map((s) => s.clauseNumber);
+    expect(nums).toContain("C1");
+    expect(nums).toContain("C2.1");
+  });
+
+  it("ignores letter-number cross-references outside appendices", () => {
+    const text = [
+      "[PAGE 10]",
+      "SECTION 2 GENERAL",
+      "2.1 SCOPE",
+      "B1 Requirements are detailed in Appendix B for special cases.",
+    ].join("\n");
+    const sections = sortIntoSections(text);
+    expect(sections.map((s) => s.clauseNumber)).not.toContain("B1");
+  });
+});
+
+describe("extractTableChunks body capture", () => {
+  it("captures the full table body up to the next heading (no 500-char cap)", () => {
+    const rows = Array.from({ length: 40 }, (_, i) =>
+      `${i + 1} 2.5 25 ${30 + i} 0.${i} 41 55 63 72 80 95 110 125 140 155`
+    ).join("\n");
+    const text = [
+      "[PAGE 12]",
+      "TABLE 4.1 — CURRENT-CARRYING CAPACITY",
+      rows,
+      "4.2 CONDUCTOR OPERATING TEMPERATURE",
+      "Body of the next clause.",
+    ].join("\n");
+    const chunks = extractTableChunks(text, "AS 3008.1.1", "2017");
+    const t = chunks.find((c) => c.clause_number === "TABLE 4.1");
+    expect(t).toBeDefined();
+    expect(t!.content.length).toBeGreaterThan(800);
+    expect(t!.content).not.toContain("CONDUCTOR OPERATING TEMPERATURE");
+    expect(t!.page_number).toBe(12);
+    expect(t!.content).toContain("transcription of this table will be generated shortly");
+  });
+
+  it("demotes a wrapped 'Table N' sentence reference and takes no junk title", () => {
+    const text = [
+      "[PAGE 3]",
+      "the three-phase voltage drop is given in",
+      "Table 40",
+      "as 0.563 mV/A.m.",
+      "The voltage drop on the neutral conductor is calculated separately.",
+    ].join("\n");
+    const chunks = extractTableChunks(text, "AS 3008.1.1", "2017");
+    const t = chunks.find((c) => c.clause_number === "TABLE 40");
+    expect(t).toBeDefined();
+    expect(t!.clause_title).toBeNull();
+    expect(t!.content).not.toContain("transcription of this table");
+  });
+});

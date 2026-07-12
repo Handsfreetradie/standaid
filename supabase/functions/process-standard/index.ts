@@ -402,8 +402,28 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Text quality too low. Try a digital PDF instead of a scan." }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const standardCode = standard.standard_code || "Unknown";
-    const version = standard.version || "";
+    // standard_code is often null (the upload wizard only sets a title like
+    // "AS 3008.1.1 2017") — which branded every chunk "[Unknown]" and baked
+    // that junk into the embeddings. Derive code + version from the title and
+    // persist them so citations and the vision prompts name the real standard.
+    let standardCode = standard.standard_code as string | null;
+    let version = (standard.version as string | null) || "";
+    if (!standardCode && standard.title) {
+      const m = (standard.title as string).match(/\b(AS(?:\s*\/\s*NZS)?)\s*(\d+(?:\.\d+)*)/i);
+      if (m) {
+        standardCode = `${m[1].toUpperCase().replace(/\s*\/\s*/, "/")} ${m[2]}`;
+        if (!version) {
+          const rest = (standard.title as string).slice((m.index || 0) + m[0].length);
+          const vm = rest.match(/\b((?:19|20)\d{2})\b/);
+          if (vm) version = vm[1];
+        }
+        await supabaseAdmin.from("standards")
+          .update({ standard_code: standardCode, ...(version && !standard.version ? { version } : {}) })
+          .eq("id", standard_id);
+        console.log(`[${standard_id}] Derived standard_code "${standardCode}"${version ? ` version ${version}` : ""} from title`);
+      }
+    }
+    standardCode = standardCode || "Unknown";
 
     // Figure/table detection needs the [PAGE N] markers to work out which page
     // each one is on. extracted.text has them stripped, so rebuild a marked

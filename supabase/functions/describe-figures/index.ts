@@ -79,31 +79,42 @@ serve(async (req) => {
       });
     }
 
-    // Fetch undescribed figure chunks (is_indexed = false means not yet described)
+    // Fetch undescribed figure AND table chunks (is_indexed = false means not
+    // yet processed). Tables get a vision transcription to markdown — the
+    // linear text extraction flattens and fuses table cells, so the page image
+    // is the only reliable source of cell-accurate values.
     const { data: figureChunks, error: fetchError } = await supabaseAdmin
       .from("standard_chunks")
-      .select("id, clause_number, clause_title, page_number")
+      .select("id, clause_number, clause_title, page_number, content")
       .eq("standard_id", standard_id)
-      .like("clause_number", "FIGURE%")
+      .or("clause_number.like.FIGURE%,clause_number.like.TABLE%")
       .eq("is_indexed", false);
 
     if (fetchError) {
-      console.error("Error fetching figure chunks:", fetchError);
+      console.error("Error fetching figure/table chunks:", fetchError);
       return new Response(JSON.stringify({ error: "Failed to fetch figure chunks" }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    if (!figureChunks || figureChunks.length === 0) {
-      console.log(`[describe-figures] No undescribed figure chunks for standard ${standard_id}`);
+    // Only table chunks that carry the transcription placeholder get a vision
+    // pass — reference-only table chunks (no caption found) have no known page
+    // to photograph and embed as-is.
+    const workChunks = (figureChunks || []).filter((c: any) =>
+      c.clause_number?.toUpperCase().startsWith("FIGURE") ||
+      (c.content || "").includes("transcription of this table will be generated shortly")
+    );
+
+    if (workChunks.length === 0) {
+      console.log(`[describe-figures] No undescribed figure/table chunks for standard ${standard_id}`);
       return new Response(JSON.stringify({ described: 0 }), {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    console.log(`[describe-figures] Found ${figureChunks.length} undescribed figure chunks`);
+    console.log(`[describe-figures] Found ${workChunks.length} undescribed figure/table chunks`);
 
     const { data: standard, error: standardError } = await supabaseAdmin
       .from("standards")
@@ -149,41 +160,59 @@ serve(async (req) => {
     const t0 = Date.now();
     let described = 0;
 
+    const standardCode = standard.standard_code || "Unknown";
+    const stdVersion = standard.version || "";
+    const standardLabel = `${standardCode}${stdVersion ? ` ${stdVersion}` : ""}`.trim();
+    const label = `[${standardLabel}]`;
+
     try {
-      for (const chunk of figureChunks.slice(0, MAX_FIGURES_PER_STANDARD)) {
-        // Check time budget before each figure
+      for (const chunk of workChunks.slice(0, MAX_FIGURES_PER_STANDARD)) {
+        // Check time budget before each item
         if (Date.now() - t0 > TIME_BUDGET_MS) {
-          console.log(`[describe-figures] Time budget reached after ${described} figures, will retrigger`);
+          console.log(`[describe-figures] Time budget reached after ${described} items, will retrigger`);
           break;
         }
 
         try {
-          const figureNumber = chunk.clause_number.replace(/^FIGURE\s+/i, "").trim();
+          const isTable = chunk.clause_number.toUpperCase().startsWith("TABLE");
+          const kind = isTable ? "Table" : "Figure";
+          const refNumber = chunk.clause_number.replace(/^(FIGURE|TABLE)\s+/i, "").trim();
           const caption = chunk.clause_title || "";
           const page = chunk.page_number || 1;
 
-          // Send only the figure's page — not the whole document
+          // Send only the relevant page — not the whole document
           const pageBase64 = await extractPageBase64(srcDoc, page);
           if (!pageBase64) {
-            console.warn(`Figure ${figureNumber}: could not isolate page ${page}, skipping`);
+            console.warn(`${kind} ${refNumber}: could not isolate page ${page}, skipping`);
             continue;
           }
 
-          const prompt =
-            `You are helping Australian tradies understand AS/NZS 3000:2018 Wiring Rules diagrams.\n\n` +
-            `Figure ${figureNumber}${caption ? ` — ${caption}` : ""} is on page ${page} of this document.\n\n` +
-            `Describe this diagram for a tradie on the job:\n` +
-            `1. What does this diagram show? (2-3 sentences, plain English)\n` +
-            `2. What should a tradie look for when checking their installation against this diagram? (3-4 dot points)\n` +
-            `3. Common mistakes or inspection points? (2-3 dot points)\n\n` +
-            `Be practical. No jargon.`;
+          const prompt = isTable
+            ? `This page is from ${standardLabel !== "Unknown" ? standardLabel : "an Australian Standard"}. ` +
+              `TABLE ${refNumber}${caption ? ` — ${caption}` : ""} appears on this page.\n\n` +
+              `Transcribe that table COMPLETELY as a GitHub-flavoured markdown table:\n` +
+              `- Keep the header rows exactly as printed, including units (mm², A, V, °C, m).\n` +
+              `- Transcribe EVERY visible row and column — never summarise, skip rows, or round values.\n` +
+              `- Copy every number exactly as printed, including decimal points.\n` +
+              `- Include any notes printed below the table, after the table.\n` +
+              `- If the table clearly continues on another page, transcribe what is visible and end with: (table continues on next page)\n` +
+              `- If the table is not actually on this page, reply with exactly: TABLE NOT ON PAGE\n\n` +
+              `Output ONLY the markdown table and its notes — no commentary.`
+            : `You are helping Australian tradies understand diagrams from ${standardLabel !== "Unknown" ? standardLabel : "an Australian Standard"}.\n\n` +
+              `Figure ${refNumber}${caption ? ` — ${caption}` : ""} is on page ${page} of this document.\n\n` +
+              `Describe this diagram for a tradie on the job:\n` +
+              `1. What does this diagram show? (2-3 sentences, plain English)\n` +
+              `2. What should a tradie look for when checking their installation against this diagram? (3-4 dot points)\n` +
+              `3. Common mistakes or inspection points? (2-3 dot points)\n\n` +
+              `Be practical. No jargon.`;
 
           const completionResponse = await fetch("https://api.anthropic.com/v1/messages", {
             method: "POST",
             headers: { "x-api-key": ANTHROPIC_API_KEY, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
             body: JSON.stringify({
               model: "claude-opus-4-8",
-              max_tokens: 1000,
+              // Big AS/NZS tables run to thousands of tokens; figures don't.
+              max_tokens: isTable ? 4000 : 1000,
               messages: [
                 {
                   role: "user",
@@ -198,63 +227,90 @@ serve(async (req) => {
 
           if (!completionResponse.ok) {
             const errText = await completionResponse.text();
-            console.error(`Figure ${figureNumber} description failed:`, completionResponse.status, errText);
+            console.error(`${kind} ${refNumber} description failed:`, completionResponse.status, errText);
             continue;
           }
 
           const completionData = await completionResponse.json();
           const description: string = completionData.content?.[0]?.text || "";
 
-          if (!description || description.length < 20) {
-            console.warn(`Figure ${figureNumber}: description too short, skipping`);
+          if (!description || description.length < 20 || description.includes("TABLE NOT ON PAGE")) {
+            console.warn(`${kind} ${refNumber}: no usable output, skipping`);
             continue;
           }
 
-          const standardCode = standard.standard_code || "Unknown";
-          const version = standard.version || "";
-          const label = `[${standardCode}${version ? ` ${version}` : ""}]`;
-          const newContent =
-            `${label} Figure ${figureNumber}${caption ? ` — ${caption}` : ""}\n\n` +
-            description;
+          const newContent = isTable
+            ? `${label} Table ${refNumber}${caption ? `: ${caption}` : ""}\n\n${description}`
+            : `${label} Figure ${refNumber}${caption ? ` — ${caption}` : ""}\n\n${description}`;
 
-          // Set is_indexed: true so re-triggered runs skip this figure
+          // Set is_indexed: true so re-triggered runs skip this item
           const { error: updateError } = await supabaseAdmin
             .from("standard_chunks")
             .update({ content: newContent, is_indexed: true })
             .eq("id", chunk.id);
 
           if (updateError) {
-            console.error(`Failed to update chunk for Figure ${figureNumber}:`, updateError);
+            console.error(`Failed to update chunk for ${kind} ${refNumber}:`, updateError);
             continue;
           }
 
+          // Register transcribed tables in standard_tables so query-time
+          // "Table X" lookups resolve to a page (schema existed but nothing
+          // ever wrote to it). image_url is intentionally empty — the chat
+          // falls back to the "Open Table X" PDF page link.
+          if (isTable) {
+            await supabaseAdmin.from("standard_tables")
+              .delete()
+              .eq("standard_id", standard_id)
+              .eq("table_number", refNumber);
+            const { error: tblInsertError } = await supabaseAdmin.from("standard_tables").insert({
+              standard_id,
+              user_id,
+              table_number: refNumber,
+              caption: caption || null,
+              page_number: page,
+              image_url: "",
+            });
+            if (tblInsertError) console.error(`standard_tables insert failed for Table ${refNumber}:`, tblInsertError);
+          }
+
           described++;
-          console.log(`[describe-figures] Described Figure ${figureNumber} (${described}/${figureChunks.length})`);
+          console.log(`[describe-figures] Described ${kind} ${refNumber} (${described}/${workChunks.length})`);
         } catch (figureErr) {
-          console.error(`Error processing figure chunk ${chunk.id}:`, figureErr);
+          console.error(`Error processing chunk ${chunk.id}:`, figureErr);
         }
       }
     } catch (e) {
-      console.error("[describe-figures] Error processing figures:", e);
+      console.error("[describe-figures] Error processing figures/tables:", e);
     }
 
     const baseUrl = Deno.env.get("SUPABASE_URL");
 
-    // Check if there are still undescribed figures left
-    const { count: remaining } = await supabaseAdmin
-      .from("standard_chunks")
-      .select("*", { count: "exact", head: true })
-      .eq("standard_id", standard_id)
-      .like("clause_number", "FIGURE%")
-      .eq("is_indexed", false);
+    // Check if there is still undescribed work left: figure chunks, plus table
+    // chunks still carrying the transcription placeholder (reference-only
+    // table chunks are embedded as-is and never processed here).
+    const [{ count: remainingFigs }, { count: remainingTbls }] = await Promise.all([
+      supabaseAdmin.from("standard_chunks")
+        .select("*", { count: "exact", head: true })
+        .eq("standard_id", standard_id)
+        .like("clause_number", "FIGURE%")
+        .eq("is_indexed", false),
+      supabaseAdmin.from("standard_chunks")
+        .select("*", { count: "exact", head: true })
+        .eq("standard_id", standard_id)
+        .like("clause_number", "TABLE%")
+        .ilike("content", "%transcription of this table will be generated shortly%")
+        .eq("is_indexed", false),
+    ]);
+    const remaining = (remainingFigs || 0) + (remainingTbls || 0);
 
-    // How many figures have already been described for this standard — the
-    // global ceiling that survives across self-retriggers.
+    // How many figures/tables have already been described for this standard —
+    // the global ceiling that survives across self-retriggers.
     const { count: totalDescribed } = await supabaseAdmin
       .from("standard_chunks")
       .select("*", { count: "exact", head: true })
       .eq("standard_id", standard_id)
-      .like("clause_number", "FIGURE%")
+      .or("clause_number.like.FIGURE%,clause_number.like.TABLE%")
       .eq("is_indexed", true);
 
     if ((remaining || 0) > 0 && (totalDescribed || 0) < MAX_FIGURES_PER_STANDARD) {

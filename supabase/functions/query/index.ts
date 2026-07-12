@@ -332,7 +332,9 @@ serve(async (req) => {
 
     // Pre-call figure lookup — when question explicitly names a figure, fetch its
     // caption from the DB so Claude knows what it shows before it answers.
-    const preFigNums = [...effectiveQuestion.matchAll(/\bfig(?:ure)?s?\s+(\d+(?:\.\d+)*)\b/gi)].map((m) => m[1]);
+    // Letter prefix covers appendix figures/tables ("Figure B2", "Table C1") —
+    // the digits-only pattern made appendix content unreachable by name.
+    const preFigNums = [...effectiveQuestion.matchAll(/\bfig(?:ure)?s?\s+([A-Z]?\d+(?:\.\d+)*)\b/gi)].map((m) => m[1].toUpperCase());
     let figCaptionContext = "";
     if (preFigNums.length > 0) {
       const { data: preFigData } = await supabase
@@ -578,9 +580,10 @@ User's question/context: ${effectiveQuestion}` : "";
           clarification_question: parsedMetadata.clarification_question || null,
         };
 
-        // Figure/table lookup — regex supports whole numbers (e.g. "Table 50") and "fig" abbreviation/typos
-        const questionFigNums = [...effectiveQuestion.matchAll(/\bfig(?:ure)?s?\s+(\d+(?:\.\d+)*)\b/gi)].map((m) => m[1]);
-        const questionTblNums = [...effectiveQuestion.matchAll(/\btable[s]?\s+(\d+(?:\.\d+)*)\b/gi)].map((m) => m[1]);
+        // Figure/table lookup — supports whole numbers ("Table 50"), appendix
+        // letters ("Table C1"), and "fig" abbreviation/typos
+        const questionFigNums = [...effectiveQuestion.matchAll(/\bfig(?:ure)?s?\s+([A-Z]?\d+(?:\.\d+)*)\b/gi)].map((m) => m[1].toUpperCase());
+        const questionTblNums = [...effectiveQuestion.matchAll(/\btable[s]?\s+([A-Z]?\d+(?:\.\d+)*)\b/gi)].map((m) => m[1].toUpperCase());
         const aiFigures: any[] = parsedResponse.figures_referenced || [];
         const aiTables: any[] = parsedResponse.tables_referenced || [];
 
@@ -598,11 +601,11 @@ User's question/context: ${effectiveQuestion}` : "";
         // mentioning "Figure 4.17" should surface that figure regardless of
         // whether the question was explicitly a visual request.
         const answerText2 = parsedResponse.answer || "";
-        const answerFigRefs = [...answerText2.matchAll(/\bfigure\s+(\d+(?:\.\d+)*)\b/gi)].map((m) => m[1]);
+        const answerFigRefs = [...answerText2.matchAll(/\bfigure\s+([A-Z]?\d+(?:\.\d+)*)\b/gi)].map((m) => m[1].toUpperCase());
         for (const n of answerFigRefs) {
           if (!seenFigNums.has(n)) { aiFigures.push({ figure_number: n }); seenFigNums.add(n); }
         }
-        const answerTblRefs = [...answerText2.matchAll(/\btable\s+(\d+(?:\.\d+)*)\b/gi)].map((m) => m[1]);
+        const answerTblRefs = [...answerText2.matchAll(/\btable\s+([A-Z]?\d+(?:\.\d+)*)\b/gi)].map((m) => m[1].toUpperCase());
         for (const n of answerTblRefs) {
           if (!seenTblNums.has(n)) { aiTables.push({ table_number: n }); seenTblNums.add(n); }
         }
@@ -656,20 +659,40 @@ User's question/context: ${effectiveQuestion}` : "";
             return [...codeToStdId.entries()].find(([k]) => k.includes(norm) || norm.includes(k))?.[1] ?? null;
           };
 
-          parsedResponse.figures_referenced = aiFigures.map((f: any) => {
+          // The standard-figures bucket is private, but rows store the public
+          // URL from upload time — served as-is those 403 in chat. Convert to
+          // a short-lived signed URL; if signing fails, fall back to the page
+          // link (image_url: null keeps standard_id + page_number intact).
+          const signImageUrl = async (storedUrl: string | null): Promise<string | null> => {
+            if (!storedUrl) return null;
+            const marker = "/standard-figures/";
+            const i = storedUrl.indexOf(marker);
+            if (i === -1) return storedUrl;
+            const path = decodeURIComponent(storedUrl.slice(i + marker.length).split("?")[0]);
+            const { data } = await supabase.storage.from("standard-figures").createSignedUrl(path, 3600);
+            return data?.signedUrl ?? null;
+          };
+
+          parsedResponse.figures_referenced = (await Promise.all(aiFigures.map(async (f: any) => {
             const hintStdId = resolveStdId(f.standard_code);
             const row = (hintStdId && figMap.get(`${hintStdId}::${f.figure_number}`)) || figMapByNum.get(f.figure_number);
-            if (row?.image_url) return { ...f, image_url: row.image_url, caption: f.caption || row.caption, page_number: row.page_number, standard_id: row.standard_id };
+            if (row?.image_url) {
+              const signed = await signImageUrl(row.image_url);
+              return { ...f, image_url: signed, caption: f.caption || row.caption, page_number: row.page_number, standard_id: row.standard_id };
+            }
             const pi = findPageInChunks("Figure", f.figure_number, hintStdId ?? undefined);
             if (pi) return { ...f, page_number: pi.page_number, standard_id: pi.standard_id };
             if (hintStdId) return { ...f, standard_id: hintStdId, page_number: null };
             return null;
-          }).filter(Boolean);
+          }))).filter(Boolean);
 
           parsedResponse.tables_referenced = aiTables.map((t: any) => {
             const hintStdId = resolveStdId(t.standard_code);
             const row = (hintStdId && tblMap.get(`${hintStdId}::${t.table_number}`)) || tblMapByNum.get(t.table_number);
-            if (row?.image_url) return { ...t, image_url: row.image_url, caption: t.caption || row.caption, page_number: row.page_number, standard_id: row.standard_id };
+            // standard_tables rows carry the authoritative caption page even
+            // when image_url is empty (tables use the PDF page link, not an
+            // image) — prefer that over scanning chunks.
+            if (row) return { ...t, image_url: row.image_url || null, caption: t.caption || row.caption, page_number: row.page_number, standard_id: row.standard_id };
             const pi = findPageInChunks("Table", t.table_number, hintStdId ?? undefined);
             if (pi) return { ...t, page_number: pi.page_number, standard_id: pi.standard_id };
             if (hintStdId) return { ...t, standard_id: hintStdId, page_number: null };

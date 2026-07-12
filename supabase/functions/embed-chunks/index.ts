@@ -133,16 +133,21 @@ serve(async (req) => {
       }
 
       // Fetch next batch of un-embedded chunks within the index limit.
-      // Skip figure placeholders — describe-figures rewrites their content with a real
-      // description, after which they get embedded. Embedding the placeholder would
-      // pollute search with empty "description will be generated shortly" chunks.
+      // Skip figure/table placeholders — describe-figures rewrites their content
+      // with a real description/transcription, after which they get embedded.
+      // Embedding the placeholder would pollute search with junk chunks.
+      // Table and figure chunks are ALWAYS within the limit: they carry the
+      // highest chunk_index values (appended after clause chunks), so the free
+      // tier's 25% cutoff used to exclude every table — the content users ask
+      // about most.
       const { data: chunks } = await supabaseAdmin
         .from("standard_chunks")
         .select("id, chunk_index, content")
         .eq("standard_id", standard_id)
         .is("embedding", null)
         .not("content", "ilike", "%visual description will be generated shortly%")
-        .lt("chunk_index", indexLimit)
+        .not("content", "ilike", "%transcription of this table will be generated shortly%")
+        .or(`chunk_index.lt.${indexLimit},clause_number.like.TABLE%,clause_number.like.FIGURE%`)
         .order("chunk_index")
         .limit(EMBED_BATCH_SIZE * PARALLEL_EMBED);
 
@@ -187,7 +192,8 @@ serve(async (req) => {
       .eq("standard_id", standard_id)
       .is("embedding", null)
       .not("content", "ilike", "%visual description will be generated shortly%")
-      .lt("chunk_index", indexLimit);
+      .not("content", "ilike", "%transcription of this table will be generated shortly%")
+      .or(`chunk_index.lt.${indexLimit},clause_number.like.TABLE%,clause_number.like.FIGURE%`);
 
     const allDone = (remaining ?? 1) === 0;
 
