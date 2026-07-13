@@ -945,6 +945,30 @@ User's question/context: ${effectiveQuestion}` : "";
           // authority. If the answer isn't grounded, it shows no citation.
         }
 
+        // Dedupe citation chips and figure/table references — the model
+        // sometimes emits the same clause twice, and question + answer scans
+        // can add the same figure from two paths.
+        {
+          const seenCites = new Set<string>();
+          parsedResponse.citations = (parsedResponse.citations || []).filter((c: any) => {
+            const key = `${normCode(c.standard_code || "")}::${(c.clause_number || "").toString().trim().toUpperCase()}`;
+            if (seenCites.has(key)) return false;
+            seenCites.add(key);
+            return true;
+          });
+          const dedupeRefs = (list: any[], numKey: string) => {
+            const seen = new Set<string>();
+            return (list || []).filter((r: any) => {
+              const key = `${r.standard_id || ""}::${(r[numKey] || "").toString().toUpperCase()}`;
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            });
+          };
+          parsedResponse.figures_referenced = dedupeRefs(parsedResponse.figures_referenced, "figure_number");
+          parsedResponse.tables_referenced = dedupeRefs(parsedResponse.tables_referenced, "table_number");
+        }
+
         // Snapshot the real citations BEFORE gating — the analytics tables
         // used to permanently store "[Upgrade to Pro to unlock this clause]"
         // for every free-tier query.

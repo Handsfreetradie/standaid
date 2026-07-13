@@ -256,6 +256,55 @@ serve(async (req) => {
             continue;
           }
 
+          // Stitch multi-page tables. The big AS/NZS tables (ampacity, max
+          // demand) run 2–4 pages; page one alone loses the enclosed/buried
+          // columns and most rows — exactly the cells tradies ask about.
+          if (isTable && description.includes("(table continues on next page)")) {
+            const MAX_CONTINUATIONS = 3;
+            let contPage = usedPage;
+            for (let cont = 0; cont < MAX_CONTINUATIONS && description.includes("(table continues on next page)"); cont++) {
+              if (Date.now() - t0 > TIME_BUDGET_MS) break;
+              contPage += 1;
+              const contBase64 = await extractPageBase64(srcDoc, contPage);
+              if (!contBase64) break;
+              const contPrompt =
+                `This page continues TABLE ${refNumber} from the previous page of ${standardLabel !== "Unknown" ? standardLabel : "an Australian Standard"}.\n\n` +
+                `Transcribe ONLY the continuation of that table visible on this page as a GitHub-flavoured markdown table:\n` +
+                `- Repeat the column header row so the columns are unambiguous.\n` +
+                `- Copy every number exactly as printed, including decimal points.\n` +
+                `- Include any notes printed below the table.\n` +
+                `- If the table continues onto yet another page, end with: (table continues on next page)\n` +
+                `- If this page does NOT continue the table, reply with exactly: TABLE NOT ON PAGE\n\n` +
+                `Output ONLY the markdown table and its notes — no commentary.`;
+              const contRes = await fetch("https://api.anthropic.com/v1/messages", {
+                method: "POST",
+                headers: { "x-api-key": ANTHROPIC_API_KEY, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
+                body: JSON.stringify({
+                  model: "claude-sonnet-4-6",
+                  max_tokens: 4000,
+                  messages: [{
+                    role: "user",
+                    content: [
+                      { type: "document", source: { type: "base64", media_type: "application/pdf", data: contBase64 } },
+                      { type: "text", text: contPrompt },
+                    ],
+                  }],
+                }),
+              });
+              if (!contRes.ok) {
+                console.error(`Table ${refNumber} continuation p${contPage} failed:`, contRes.status);
+                break;
+              }
+              const contData = await contRes.json();
+              const contText: string = contData.content?.[0]?.text || "";
+              if (!contText || contText.length < 20 || contText.includes("TABLE NOT ON PAGE")) break;
+              description =
+                description.replace(/\(table continues on next page\)\s*$/i, "").trimEnd() +
+                `\n\n[continued — page ${contPage}]\n\n` + contText;
+              console.log(`[describe-figures] Table ${refNumber}: stitched continuation from page ${contPage}`);
+            }
+          }
+
           const newContent = isTable
             ? `${label} Table ${refNumber}${caption ? `: ${caption}` : ""}\n\n${description}`
             : `${label} Figure ${refNumber}${caption ? ` — ${caption}` : ""}\n\n${description}`;

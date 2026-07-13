@@ -128,10 +128,14 @@ function validateCitations(
   chunkClauseNumbers: Set<string>,
 ): { cleaned: string; issues: ValidationIssue[] } {
   const issues: ValidationIssue[] = [];
-  const citations = [
+  // Dedupe, then process longest matches first: "AS/NZS 3000 Table 8.1" must
+  // be handled before its substring "Table 8.1" — replacing the short form
+  // first sliced into the longer text and produced mangled output like
+  // "AS/NZS 3ence." in answers.
+  const citations = [...new Set([
     ...(response.match(STANDARD_CLAUSE_REGEX) ?? []),
     ...(response.match(STANDALONE_CLAUSE_REGEX) ?? []),
-  ];
+  ])].sort((a, b) => b.length - a.length);
 
   if (citations.length === 0) {
     // Info only — by design, clause numbers go in the citations metadata array,
@@ -163,8 +167,10 @@ function validateCitations(
       });
       // Replace with neutral wording — never the bracketed placeholder the
       // system prompt itself forbids ("AS/NZS 3000 Clause 2.5.1 requires…"
-      // becomes "the standard requires…").
-      cleaned = cleaned.replace(citation, "the standard");
+      // becomes "the standard requires…"). split/join replaces every
+      // occurrence; single .replace() left later duplicates for shorter
+      // patterns to slice into.
+      cleaned = cleaned.split(citation).join("the standard");
     }
   }
 
