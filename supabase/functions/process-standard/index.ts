@@ -145,7 +145,10 @@ async function extractTextWithAI(
         messages: [{
           role: "user",
           content: [
-            { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64Pdf } },
+            // cache_control: batches 2..N send the IDENTICAL document (whole-
+            // doc mode) — caching it cuts input cost ~90% for every batch
+            // after the first. No-op for the sliced path (unique doc per call).
+            { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64Pdf }, cache_control: { type: "ephemeral" } },
             { type: "text", text: prompt },
           ],
         }],

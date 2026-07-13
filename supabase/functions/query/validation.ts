@@ -213,10 +213,13 @@ function checkSafetyWarnings(
     lowerResponse.includes("verify on site");
 
   if (!hasWarning) {
+    // We APPEND the warning ourselves right here — the issue is corrected,
+    // so it's informational. Counting it as a warning pushed needs_review on
+    // half of all safety-topic answers whose content was fully correct.
     issues.push({
       type: "missing_safety_warning",
-      severity: "warning",
-      detail: "Safety-critical response missing ⚠️ warning",
+      severity: "info",
+      detail: "Safety-critical response missing ⚠️ warning — warning appended automatically",
     });
     const updatedResponse =
       response +

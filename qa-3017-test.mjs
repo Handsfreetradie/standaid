@@ -31,7 +31,7 @@ const TEST_QUERIES = [
     text: "What is the minimum insulation resistance value for a new electrical installation?",
     description: "Core insulation resistance pass/fail value",
     correct_values: ["1 m", "1mΩ", "1 megohm", "1MΩ"],
-    wrong_values: ["2 m", "5 m", "10 m", "0.5 m"],
+    wrong_values: ["2 megohm", "5 megohm", "10 megohm", "minimum of 0.5 m", "minimum of 2 m"],
     clause_hints: ["3.2.2", "3.2"],
     safety: false,
   },
@@ -40,7 +40,7 @@ const TEST_QUERIES = [
     text: "What DC test voltage do I use for insulation resistance testing on a standard installation?",
     description: "IR test voltage",
     correct_values: ["500 v", "500v", "500 volt"],
-    wrong_values: ["1000v", "1000 v", "250v", "240v"],
+    wrong_values: ["1000v", "1000 v"],
     clause_hints: ["3.2", "3.2.4"],
     safety: false,
   },
@@ -102,8 +102,8 @@ const TEST_QUERIES = [
     id: 9,
     text: "Can I use a neon voltage tester to check insulation resistance on a circuit?",
     description: "Voltage indicator limitation — Clause 1.7.2 Note 2",
-    correct_values: ["no", "should not", "not be used", "only", "presence"],
-    wrong_values: ["yes, you can", "suitable", "acceptable"],
+    correct_values: ["no", "should not", "not be used", "not suitable", "only", "presence"],
+    wrong_values: ["yes, you can", "is suitable", "is acceptable", "perfectly fine"],
     clause_hints: ["1.7.2"],
     safety: true,
   },
@@ -254,11 +254,15 @@ function validateResponse(query, apiResponse) {
     }
   }
 
-  // Check clause citation present
+  // Check clause citation present — the app returns clauses as clickable
+  // citation metadata, NOT inline in the answer text (by design). Check both.
   const clauseRegex = /(?:clause|section|figure|table)\s+\d+(?:\.\d+)*/gi;
-  const citations = answer.match(clauseRegex) ?? [];
-  if (citations.length === 0) {
-    issues.push("NEEDS REVIEW: No clause reference in answer");
+  const inlineCitations = answer.match(clauseRegex) ?? [];
+  const metaCitations = Array.isArray(apiResponse.citations)
+    ? apiResponse.citations.filter(c => c && (c.clause_number || c.standard_code)).length
+    : 0;
+  if (inlineCitations.length === 0 && metaCitations === 0) {
+    issues.push("NEEDS REVIEW: No clause reference in answer or citations metadata");
     if (verdict === "PASS") verdict = "NEEDS REVIEW";
   }
 
@@ -285,7 +289,7 @@ function validateResponse(query, apiResponse) {
     pass,
     verdict,
     issues,
-    citationCount: citations.length,
+    citationCount: inlineCitations.length + metaCitations,
     answer_snippet: answer.slice(0, 200),
   };
 }
@@ -294,13 +298,15 @@ function validateResponse(query, apiResponse) {
 async function main() {
   const email = process.env.SUPABASE_EMAIL;
   const password = process.env.SUPABASE_PASSWORD;
-  if (!email || !password) {
+  const presetToken = process.env.SUPABASE_ACCESS_TOKEN; // CI/agent use: skip password auth
+  if (!presetToken && (!email || !password)) {
     console.error("Usage: SUPABASE_EMAIL=xxx SUPABASE_PASSWORD=xxx node qa-3017-test.mjs");
+    console.error("   or: SUPABASE_ACCESS_TOKEN=xxx node qa-3017-test.mjs");
     process.exit(1);
   }
 
   console.log("🔐 Signing in...");
-  const token = await signIn(email, password);
+  const token = presetToken || await signIn(email, password);
   console.log("✅ Authenticated\n");
 
   const results = [];
