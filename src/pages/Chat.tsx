@@ -216,6 +216,18 @@ const Chat = () => {
   // threw on every send and killed the chat before the request went out.
   const { start, update, done } = useProgress();
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Prefill from ?q= (the tools' "Verify with AI" button). Prefill ONLY —
+  // nothing sends until the user hits send, so no query is spent silently.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get("q");
+    if (q) {
+      setInput(q);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const queriesRemaining = profile

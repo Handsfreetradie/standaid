@@ -15,15 +15,17 @@ import HeatLoadTool from "@/components/tools/HeatLoadTool";
 import DuctSizingTool from "@/components/tools/DuctSizingTool";
 import GasPipeSizingTool from "@/components/tools/GasPipeSizingTool";
 import DrainageFallTool from "@/components/tools/DrainageFallTool";
+import EarthConductorTool from "@/components/tools/EarthConductorTool";
 
-type ToolMode = "menu" | "voltage-drop" | "concrete-volume" | "pipe-sizing" | "cable-sizer" | "conduit-fill" | "max-demand" | "brick-calc" | "timber-span" | "roof-pitch" | "heat-load" | "duct-sizing" | "gas-pipe" | "drainage-fall";
+type ToolMode = "menu" | "earth-conductor" | "voltage-drop" | "concrete-volume" | "pipe-sizing" | "cable-sizer" | "conduit-fill" | "max-demand" | "brick-calc" | "timber-span" | "roof-pitch" | "heat-load" | "duct-sizing" | "gas-pipe" | "drainage-fall";
 
 const TOOLS: { id: ToolMode; title: string; desc: string; category: string }[] = [
   // Electrical
   { id: "voltage-drop", title: "Voltage Drop", desc: "AC/DC, full cable spec & derating", category: "Electrical" },
   { id: "cable-sizer", title: "Cable Sizer", desc: "Auto-select cable by load, run & conditions", category: "Electrical" },
   { id: "max-demand", title: "Maximum Demand", desc: "Diversity & main breaker sizing", category: "Electrical" },
-  { id: "conduit-fill", title: "Conduit Fill", desc: "AS/NZS 3080 multi-cable fill check", category: "Electrical" },
+  { id: "conduit-fill", title: "Conduit Fill", desc: "Space-factor multi-cable fill check", category: "Electrical" },
+  { id: "earth-conductor", title: "Earth Conductor Size", desc: "AS/NZS 3000 Table 5.1 minimum earth", category: "Electrical" },
   // HVAC / Refrigeration
   { id: "heat-load", title: "Heat Load", desc: "Cooling & heating capacity estimator", category: "HVAC" },
   { id: "duct-sizing", title: "Duct Sizing", desc: "Round & rectangular duct by airflow", category: "HVAC" },
@@ -41,6 +43,7 @@ const TOOLS: { id: ToolMode; title: string; desc: string; category: string }[] =
 
 const TOOL_COMPONENTS: Record<string, React.FC<{ onBack: () => void }>> = {
   "voltage-drop": VoltageDropTool,
+  "earth-conductor": EarthConductorTool,
   "cable-sizer": CableSizerTool,
   "conduit-fill": ConduitFillTool,
   "max-demand": MaxDemandTool,

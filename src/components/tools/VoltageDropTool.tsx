@@ -180,6 +180,9 @@ const VoltageDropTool = ({ onBack }: Props) => {
       disclaimer="Based on AS/NZS 3008.1.1 mV/A/m tables and current capacity. Derating factors are per Tables 22-27. Always verify with the full standard and manufacturer data for critical installations."
       onBack={onBack}
       onCalculate={calculate}
+      verifyQuestion={result
+        ? `Is a ${cableSize} mm² ${material} ${ct?.label ?? ""} cable compliant for a ${loadValue}${loadMode === "kw" ? " kW" : " A"} load over a ${length} m run at ${voltage} V ${system === "dc" ? "DC" : phase === "three" ? "three phase" : "single phase"}? Check voltage drop and current capacity.`
+        : undefined}
       result={result ? (
         <>
           {/* Pass/Fail Header */}

@@ -111,6 +111,9 @@ const ConduitFillTool = ({ onBack }: Props) => {
       disclaimer="Uses the accepted conduit space factors (53% one cable, 31% two, 40% three or more) with AS/NZS 2053 conduit dimensions. Cable ODs are typical values — check manufacturer data for exact dimensions. Tight fills make cable pulling difficult and risk insulation damage."
       onBack={onBack}
       onCalculate={calculate}
+      verifyQuestion={result
+        ? `What are the conduit space factor rules for running multiple cables in a ${conduitSize} mm conduit?`
+        : undefined}
       result={result ? (
         <>
           <div className={`p-3 rounded-lg mb-3 border ${

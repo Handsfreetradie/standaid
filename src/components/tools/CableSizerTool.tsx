@@ -187,6 +187,9 @@ const CableSizerTool = ({ onBack }: Props) => {
       disclaimer="Based on AS/NZS 3008.1.1 current capacity and mV/A/m tables. Derating per Tables 22-27. Always verify with the full standard for critical installations."
       onBack={onBack}
       onCalculate={calculate}
+      verifyQuestion={result
+        ? `What size ${material} ${ct?.label ?? ""} cable do I need for a ${loadValue}${loadMode === "kw" ? " kW" : " A"} load over ${length} m at ${voltage} V, staying under ${maxVdPercent}% voltage drop?`
+        : undefined}
       result={result ? (
         <>
           <div className={`p-3 rounded-lg mb-3 border ${

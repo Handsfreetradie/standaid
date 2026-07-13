@@ -1,8 +1,9 @@
-import { ArrowLeft, ChevronDown } from "lucide-react";
+import { ArrowLeft, ChevronDown, MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 interface ToolLayoutProps {
   title: string;
@@ -13,10 +14,15 @@ interface ToolLayoutProps {
   result?: React.ReactNode;
   onCalculate: () => void;
   advancedInputs?: React.ReactNode;
+  // Pre-written question for the AI chat — lets the user double-check this
+  // tool's result against their own uploaded standard in one tap. The chat
+  // input is prefilled only; nothing sends (or spends) until they hit send.
+  verifyQuestion?: string;
 }
 
-const ToolLayout = ({ title, subtitle, disclaimer, onBack, children, result, onCalculate, advancedInputs }: ToolLayoutProps) => {
+const ToolLayout = ({ title, subtitle, disclaimer, onBack, children, result, onCalculate, advancedInputs, verifyQuestion }: ToolLayoutProps) => {
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const navigate = useNavigate();
 
   return (
     <div className="h-full overflow-y-auto">
@@ -54,6 +60,16 @@ const ToolLayout = ({ title, subtitle, disclaimer, onBack, children, result, onC
       {result && (
         <Card className="mt-5 p-4 border-primary/20">
           {result}
+          {verifyQuestion && (
+            <Button
+              variant="outline"
+              className="w-full h-10 mt-4 gap-2 text-sm font-semibold"
+              onClick={() => navigate(`/chat?q=${encodeURIComponent(verifyQuestion)}`)}
+            >
+              <MessageCircle className="h-4 w-4" />
+              Verify with AI against your standard
+            </Button>
+          )}
         </Card>
       )}
 

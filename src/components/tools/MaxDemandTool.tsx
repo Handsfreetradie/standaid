@@ -40,6 +40,9 @@ const MaxDemandTool = ({ onBack }: Props) => {
       disclaimer="Calculates maximum demand per phase for a SINGLE domestic installation using the load-group method of AS/NZS 3000:2018 Appendix C, Table C1 (column 2). Blocks of units use different columns, and non-domestic installations use Table C2 — always verify against your copy of the standard. Off-peak controlled loads on a separate tariff are excluded from demand."
       onBack={onBack}
       onCalculate={calculate}
+      verifyQuestion={result
+        ? `How do I calculate maximum demand for a single domestic installation using Table C1, and what are the load group contribution rules?`
+        : undefined}
       result={result ? (
         <>
           <div className="p-3 rounded-lg mb-3 border bg-primary/5 border-primary/20">
