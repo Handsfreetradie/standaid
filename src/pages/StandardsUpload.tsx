@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import * as pdfjsLib from "pdfjs-dist";
+import { assembleLines, type PositionedItem } from "@/lib/pdf-text";
 import {
   Upload, FileText, CheckCircle2, Loader2, ArrowLeft, ArrowRight,
   BookOpen, Zap, Search, Shield, Sparkles,
@@ -54,14 +55,12 @@ async function extractPdfText(
       const page = await pdf.getPage(i + 1);
       const content = await page.getTextContent();
 
-      // Reconstruct lines geometry-aware. The old fixed 3pt Y-grid split
-      // same-line items across buckets (a decimal point 0.02pt off became its
-      // own "line", turning 0.5 into 05) and join("") fused adjacent table
-      // columns into one number. Instead: cluster by Y-gap relative to glyph
-      // height, sort by X within each line, and insert spaces from the real
-      // horizontal gap between items.
-      interface Positioned { str: string; x: number; y: number; w: number; h: number }
-      const items: Positioned[] = [];
+      // Reconstruct lines geometry-aware (see src/lib/pdf-text.ts — pure,
+      // unit-tested). The old fixed 3pt Y-grid split same-line items across
+      // buckets (a decimal point 0.02pt off became its own "line", turning
+      // 0.5 into 05) and join("") fused adjacent table columns into one
+      // number.
+      const items: PositionedItem[] = [];
       for (const item of content.items) {
         if (!("str" in item) || !item.str) continue;
         const t = (item as any).transform;
@@ -73,44 +72,7 @@ async function extractPdfText(
           h: (item as any).height || Math.hypot(t[2], t[3]) || 10,
         });
       }
-
-      // Top-to-bottom, then left-to-right so clustering sees reading order.
-      items.sort((a, b) => (b.y - a.y) || (a.x - b.x));
-
-      const lines: Positioned[][] = [];
-      let current: Positioned[] = [];
-      let currentY = Infinity;
-      for (const it of items) {
-        // Same visual line if Y is within half a glyph height (min 2pt) —
-        // tolerant of kerned runs and superscripts, unlike a fixed grid.
-        const tol = Math.max(2, it.h * 0.5);
-        if (current.length === 0 || Math.abs(it.y - currentY) <= tol) {
-          current.push(it);
-          if (current.length === 1) currentY = it.y;
-        } else {
-          lines.push(current);
-          current = [it];
-          currentY = it.y;
-        }
-      }
-      if (current.length > 0) lines.push(current);
-
-      const sortedLines = lines.map((line) => {
-        line.sort((a, b) => a.x - b.x);
-        let text = "";
-        let prevEnd = Infinity;
-        for (const it of line) {
-          const gap = it.x - prevEnd;
-          // A real word/column gap is a decent fraction of the glyph height;
-          // kerned fragments of one word sit at gap ≈ 0 (or overlap).
-          if (text && gap > Math.max(1, it.h * 0.12) && !text.endsWith(" ") && !it.str.startsWith(" ")) {
-            text += " ";
-          }
-          text += it.str;
-          prevEnd = it.x + it.w;
-        }
-        return text;
-      });
+      const sortedLines = assembleLines(items);
 
       onProgress(++completed / numPages);
       return sortedLines.join("\n");

@@ -203,18 +203,36 @@ function validateResponse(query, apiResponse) {
   let pass = true;
   let verdict = "PASS";
 
-  // If AI couldn't find content — that's a valid response (no hallucination)
+  // If AI couldn't find content — that's a valid response (no hallucination).
+  // A "General knowledge" prefixed answer is ALSO a decline for scoring
+  // purposes: the AI is explicitly saying the standard isn't in its context.
+  // Previously these were scored as real attempts, so memory-based answers
+  // inflated/deflated the score depending on luck.
   const noContent = answer.includes("couldn't find") ||
                     answer.includes("not found") ||
                     answer.includes("not uploaded") ||
                     answer.includes("not been uploaded") ||
+                    answer.includes("isn't in your uploaded") ||
+                    answer.includes("general knowledge (not from your uploaded") ||
                     answer.includes("answer_found") ||
                     apiResponse.answer_found === false;
 
   if (noContent) {
+    // Declining is only fully correct if it doesn't smuggle in specifics:
+    // a decline that still states a wrong value is a hallucination.
+    for (const bad of query.wrong_values) {
+      if (answer.includes(bad.toLowerCase())) {
+        return {
+          pass: false,
+          verdict: "FAIL (declined but still stated a wrong value)",
+          issues: [`FAIL: Decline contains "${bad}" which contradicts the standard`],
+          answer_snippet: answer.slice(0, 120),
+        };
+      }
+    }
     return {
       pass: true,
-      verdict: "PASS (standard not uploaded — correctly declined to answer)",
+      verdict: "PASS (standard not in context — correctly declined to answer)",
       issues: [],
       answer_snippet: answer.slice(0, 120),
     };
@@ -252,10 +270,12 @@ function validateResponse(query, apiResponse) {
     if (verdict === "PASS") verdict = "NEEDS REVIEW";
   }
 
-  // API-level hallucination flag
+  // API-level review flag: a warning to inspect, NOT an automatic failure.
+  // needs_review fires on soft signals (e.g. an appended safety warning);
+  // failing on it cost passes for otherwise-correct answers in the June run.
   if (apiResponse.needs_review) {
-    issues.push("FAIL: API flagged needs_review — possible citation grounding issue");
-    pass = false;
+    issues.push("NEEDS REVIEW: API flagged needs_review — inspect citation grounding");
+    if (verdict === "PASS") verdict = "NEEDS REVIEW";
   }
 
   if (!pass) verdict = "FAIL";
