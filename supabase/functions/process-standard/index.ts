@@ -446,6 +446,26 @@ serve(async (req) => {
         ? { priorText: (jobRow.ocr_text as string) || "", startPage: jobRow.ocr_next_page as number }
         : undefined;
 
+      // Hard daily circuit-breaker on OCR runs (each run makes 2-5 vision
+      // calls on a full document). 40 runs/day covers many scanned uploads;
+      // anything past that is a loop or a mistake and must stop, not spend.
+      const { data: ocrBudget } = await supabaseAdmin.rpc("check_and_record_ai_usage", {
+        p_user_id: userId,
+        p_kind: "ocr_run",
+        p_max: 40,
+        p_window_seconds: 86400,
+      });
+      if (typeof ocrBudget === "number" && ocrBudget < 0) {
+        clearTimeout(timeoutHandle);
+        await supabaseAdmin.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
+        await supabaseAdmin.from("processing_jobs")
+          .update({ status: "failed", error_message: "Daily document-processing budget reached. Try again tomorrow.", completed_at: new Date().toISOString() })
+          .eq("standard_id", standard_id);
+        return new Response(JSON.stringify({ error: "Daily OCR budget reached — stopped to protect API spend" }), {
+          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
       try {
         // Leave ~20s of the processing window for chunking + DB writes
         const extractionDeadline = requestStart + PROCESSING_TIMEOUT_MS - 20_000;

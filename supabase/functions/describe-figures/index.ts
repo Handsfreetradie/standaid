@@ -159,6 +159,7 @@ serve(async (req) => {
 
     const t0 = Date.now();
     let described = 0;
+    let budgetExhausted = false;
 
     const standardCode = standard.standard_code || "Unknown";
     const stdVersion = standard.version || "";
@@ -174,6 +175,22 @@ serve(async (req) => {
         }
 
         try {
+          // Hard daily circuit-breaker: every vision call is counted against
+          // a per-account daily ceiling. A bug, a loop, or an over-eager
+          // agent can never again burn unbounded API credit — the pipeline
+          // stops and says so instead.
+          const { data: budget } = await supabaseAdmin.rpc("check_and_record_ai_usage", {
+            p_user_id: user_id,
+            p_kind: "vision",
+            p_max: 500,
+            p_window_seconds: 86400,
+          });
+          if (typeof budget === "number" && budget < 0) {
+            console.error(`[describe-figures] DAILY VISION BUDGET REACHED (500/day) — stopping without retrigger. Resumes tomorrow or via manual kick.`);
+            budgetExhausted = true;
+            break;
+          }
+
           const isTable = chunk.clause_number.toUpperCase().startsWith("TABLE");
           const kind = isTable ? "Table" : "Figure";
           const refNumber = chunk.clause_number.replace(/^(FIGURE|TABLE)\s+/i, "").trim();
@@ -386,7 +403,7 @@ serve(async (req) => {
     // re-fired itself ~860 times in 20 minutes (each run re-downloading the
     // multi-MB PDF). If nothing was described, stop — the next upload or a
     // manual kick resumes the work once the underlying problem is fixed.
-    if (described > 0 && (remaining || 0) > 0 && (totalDescribed || 0) < MAX_FIGURES_PER_STANDARD) {
+    if (described > 0 && !budgetExhausted && (remaining || 0) > 0 && (totalDescribed || 0) < MAX_FIGURES_PER_STANDARD) {
       // More figures to describe and still under the ceiling — retrigger self
       console.log(`[describe-figures] ${remaining} figures/tables remaining, retriggering`);
       const retrigger = fetch(`${baseUrl}/functions/v1/describe-figures`, {
