@@ -90,9 +90,13 @@ export const CABLE_TYPES: Record<string, CableTypeInfo> = {
 // Keys: `${cableType}-${material}` → { size: amps }
 // Simplified: enclosed/clipped reference values at 40°C for PVC, 45°C for XLPE
 export const CURRENT_CAPACITY: Record<string, Record<string, number>> = {
-  // Flat TPS V-75 copper – Table 3 Col 4 (enclosed, single circuit)
+  // Flat TPS V-75 copper (two-core sheathed thermoplastic) — AS/NZS 3008.1.1
+  // Table 10, column 11 "Enclosed — wiring enclosure in air", Cu solid/stranded.
+  // Verified 2026-07-13 cell-by-cell against the vision-transcribed Table 10
+  // from the user's uploaded standard; the previous hand-typed values were
+  // ~10% low (they tracked the exposed-to-sun column, not enclosed).
   "flat-tps-v75-copper": {
-    "1": 13, "1.5": 15.5, "2.5": 20, "4": 27, "6": 34, "10": 46, "16": 61,
+    "1": 13, "1.5": 16, "2.5": 23, "4": 30, "6": 39, "10": 52, "16": 68,
   },
   // V-90 building wire copper – Table 4 Col 4 (enclosed)
   "v90-copper": {

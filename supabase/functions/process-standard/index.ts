@@ -391,6 +391,27 @@ serve(async (req) => {
     const qualityScore = computeQualityScore(extracted.text, extracted.totalPages, extracted.pagesWithContent);
     console.log(`Quality score: ${qualityScore} (${extracted.pagesWithContent}/${extracted.totalPages} pages with content)`);
 
+    // AI-OCR failure text must never become content. A copy-protected PDF
+    // renders blank when sliced for OCR, and the model replies "these pages
+    // are entirely blank" — prose that scored 68 and shipped as a "complete"
+    // standard (AS 3017 incident, 2026-07-13). Two independent detectors:
+    // refusal phrasing, and characters-per-page far below any real document.
+    const refusalPhrases = /entirely blank|completely (blank|empty)|no (readable|visible) text|blank\/white|cannot transcribe|unable to (read|transcribe)|do not contain any readable/i;
+    const charsPerPage = extracted.text.length / Math.max(extracted.totalPages, 1);
+    const looksLikeOcrFailure =
+      refusalPhrases.test(extracted.text.slice(0, 3000)) ||
+      (extracted.totalPages > 5 && charsPerPage < 150);
+    if (looksLikeOcrFailure) {
+      clearTimeout(timeoutHandle);
+      await supabaseAdmin.from("standards").update({ extraction_status: "failed", extraction_quality_score: 0 }).eq("id", standard_id);
+      await supabaseAdmin.from("processing_jobs")
+        .update({ status: "failed", error_message: "This PDF appears to be copy-protected or scanned in a way we can't read — the pages came back blank. Try opening it and using Print → Save as PDF to create a fresh copy, then upload that.", completed_at: new Date().toISOString() })
+        .eq("standard_id", standard_id);
+      return new Response(JSON.stringify({ error: "This PDF appears to be copy-protected or scanned in a way we can't read — the pages came back blank. Try opening it and using Print → Save as PDF to create a fresh copy, then upload that." }), {
+        status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Reject low-quality extractions outright — a half-read standard produces wrong
     // answers, which is worse than asking the user for a cleaner PDF. A genuine
     // standard scores 70+; garbage/partial scans score well below 35.
