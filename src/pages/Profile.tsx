@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { User, ChevronRight, ChevronDown, Shield, Zap, HelpCircle, LogOut, CreditCard, Bell, Mail, ExternalLink, CheckCircle2 } from "lucide-react";
+import { User, ChevronRight, ChevronDown, Shield, Zap, HelpCircle, LogOut, CreditCard, Bell, Mail, ExternalLink, CheckCircle2, BookOpen, FileText, CalendarDays } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/hooks/useAuth";
-import { useProfile } from "@/hooks/useData";
+import { useProfile, useStandards } from "@/hooks/useData";
 
 const TRADE_LABELS: Record<string, string> = {
   electrical: "Electrical",
@@ -43,6 +43,7 @@ const FAQS = [
 const Profile = () => {
   const { user, signOut } = useAuth();
   const { data: profile } = useProfile();
+  const { data: standards } = useStandards();
   const [activePanel, setActivePanel] = useState<string | null>(null);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const [notifFeatures, setNotifFeatures] = useState(() =>
@@ -77,10 +78,20 @@ const Profile = () => {
   const queriesUsed = profile?.daily_query_count || 0;
   const isPro = tier === "pro" || tier === "business";
 
+  const readyStandards = (standards || []).filter((s: any) => s.extraction_status === "complete");
+  const totalClauses = (standards || []).reduce((sum: number, s: any) => sum + (s.indexed_chunks || 0), 0);
+  const memberSince = user?.created_at
+    ? new Date(user.created_at).toLocaleDateString("en-AU", { month: "short", year: "numeric" })
+    : null;
+
   return (
     <div className="h-full overflow-y-auto">
-      <div className="min-h-full px-5 py-6 pb-24 md:pb-10 max-w-5xl md:mx-auto flex flex-col">
-        <div className="md:grid md:grid-cols-5 md:gap-10 md:items-start flex-1">
+      {/* md:justify-center vertically centres the content block on desktop —
+          it used to hug the top-left of the viewport with a sea of empty
+          space below (especially for Pro users, who have no plan-comparison
+          cards). Mobile keeps the natural top-aligned scroll flow. */}
+      <div className="min-h-full px-5 py-6 pb-24 md:py-10 max-w-5xl md:mx-auto flex flex-col md:justify-center">
+        <div className="md:grid md:grid-cols-5 md:gap-10 md:items-start">
 
           {/* Left column: identity + plan */}
           <div className="md:col-span-2 mb-6 md:mb-0">
@@ -131,6 +142,42 @@ const Profile = () => {
                   <Zap className="h-4 w-4" />
                   Upgrade to Pro — $19.99/mo
                 </Button>
+              )}
+            </Card>
+
+            {/* Your Library — fills the left column with real account data */}
+            <Card className="p-4 mb-6">
+              <h2 className="text-sm font-bold text-foreground mb-3">Your Library</h2>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-lg bg-muted/50 py-3 px-1">
+                  <BookOpen className="h-4 w-4 text-primary mx-auto mb-1.5" />
+                  <p className="text-lg font-extrabold text-foreground leading-none">{readyStandards.length}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">Standards ready</p>
+                </div>
+                <div className="rounded-lg bg-muted/50 py-3 px-1">
+                  <FileText className="h-4 w-4 text-primary mx-auto mb-1.5" />
+                  <p className="text-lg font-extrabold text-foreground leading-none">{totalClauses.toLocaleString("en-AU")}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">Clauses searchable</p>
+                </div>
+                <div className="rounded-lg bg-muted/50 py-3 px-1">
+                  <CalendarDays className="h-4 w-4 text-primary mx-auto mb-1.5" />
+                  <p className="text-lg font-extrabold text-foreground leading-none">{memberSince ?? "—"}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">Member since</p>
+                </div>
+              </div>
+              {readyStandards.length > 0 && (
+                <div className="mt-3 space-y-1.5">
+                  {readyStandards.slice(0, 4).map((s: any) => (
+                    <div key={s.id} className="flex items-center justify-between rounded-lg bg-muted/30 px-3 py-2">
+                      <span className="text-xs font-medium text-foreground truncate mr-2">
+                        {s.standard_code || s.title}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground flex-shrink-0">
+                        {(s.indexed_chunks || 0).toLocaleString("en-AU")} clauses
+                      </span>
+                    </div>
+                  ))}
+                </div>
               )}
             </Card>
 
