@@ -344,7 +344,7 @@ serve(async (req) => {
       const topicFilter = topic ? `Focus on the topic: ${topic}.` : "";
 
       const aiResponse = await callAI({
-          model: "claude-opus-4-8",
+          model: "claude-sonnet-4-6",
           messages: [
             { role: "system", content: `You are an exam question generator for trade apprentices studying ${standard?.title || "industry standards"}. Generate practical, scenario-based multiple-choice questions ONLY from the provided standard content. Never invent facts. Frame questions as real on-site situations — e.g. "You are wiring a bathroom and...", "A customer asks you to install...", "On a job site you find...". Do NOT ask "What does Clause X.X say?" or "According to Clause X.X..." — test understanding and application, not clause memorisation. CRITICAL: Never mention any clause number in the question text. Clause numbers belong only in the explanation field.` },
             { role: "user", content: `Generate ${count} ${diff}-difficulty multiple-choice questions from this standard content. ${topicFilter}\n\nStandard: ${standard?.standard_code || standard?.title}\n\nContent:\n${allChunks.map((c) => `[${c.clause_number || ""}] ${(c.content || "").slice(0, 700)}`).join("\n\n")}` },
@@ -552,7 +552,7 @@ Rules:
         const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
 
         const genResponse = await callAI({
-          model: "claude-opus-4-8",
+          model: "claude-sonnet-4-6",
           messages: [
             { role: "system", content: `You are an exam question generator for trade apprentices studying ${standard?.title || "industry standards"}. Generate practical, scenario-based multiple-choice questions ONLY from the provided standard content. Never invent facts. Frame questions as real on-site situations — e.g. "You are wiring a bathroom and...", "A customer asks you to install...", "On a job site you find...". Do NOT ask "What does Clause X.X say?" — test understanding and application, not clause memorisation. CRITICAL: Never mention any clause number in the question text. Clause numbers belong only in the explanation field.` },
             { role: "user", content: `Generate ${count} medium-difficulty multiple-choice questions from this standard content.\n\nStandard: ${standard?.standard_code || standard?.title}\n\nContent:\n${allChunks.map((c) => `[${c.clause_number || ""}] ${(c.content || "").slice(0, 700)}`).join("\n\n")}` },
@@ -690,7 +690,7 @@ Rules:
         : "";
 
       const aiResponse = await callAI({
-          model: "claude-opus-4-8",
+          model: "claude-sonnet-4-6",
           messages: [
             { role: "system", content: `You are an expert trade educator. Create concise, apprentice-friendly study guides from standard content. Use clear headings, bullet points, and highlight key clause numbers. Only use information from the provided content.${figureNote}` },
             { role: "user", content: `Create a comprehensive study guide for apprentices from this standard. ${focusNote}\n\nStandard: ${standard?.standard_code || standard?.title}${sectionLabel}\n\nContent:\n${allChunks.map((c) => `[${c.clause_number || ""}${c.clause_title ? " - " + c.clause_title : ""}] ${(c.content || "").slice(0, 700)}`).join("\n\n")}` },
@@ -757,7 +757,7 @@ Rules:
       const fullContext = contextParts.join("\n\n") + standardContext;
 
       const aiResponse = await callAI({
-          model: "claude-opus-4-8",
+          model: "claude-sonnet-4-6",
           messages: [
             {
               role: "system",
@@ -870,7 +870,7 @@ Voltage drop limit: 5% of supply voltage (AS/NZS 3000 Clause 3.6)`;
       ].filter(Boolean).join("\n\n---\n\n");
 
       const aiResponse = await callAI({
-        model: "claude-opus-4-8",
+        model: "claude-sonnet-4-6",
         messages: [
           {
             role: "system",
@@ -990,7 +990,7 @@ Give specific, helpful feedback.`,
       const count = questionCount || 5;
 
       const aiResponse = await callAI({
-        model: "claude-opus-4-8",
+        model: "claude-sonnet-4-6",
         messages: [
           {
             role: "system",

@@ -533,7 +533,10 @@ User's question/context: ${effectiveQuestion}` : "";
         method: "POST",
         headers: { "x-api-key": ANTHROPIC_API_KEY, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
         body: JSON.stringify({
-          model: "claude-opus-4-8",
+          // Sonnet 4.6: with retrieval doing the heavy lifting and the strict
+          // grounding prompt, answer quality holds while cost drops ~5x vs
+          // Opus. Swap back to claude-opus-4-8 here if quality ever dips.
+          model: "claude-sonnet-4-6",
           // Photo compliance answers are longer and structured — 2000 was getting
           // truncated mid-sentence, losing the metadata separator entirely
           max_tokens: hasImage ? 3500 : 2000,
@@ -980,7 +983,7 @@ User's question/context: ${effectiveQuestion}` : "";
             trade,
             retrieved_chunk_ids: matchedChunks.map((c: any) => c.id).filter(Boolean),
             retrieved_chunk_count: matchedChunks.length,
-            model_used: "claude-opus-4-8",
+            model_used: "claude-sonnet-4-6",
             response_text: parsedResponse.answer,
             confidence_score: validation.confidenceScore,
             validation_issues: validation.issues,
