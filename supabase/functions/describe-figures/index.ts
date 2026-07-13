@@ -180,12 +180,19 @@ serve(async (req) => {
           const caption = chunk.clause_title || "";
           const page = chunk.page_number || 1;
 
-          // Send only the relevant page — not the whole document
-          const pageBase64 = await extractPageBase64(srcDoc, page);
-          if (!pageBase64) {
-            console.warn(`${kind} ${refNumber}: could not isolate page ${page}, skipping`);
-            continue;
-          }
+          // Send only the relevant page — not the whole document. Tables get
+          // a second shot at the next page: mis-anchored captions (wrapped
+          // reference lines) often sit one page before the table itself, and
+          // big tables start on the page after their heading.
+          const candidatePages = isTable ? [page, page + 1] : [page];
+          let description = "";
+          let usedPage = page;
+          for (const tryPage of candidatePages) {
+            const pageBase64 = await extractPageBase64(srcDoc, tryPage);
+            if (!pageBase64) {
+              console.warn(`${kind} ${refNumber}: could not isolate page ${tryPage}`);
+              continue;
+            }
 
           const prompt = isTable
             ? `This page is from ${standardLabel !== "Unknown" ? standardLabel : "an Australian Standard"}. ` +
@@ -206,35 +213,45 @@ serve(async (req) => {
               `3. Common mistakes or inspection points? (2-3 dot points)\n\n` +
               `Be practical. No jargon.`;
 
-          const completionResponse = await fetch("https://api.anthropic.com/v1/messages", {
-            method: "POST",
-            headers: { "x-api-key": ANTHROPIC_API_KEY, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
-            body: JSON.stringify({
-              model: "claude-opus-4-8",
-              // Big AS/NZS tables run to thousands of tokens; figures don't.
-              max_tokens: isTable ? 4000 : 1000,
-              messages: [
-                {
-                  role: "user",
-                  content: [
-                    { type: "document", source: { type: "base64", media_type: "application/pdf", data: pageBase64 } },
-                    { type: "text", text: prompt },
-                  ],
-                },
-              ],
-            }),
-          });
+            const completionResponse = await fetch("https://api.anthropic.com/v1/messages", {
+              method: "POST",
+              headers: { "x-api-key": ANTHROPIC_API_KEY, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
+              body: JSON.stringify({
+                // Sonnet transcribes documents as accurately as Opus at ~1/5
+                // the price — the Opus vision run across two standards
+                // (~300 calls) drained the API credit balance in one day.
+                model: "claude-sonnet-4-6",
+                // Big AS/NZS tables run to thousands of tokens; figures don't.
+                max_tokens: isTable ? 4000 : 1000,
+                messages: [
+                  {
+                    role: "user",
+                    content: [
+                      { type: "document", source: { type: "base64", media_type: "application/pdf", data: pageBase64 } },
+                      { type: "text", text: prompt },
+                    ],
+                  },
+                ],
+              }),
+            });
 
-          if (!completionResponse.ok) {
-            const errText = await completionResponse.text();
-            console.error(`${kind} ${refNumber} description failed:`, completionResponse.status, errText);
-            continue;
+            if (!completionResponse.ok) {
+              const errText = await completionResponse.text();
+              console.error(`${kind} ${refNumber} description failed:`, completionResponse.status, errText);
+              break;
+            }
+
+            const completionData = await completionResponse.json();
+            const text: string = completionData.content?.[0]?.text || "";
+            if (text && text.length >= 20 && !text.includes("TABLE NOT ON PAGE")) {
+              description = text;
+              usedPage = tryPage;
+              break;
+            }
+            console.warn(`${kind} ${refNumber}: not found on page ${tryPage}`);
           }
 
-          const completionData = await completionResponse.json();
-          const description: string = completionData.content?.[0]?.text || "";
-
-          if (!description || description.length < 20 || description.includes("TABLE NOT ON PAGE")) {
+          if (!description) {
             console.warn(`${kind} ${refNumber}: no usable output, skipping`);
             continue;
           }
@@ -243,10 +260,11 @@ serve(async (req) => {
             ? `${label} Table ${refNumber}${caption ? `: ${caption}` : ""}\n\n${description}`
             : `${label} Figure ${refNumber}${caption ? ` — ${caption}` : ""}\n\n${description}`;
 
-          // Set is_indexed: true so re-triggered runs skip this item
+          // Set is_indexed: true so re-triggered runs skip this item; correct
+          // the page anchor if the table was found on the retry page.
           const { error: updateError } = await supabaseAdmin
             .from("standard_chunks")
-            .update({ content: newContent, is_indexed: true })
+            .update({ content: newContent, is_indexed: true, page_number: usedPage })
             .eq("id", chunk.id);
 
           if (updateError) {
@@ -268,7 +286,7 @@ serve(async (req) => {
               user_id,
               table_number: refNumber,
               caption: caption || null,
-              page_number: page,
+              page_number: usedPage,
               image_url: "",
             });
             if (tblInsertError) console.error(`standard_tables insert failed for Table ${refNumber}:`, tblInsertError);

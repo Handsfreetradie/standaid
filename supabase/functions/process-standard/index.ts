@@ -117,7 +117,8 @@ async function extractTextWithAI(
       method: "POST",
       headers: { "x-api-key": anthropicApiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
       body: JSON.stringify({
-        model: "claude-opus-4-8",
+        // Sonnet matches Opus on straight page transcription at ~1/5 the cost
+        model: "claude-sonnet-4-6",
         max_tokens: 8000,
         messages: [{
           role: "user",
