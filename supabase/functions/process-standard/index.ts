@@ -183,7 +183,7 @@ async function extractTextWithAI(
 
 
 type ExtractionOutcome =
-  | { done: true; text: string; pages: string[]; totalPages: number; pagesWithContent: number }
+  | { done: true; text: string; rawText: string; pages: string[]; totalPages: number; pagesWithContent: number }
   | { done: false; ocrText: string; nextPage: number };
 
 async function extractTextFromPdf(
@@ -238,6 +238,7 @@ async function extractTextFromPdf(
         return {
           done: true,
           text: fullText,
+          rawText: fullText,
           pages,
           totalPages,
           pagesWithContent: contentPages.length,
@@ -290,6 +291,7 @@ async function extractTextFromPdf(
     return {
       done: true,
       text: aiText.replace(/\[PAGE\s+\d+\]/gi, "\n\n").trim(),
+      rawText: aiText,
       pages,
       totalPages: maxPage,
       pagesWithContent: pages.filter(p => p.trim().length >= SCANNED_PAGE_THRESHOLD).length,
@@ -477,13 +479,31 @@ serve(async (req) => {
           });
         }
 
-        extracted = outcome;
-        // OCR finished — clear resume state
-        if (resume) {
+        // OCR done but most of this window is spent — chunking + inserts
+        // after a ~90s OCR run blow the 110s cleanup timer (that race marked
+        // the AS 3017 job failed AFTER all 57 pages were transcribed, and
+        // the early resume-state clear threw the text away). Persist the
+        // complete text and retrigger: the next run skips OCR (startPage
+        // beyond the last page) and gets a fresh window for chunking.
+        if (Date.now() - requestStart > 60_000) {
+          clearTimeout(timeoutHandle);
           await supabaseAdmin.from("processing_jobs")
-            .update({ ocr_text: null, ocr_next_page: null })
+            .update({ ocr_text: outcome.rawText, ocr_next_page: outcome.totalPages + 1, status: "processing" })
             .eq("standard_id", standard_id);
+          const selfUrl2 = `${Deno.env.get("SUPABASE_URL")}/functions/v1/process-standard`;
+          const chunkTrigger = fetch(selfUrl2, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceRoleKey}` },
+            body: JSON.stringify({ standard_id, user_id: userId }),
+          }).catch(err => console.error("Failed to retrigger for chunking pass:", err));
+          (globalThis as any).EdgeRuntime?.waitUntil?.(chunkTrigger);
+          console.log(`[${standard_id}] OCR complete (${outcome.rawText.length} chars) — deferred chunking to a fresh window`);
+          return new Response(JSON.stringify({ status: "ocr_done_chunking_deferred" }), {
+            status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
         }
+
+        extracted = outcome;
       } catch (e) {
         console.error("Text extraction failed:", e);
         clearTimeout(timeoutHandle);
@@ -607,6 +627,11 @@ serve(async (req) => {
     }
 
     console.log(`[${standard_id}] All chunks stored (text-only): ${Date.now() - t0}ms`);
+
+    // Chunks are in — safe to drop the OCR resume text now
+    await supabaseAdmin.from("processing_jobs")
+      .update({ ocr_text: null, ocr_next_page: null })
+      .eq("standard_id", standard_id);
     clearTimeout(timeoutHandle);
 
     // Update standard with chunk count — stays "processing" until embed-chunks finishes
