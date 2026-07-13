@@ -102,31 +102,38 @@ export const CURRENT_CAPACITY: Record<string, Record<string, number>> = {
   "v90-copper": {
     "1": 14, "1.5": 17.5, "2.5": 24, "4": 32, "6": 41, "10": 56, "16": 73,
   },
-  // XLPE copper – Table 12 Col 4 (enclosed)
+  // XLPE (X-90) copper single-core — AS/NZS 3008.1.1 Table 5 column 14
+  // "Enclosed — wiring enclosure in air", Cu. Verified 2026-07-13 cell-by-cell
+  // against the vision-transcribed Table 5 from the user's uploaded standard;
+  // the previous values (wrongly attributed to Table 12, which is 110°C
+  // insulation) ran 2–5% HIGH — the unsafe direction. Two-conductor (1Ø)
+  // basis; three-phase circuits (Table 8) rate slightly lower.
   "xlpe-copper": {
-    "1.5": 22, "2.5": 29, "4": 38, "6": 49, "10": 67, "16": 88,
-    "25": 115, "35": 141, "50": 170, "70": 214, "95": 259, "120": 301,
-    "150": 346, "185": 396, "240": 468,
+    "1.5": 21, "2.5": 30, "4": 38, "6": 47, "10": 65, "16": 84,
+    "25": 113, "35": 135, "50": 166, "70": 204, "95": 255, "120": 292,
+    "150": 329, "185": 387, "240": 461,
   },
-  // XLPE aluminium – Table 12 Col 4
+  // XLPE aluminium — Table 5 column 16 (enclosed), verified as above
   "xlpe-aluminium": {
-    "16": 68, "25": 89, "35": 109, "50": 132, "70": 166, "95": 201,
-    "120": 233, "150": 268, "185": 307, "240": 363,
+    "16": 65, "25": 87, "35": 105, "50": 129, "70": 159, "95": 198,
+    "120": 226, "150": 255, "185": 301, "240": 360,
   },
-  // Orange circular copper – same as V-90 enclosed
+  // Orange circular copper — UNVERIFIED: proper basis is Table 13 (3/4-core
+  // thermoplastic) whose transcription came back column-garbled; these
+  // conservative V-90-derived values stay until Table 13 verifies cleanly.
   "orange-circular-copper": {
     "1.5": 17.5, "2.5": 24, "4": 32, "6": 41, "10": 56, "16": 73,
     "25": 97, "35": 119, "50": 144,
   },
-  // SDI copper – Table 12 (similar to XLPE)
+  // SDI copper — single-core X-90, same Table 5 column 14 basis (verified)
   "sdi-copper": {
-    "6": 49, "10": 67, "16": 88, "25": 115, "35": 141, "50": 170,
-    "70": 214, "95": 259, "120": 301, "150": 346, "185": 396, "240": 468,
+    "6": 47, "10": 65, "16": 84, "25": 113, "35": 135, "50": 166,
+    "70": 204, "95": 255, "120": 292, "150": 329, "185": 387, "240": 461,
   },
-  // SDI aluminium
+  // SDI aluminium — Table 5 column 16 (verified)
   "sdi-aluminium": {
-    "16": 68, "25": 89, "35": 109, "50": 132, "70": 166, "95": 201,
-    "120": 233, "150": 268, "185": 307, "240": 363,
+    "16": 65, "25": 87, "35": 105, "50": 129, "70": 159, "95": 198,
+    "120": 226, "150": 255, "185": 301, "240": 360,
   },
   // MICC copper
   "mineral-insulated-copper": {

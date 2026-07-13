@@ -24,7 +24,11 @@ const PROCESSING_TIMEOUT_MS = 110_000;
 
 // ── PDF extraction ───────────────────────────────────────────────────────────
 
-const PAGES_PER_AI_BATCH = 15; // pages per OCR call — stays well within the 8k token output limit
+// Pages per OCR call. A dense standards page transcribes to ~600-1000 output
+// tokens; 15 pages blew straight past the 8k max_tokens and later pages of
+// every batch were silently cut off mid-sentence. 6 pages leaves headroom,
+// and stop_reason is checked to catch truncation.
+const PAGES_PER_AI_BATCH = 6;
 
 // Copy a page range into a fresh PDF so each OCR call only carries the pages it
 // needs. Sending the whole document per batch both re-uploads megabytes every
@@ -50,12 +54,17 @@ async function slicePdfPages(srcDoc: PDFDocument, startPage: number, endPage: nu
 // like Ω are transcribed correctly rather than corrupted by font encoding.
 // Stops at `deadline` and returns what it has — partial text either passes the
 // quality gate or gets rejected there with a clear message.
+// Returns the transcribed text plus resume state: `nextPage` is the first
+// page NOT yet transcribed (null when the whole document is done). The
+// caller persists partial text + nextPage and retriggers itself — a scanned
+// 60-page standard takes ~10 batches, far more than one function window.
 async function extractTextWithAI(
   fileBytes: Uint8Array,
   anthropicApiKey: string,
   totalPages = 0,
   deadline = Number.POSITIVE_INFINITY,
-): Promise<string> {
+  startPage = 1,
+): Promise<{ text: string; nextPage: number | null; totalPages: number }> {
   let srcDoc: PDFDocument | null = null;
   try {
     srcDoc = await PDFDocument.load(fileBytes, { ignoreEncryption: true });
@@ -64,11 +73,22 @@ async function extractTextWithAI(
     console.warn("pdf-lib could not load document — OCR will send the whole file per batch:", e);
   }
 
-  const batchCount = totalPages > 0
-    ? Math.ceil(totalPages / PAGES_PER_AI_BATCH)
-    : 1; // unknown page count — try single call
+  // Whole-document mode for PDFs within API limits (≤100 pages): pdf-lib
+  // page slicing drops the page images of scanned documents entirely — the
+  // model received near-blank pages (~220 chars/page came back for AS 3017's
+  // scans). Sending the complete file preserves the scans; the prompt limits
+  // which pages each call transcribes. Bigger page windows + a bigger output
+  // budget keep the call count down since input is the whole doc each time.
+  const useWholeDoc = totalPages > 0 && totalPages <= 100 && fileBytes.length <= 25 * 1024 * 1024;
+  const pagesPerBatch = useWholeDoc ? 12 : PAGES_PER_AI_BATCH;
+  const maxTokensPerBatch = useWholeDoc ? 16000 : 8000;
 
-  const wholeDocBase64 = srcDoc ? null : convertPdfToBase64(fileBytes);
+  const firstBatch = Math.floor((startPage - 1) / pagesPerBatch);
+  const batchCount = totalPages > 0
+    ? Math.ceil(totalPages / pagesPerBatch)
+    : firstBatch + 1; // unknown page count — try single call
+
+  const wholeDocBase64 = (useWholeDoc || !srcDoc) ? convertPdfToBase64(fileBytes) : null;
 
   const transcriptionRules =
     `Include every clause number, heading, value, table, note, and figure caption exactly as written. ` +
@@ -78,22 +98,24 @@ async function extractTextWithAI(
     `Pay special attention to numerical values and units (e.g. 0.5 Ω, 1 MΩ, 500 V).`;
 
   let fullText = "";
+  let nextPage: number | null = null;
 
-  for (let batch = 0; batch < batchCount; batch++) {
+  for (let batch = firstBatch; batch < batchCount; batch++) {
     if (Date.now() > deadline) {
-      console.warn(`AI OCR stopping at batch ${batch}/${batchCount} — time budget reached`);
+      nextPage = batch * pagesPerBatch + 1;
+      console.warn(`AI OCR pausing at batch ${batch}/${batchCount} (page ${nextPage}) — time budget reached, will resume`);
       break;
     }
 
-    const startPage = batch * PAGES_PER_AI_BATCH + 1;
+    const startPage = batch * pagesPerBatch + 1;
     const endPage = totalPages > 0
-      ? Math.min((batch + 1) * PAGES_PER_AI_BATCH, totalPages)
+      ? Math.min((batch + 1) * pagesPerBatch, totalPages)
       : 9999;
 
     let base64Pdf: string;
     let prompt: string;
 
-    const sliced = srcDoc && totalPages > 0 ? await slicePdfPages(srcDoc, startPage, endPage) : null;
+    const sliced = !useWholeDoc && srcDoc && totalPages > 0 ? await slicePdfPages(srcDoc, startPage, endPage) : null;
     if (sliced) {
       base64Pdf = convertPdfToBase64(sliced);
       prompt =
@@ -105,8 +127,8 @@ async function extractTextWithAI(
       base64Pdf = wholeDocBase64 ?? convertPdfToBase64(fileBytes);
       prompt = totalPages > 0
         ? `This is an Australian/New Zealand technical Standards document. ` +
-          `Transcribe ONLY pages ${startPage} to ${endPage} completely and accurately. ` +
-          `Insert [PAGE N] at the start of each page. ` + transcriptionRules
+          `Transcribe ONLY pages ${startPage} to ${endPage} of the document (counting from the first page of the file as page 1) completely and accurately. ` +
+          `Insert [PAGE N] at the start of each transcribed page, numbering from ${startPage}. ` + transcriptionRules
         : `This is an Australian/New Zealand technical Standards document. Transcribe ALL content completely and accurately. ` +
           `Insert [PAGE N] markers between pages. ` + transcriptionRules;
     }
@@ -119,7 +141,7 @@ async function extractTextWithAI(
       body: JSON.stringify({
         // Sonnet matches Opus on straight page transcription at ~1/5 the cost
         model: "claude-sonnet-4-6",
-        max_tokens: 8000,
+        max_tokens: maxTokensPerBatch,
         messages: [{
           role: "user",
           content: [
@@ -133,32 +155,43 @@ async function extractTextWithAI(
     if (!completionResponse.ok) {
       const errText = await completionResponse.text();
       console.error(`AI OCR batch ${batch + 1} failed:`, completionResponse.status, errText);
-      if (batch === 0) throw new Error(`AI extraction failed: ${completionResponse.status}`);
-      break; // partial extraction is better than nothing
+      if (batch === firstBatch && fullText.length === 0) throw new Error(`AI extraction failed: ${completionResponse.status}`);
+      // Transient failure mid-document — pause here and let the resume
+      // retry this batch, instead of shipping a silently truncated document.
+      nextPage = batch * pagesPerBatch + 1;
+      break;
     }
 
     const data = await completionResponse.json();
     const batchText: string = data.content?.[0]?.text || "";
+    if (data.stop_reason === "max_tokens") {
+      console.warn(`AI OCR batch ${batch + 1} hit max_tokens — output may have lost the tail of page ${endPage}`);
+    }
     if (batchText.length < 50) {
       console.warn(`AI OCR batch ${batch + 1} returned very little text — stopping`);
+      nextPage = null; // nothing more to get (blank/failed pages are caught by the failure gate)
       break;
     }
 
-    fullText += (batch > 0 ? "\n\n" : "") + batchText;
+    fullText += (fullText ? "\n\n" : "") + batchText;
     console.log(`Batch ${batch + 1} extracted: ${batchText.length} chars`);
   }
 
-  if (fullText.length < 50) throw new Error("AI extraction returned insufficient text");
-  console.log(`Total AI OCR extraction: ${fullText.length} chars`);
-  return fullText;
+  console.log(`AI OCR run: ${fullText.length} chars, nextPage=${nextPage ?? "done"}`);
+  return { text: fullText, nextPage, totalPages };
 }
 
+
+type ExtractionOutcome =
+  | { done: true; text: string; pages: string[]; totalPages: number; pagesWithContent: number }
+  | { done: false; ocrText: string; nextPage: number };
 
 async function extractTextFromPdf(
   fileBytes: Uint8Array,
   anthropicApiKey: string,
   deadline: number,
-): Promise<{ text: string; pages: string[]; totalPages: number; pagesWithContent: number }> {
+  resume?: { priorText: string; startPage: number },
+): Promise<ExtractionOutcome> {
   // Use unpdf to extract text page-by-page
   let pageTexts: string[] = [];
   let unpdfFailed = false;
@@ -175,7 +208,8 @@ async function extractTextFromPdf(
 
   const totalPages = pageTexts.length || 1;
 
-  if (!unpdfFailed && pageTexts.length > 0) {
+  // A resume run is by definition mid-OCR — don't re-evaluate the unpdf path
+  if (!resume && !unpdfFailed && pageTexts.length > 0) {
     // Assess how many pages have real content
     const scannedPages: number[] = [];
     const contentPages: number[] = [];
@@ -202,6 +236,7 @@ async function extractTextFromPdf(
       if (hasGoodTextQuality(fullText)) {
         console.log(`unpdf result accepted: ${fullText.length} chars, ${contentPages.length}/${totalPages} pages with content`);
         return {
+          done: true,
           text: fullText,
           pages,
           totalPages,
@@ -223,20 +258,41 @@ async function extractTextFromPdf(
   // Use batched page-by-page AI OCR so long documents aren't truncated.
   // Pass the known page count from unpdf so we can batch correctly.
   const knownPageCount = pageTexts.length > 0 ? pageTexts.length : 0;
-  console.log(`Attempting batched AI OCR (${knownPageCount > 0 ? knownPageCount + " pages" : "unknown length"})...`);
+  console.log(`Attempting batched AI OCR (${knownPageCount > 0 ? knownPageCount + " pages" : "unknown length"})${resume ? `, resuming at page ${resume.startPage}` : ""}...`);
   try {
-    const aiText = await extractTextWithAI(fileBytes, anthropicApiKey, knownPageCount, deadline);
+    const { text: newText, nextPage, totalPages: realPages } = await extractTextWithAI(
+      fileBytes, anthropicApiKey, knownPageCount, deadline, resume?.startPage ?? 1,
+    );
+    const aiText = resume?.priorText ? `${resume.priorText}\n\n${newText}` : newText;
+
+    // More pages to go — hand resume state back so the caller persists it
+    // and retriggers. Never report a partial document as complete.
+    if (nextPage !== null) {
+      return { done: false, ocrText: aiText, nextPage };
+    }
+
+    if (aiText.length < 50) throw new Error("AI extraction returned insufficient text");
     console.log(`Batched AI OCR complete: ${aiText.length} chars`);
 
-    const pageMarkerRegex = /\[PAGE\s+\d+\]/gi;
-    const aiPages = aiText.split(pageMarkerRegex).filter(p => p.trim().length > 0);
-    const resolvedPages = aiPages.length > 1 ? aiPages : [aiText];
-
+    // Rebuild pages by their ORIGINAL numbers from the [PAGE N] markers.
+    // Index-based splitting renumbered everything when front pages were
+    // blank, and reported only the transcribed count as totalPages — a
+    // deadline-cut extraction of 8/57 pages scored 97% coverage.
+    const parts = aiText.split(/\[PAGE\s+(\d+)\]/i);
+    const pageMap = new Map<number, string>();
+    for (let i = 1; i < parts.length; i += 2) {
+      const n = parseInt(parts[i], 10);
+      const txt = (parts[i + 1] || "").trim();
+      if (n > 0 && txt) pageMap.set(n, pageMap.has(n) ? `${pageMap.get(n)}\n${txt}` : txt);
+    }
+    const maxPage = Math.max(realPages || 0, knownPageCount, ...(pageMap.size > 0 ? [...pageMap.keys()] : [1]));
+    const pages = Array.from({ length: maxPage }, (_, i) => pageMap.get(i + 1) || "");
     return {
-      text: aiText.replace(pageMarkerRegex, "\n\n").trim(),
-      pages: resolvedPages,
-      totalPages: resolvedPages.length,
-      pagesWithContent: resolvedPages.filter(p => p.trim().length >= SCANNED_PAGE_THRESHOLD).length,
+      done: true,
+      text: aiText.replace(/\[PAGE\s+\d+\]/gi, "\n\n").trim(),
+      pages,
+      totalPages: maxPage,
+      pagesWithContent: pages.filter(p => p.trim().length >= SCANNED_PAGE_THRESHOLD).length,
     };
   } catch (aiError) {
     console.error("Batched AI OCR failed:", aiError);
@@ -372,10 +428,62 @@ serve(async (req) => {
 
       const fileBytes = new Uint8Array(await fileData.arrayBuffer());
       console.log(`[${standard_id}] File size: ${fileBytes.length} bytes, starting extraction`);
+      // Resume state from a previous OCR run of this job (scanned documents
+      // need many OCR batches — far more than one function window)
+      const { data: jobRows } = await supabaseAdmin
+        .from("processing_jobs")
+        .select("id, ocr_text, ocr_next_page")
+        .eq("standard_id", standard_id)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      const jobRow = jobRows?.[0];
+      const resume = jobRow?.ocr_next_page && jobRow.ocr_next_page > 1
+        ? { priorText: (jobRow.ocr_text as string) || "", startPage: jobRow.ocr_next_page as number }
+        : undefined;
+
       try {
         // Leave ~20s of the processing window for chunking + DB writes
         const extractionDeadline = requestStart + PROCESSING_TIMEOUT_MS - 20_000;
-        extracted = await extractTextFromPdf(fileBytes, ANTHROPIC_API_KEY, extractionDeadline);
+        const outcome = await extractTextFromPdf(fileBytes, ANTHROPIC_API_KEY, extractionDeadline, resume);
+
+        if (!outcome.done) {
+          // No forward progress since last run (e.g. the same batch keeps
+          // failing) — fail the job rather than retriggering forever.
+          if (resume && outcome.nextPage <= resume.startPage) {
+            clearTimeout(timeoutHandle);
+            await supabaseAdmin.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
+            await supabaseAdmin.from("processing_jobs")
+              .update({ status: "failed", error_message: "Text extraction stalled partway through this PDF. Please try again, or upload a cleaner copy.", ocr_text: null, ocr_next_page: null, completed_at: new Date().toISOString() })
+              .eq("standard_id", standard_id);
+            return new Response(JSON.stringify({ error: "OCR stalled — no progress between runs" }), {
+              status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          // Persist progress and retrigger self to continue from nextPage.
+          clearTimeout(timeoutHandle);
+          await supabaseAdmin.from("processing_jobs")
+            .update({ ocr_text: outcome.ocrText, ocr_next_page: outcome.nextPage, status: "processing" })
+            .eq("standard_id", standard_id);
+          const selfUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/process-standard`;
+          const retrigger = fetch(selfUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceRoleKey}` },
+            body: JSON.stringify({ standard_id, user_id: userId }),
+          }).catch(err => console.error("Failed to retrigger process-standard for OCR resume:", err));
+          (globalThis as any).EdgeRuntime?.waitUntil?.(retrigger);
+          console.log(`[${standard_id}] OCR paused at page ${outcome.nextPage} (${outcome.ocrText.length} chars so far) — retriggered to resume`);
+          return new Response(JSON.stringify({ status: "ocr_resuming", next_page: outcome.nextPage }), {
+            status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        extracted = outcome;
+        // OCR finished — clear resume state
+        if (resume) {
+          await supabaseAdmin.from("processing_jobs")
+            .update({ ocr_text: null, ocr_next_page: null })
+            .eq("standard_id", standard_id);
+        }
       } catch (e) {
         console.error("Text extraction failed:", e);
         clearTimeout(timeoutHandle);
@@ -400,7 +508,7 @@ serve(async (req) => {
     const charsPerPage = extracted.text.length / Math.max(extracted.totalPages, 1);
     const looksLikeOcrFailure =
       refusalPhrases.test(extracted.text.slice(0, 3000)) ||
-      (extracted.totalPages > 5 && charsPerPage < 150);
+      (extracted.totalPages > 5 && charsPerPage < 400);
     if (looksLikeOcrFailure) {
       clearTimeout(timeoutHandle);
       await supabaseAdmin.from("standards").update({ extraction_status: "failed", extraction_quality_score: 0 }).eq("id", standard_id);
