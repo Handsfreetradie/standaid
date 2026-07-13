@@ -12,7 +12,7 @@ const PIPE_GRADES: Record<string, { label: string; minGrade: number; desc: strin
   "80-drain": { label: "80mm branch drain", minGrade: 2.5, desc: "Shower, floor waste" },
   "100-drain": { label: "100mm sanitary drain", minGrade: 1.65, desc: "Toilet, main drain" },
   "100-storm": { label: "100mm stormwater", minGrade: 1.0, desc: "Downpipe connections" },
-  "150-sewer": { label: "150mm sewer main", minGrade: 1.65, desc: "Property sewer line" },
+  "150-sewer": { label: "150mm sewer main", minGrade: 1.0, desc: "Property sewer line (AS/NZS 3500.2 min 1.00%)" },
   "225-sewer": { label: "225mm sewer main", minGrade: 1.0, desc: "Main sewer" },
   "custom": { label: "Custom", minGrade: 1.0, desc: "Enter your own values" },
 };

@@ -32,7 +32,6 @@ let nextId = 1;
 
 const ConduitFillTool = ({ onBack }: Props) => {
   const [conduitSize, setConduitSize] = useState("20");
-  const [conduitMaterial, setConduitMaterial] = useState("pvc");
   const [cables, setCables] = useState<CableEntry[]>([
     { id: nextId++, cableType: "V-90 (single core)", cableSize: "2.5", quantity: 3 },
   ]);
@@ -89,7 +88,7 @@ const ConduitFillTool = ({ onBack }: Props) => {
       }
     }
 
-    if (!passes) warnings.push(`Fill exceeds ${maxFillPercent.toFixed(0)}% max for ${fillRatioKey === "3+" ? "3+" : fillRatioKey} cable(s) per AS/NZS 3080.`);
+    if (!passes) warnings.push(`Fill exceeds the ${maxFillPercent.toFixed(0)}% space factor for ${fillRatioKey === "3+" ? "3+" : fillRatioKey} cable(s).`);
     if (fillPercent > maxFillPercent * 0.9 && passes) warnings.push("Fill above 90% of max — cable pulling may be difficult.");
     if (totalCableCount > 6) suggestions.push("Consider using cable tray instead of conduit for large cable groups.");
 
@@ -108,8 +107,8 @@ const ConduitFillTool = ({ onBack }: Props) => {
   return (
     <ToolLayout
       title="Conduit Fill Calculator"
-      subtitle="AS/NZS 3080 — Check cable fill capacity"
-      disclaimer="Based on AS/NZS 3080 fill ratios and AS/NZS 2053 conduit dimensions. Cable ODs are typical values — check manufacturer data for exact dimensions."
+      subtitle="Space factor check — 53% / 31% / 40% fill rules"
+      disclaimer="Uses the accepted conduit space factors (53% one cable, 31% two, 40% three or more) with AS/NZS 2053 conduit dimensions. Cable ODs are typical values — check manufacturer data for exact dimensions. Tight fills make cable pulling difficult and risk insulation damage."
       onBack={onBack}
       onCalculate={calculate}
       result={result ? (
@@ -148,19 +147,7 @@ const ConduitFillTool = ({ onBack }: Props) => {
           ))}
         </>
       ) : undefined}
-      advancedInputs={
-        <div>
-          <Label className="text-sm">Conduit Material</Label>
-          <Select value={conduitMaterial} onValueChange={setConduitMaterial}>
-            <SelectTrigger className="h-11 mt-1"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="pvc">PVC (AS/NZS 2053)</SelectItem>
-              <SelectItem value="steel">Steel (galvanised)</SelectItem>
-              <SelectItem value="corrugated">Corrugated flexible</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      }
+      advancedInputs={undefined}
     >
       <div>
         <Label className="text-sm">Conduit Size</Label>

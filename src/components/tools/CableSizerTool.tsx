@@ -100,7 +100,7 @@ const CableSizerTool = ({ onBack }: Props) => {
     const conductorTemp = conductorTempFor(ct?.maxTemp);
     const mvTable: Record<string, number> = {};
     for (const size of availableSizes) {
-      const v = mvPerAm(material, size, system, phase, conductorTemp);
+      const v = mvPerAm(material, size, system, phase, conductorTemp, pf);
       if (v !== null) mvTable[size] = v;
     }
     const capKey = getCapacityKey(cableType, material);
@@ -108,6 +108,9 @@ const CableSizerTool = ({ onBack }: Props) => {
 
     const warnings: string[] = [];
     const suggestions: string[] = [];
+    if (installMethod === "buried-direct" || installMethod === "buried-conduit") {
+      warnings.push("Buried capacity shown is a guide — AS/NZS 3008 rates buried cables from separate soil-based tables. Verify against the buried tables or ask the AI chat.");
+    }
     let recommended: string | null = null;
     let deratedCap = 0;
     let vdP = 0;

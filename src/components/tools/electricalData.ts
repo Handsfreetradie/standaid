@@ -1,6 +1,6 @@
 // ============================================================
 // Shared electrical data for all trade tools
-// Based on AS/NZS 3008.1.1, AS/NZS 3000, AS/NZS 3080
+// Based on AS/NZS 3008.1.1, AS/NZS 3000, AS/NZS 2053
 // ============================================================
 
 export type SystemType = "ac" | "dc";
@@ -154,20 +154,34 @@ const REACTANCE_OHM_PER_KM = 0.08;
 // mV/A·m for a run: single-phase = 2·Zc, three-phase = √3·Zc, DC = 2·R.
 // conductorTempC should be the insulation's operating temperature
 // (75 for V-75, 90 for XLPE/V-90) — resistance rises ~6% from 75→90°C.
+//
+// powerFactor: AS/NZS 3008.1.1 Clause 4.5 computes AC voltage drop from
+// (R·cosφ + X·sinφ), not |Z|. At unity pf only R matters; ignoring this
+// (the old behaviour) overstated drop slightly at pf 1 and misstated it on
+// larger cables at low pf. Omit powerFactor to keep the |Z| (worst-case)
+// figure the printed tables use.
 export function mvPerAm(
   material: CableMaterial,
   size: string,
   system: SystemType,
   phase?: PhaseType,
   conductorTempC = 75,
+  powerFactor?: number,
 ): number | null {
   const r20 = R20_OHM_PER_KM[material]?.[size];
   if (!r20) return null;
   const alpha = material === "copper" ? 0.00393 : 0.00403;
   const r = r20 * (1 + alpha * (conductorTempC - 20));
   if (system === "dc") return 2 * r;
-  const z = Math.sqrt(r * r + REACTANCE_OHM_PER_KM * REACTANCE_OHM_PER_KM);
-  return phase === "three" ? Math.sqrt(3) * z : 2 * z;
+  const x = REACTANCE_OHM_PER_KM;
+  let effective: number;
+  if (powerFactor !== undefined && powerFactor > 0 && powerFactor < 1) {
+    const sinPhi = Math.sqrt(1 - powerFactor * powerFactor);
+    effective = r * powerFactor + x * sinPhi;
+  } else {
+    effective = Math.sqrt(r * r + x * x);
+  }
+  return phase === "three" ? Math.sqrt(3) * effective : 2 * effective;
 }
 
 // Backwards-compatible lookup tables, generated at 75°C conductor temperature.
@@ -225,12 +239,19 @@ export const INSTALL_METHODS: Record<string, InstallMethod> = {
   "trunking": { label: "In trunking", factor: 0.90, description: "Cable trunking / ducting" },
   "cable-tray-touching": { label: "Cable tray (touching)", factor: 0.87, description: "Perforated tray, cables touching" },
   "cable-tray-spaced": { label: "Cable tray (spaced)", factor: 1.0, description: "Perforated tray, cables spaced apart" },
-  "buried-direct": { label: "Buried direct", factor: 0.97, description: "Direct buried in ground" },
-  "buried-conduit": { label: "Buried in conduit", factor: 0.88, description: "Underground in conduit" },
+  "buried-direct": { label: "Buried direct (guide)", factor: 0.97, description: "APPROXIMATION — real buried ratings come from AS/NZS 3008's separate soil-based tables. Verify before relying on this." },
+  "buried-conduit": { label: "Buried in conduit (guide)", factor: 0.88, description: "APPROXIMATION — real buried ratings come from AS/NZS 3008's separate soil-based tables. Verify before relying on this." },
   "in-insulation-covered": { label: "In thermal insulation (covered)", factor: 0.50, description: "Completely surrounded by insulation" },
   "in-insulation-one-side": { label: "In insulation (one side)", factor: 0.75, description: "Touching insulation on one side" },
-  "free-air": { label: "Free air / suspended", factor: 1.05, description: "Suspended in air, good ventilation" },
+  // No uplift for free air: in-air ratings come from the standard's own
+  // unenclosed tables, not a bonus factor on the enclosed column (the old
+  // ×1.05 was invented and could pass a cable the real table would fail).
+  "free-air": { label: "Free air / suspended", factor: 1.0, description: "Unenclosed in-air ratings are higher — this uses the enclosed value as a safe floor" },
 };
+
+// Installation methods whose real ratings live in separate tables of the
+// standard — results for these are flagged as a guide, not a compliance call.
+export const APPROXIMATE_METHODS = new Set(["buried-direct", "buried-conduit"]);
 
 // --- Grouping derating factors (AS/NZS 3008 Table 22) ---
 export const GROUPING_DERATING: Record<number, number> = {
@@ -282,7 +303,7 @@ export const CABLE_OD: Record<string, Record<string, number>> = {
   },
 };
 
-// AS/NZS 3080 fill ratios
+// Conduit space factors (accepted industry practice: 53% one cable, 31% two, 40% three+)
 export const CONDUIT_FILL_RATIOS: Record<string, { label: string; ratio: number }> = {
   "1": { label: "1 cable", ratio: 0.53 },
   "2": { label: "2 cables", ratio: 0.31 },

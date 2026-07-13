@@ -105,7 +105,7 @@ const VoltageDropTool = ({ onBack }: Props) => {
     }
 
     const conductorTemp = conductorTempFor(ct?.maxTemp);
-    const mv = mvPerAm(material, cableSize, system, phase, conductorTemp);
+    const mv = mvPerAm(material, cableSize, system, phase, conductorTemp, pf);
     if (!mv) return;
 
     const vdVolts = (mv * I * L) / 1000;
@@ -127,6 +127,9 @@ const VoltageDropTool = ({ onBack }: Props) => {
     const suggestions: string[] = [];
 
     if (vdPercent > 5) warnings.push("Exceeds AS/NZS 3000 maximum 5% voltage drop.");
+    if (installMethod === "buried-direct" || installMethod === "buried-conduit") {
+      warnings.push("Buried capacity shown is a guide — AS/NZS 3008 rates buried cables from separate soil-based tables. Verify against the buried tables or ask the AI chat.");
+    }
     if (vdPercent > 3 && vdPercent <= 5) warnings.push("Above 3% — check sub-circuit allowance remains.");
     if (!capacityOk && deratedCapacity) warnings.push(`Load ${Math.round(I)}A exceeds derated capacity of ${deratedCapacity}A.`);
 
@@ -134,7 +137,7 @@ const VoltageDropTool = ({ onBack }: Props) => {
     let recommendedSize: string | null = null;
     if (vdPercent > 5 || !capacityOk) {
       for (const size of availableSizes) {
-        const testMv = mvPerAm(material, size, system, phase, conductorTemp);
+        const testMv = mvPerAm(material, size, system, phase, conductorTemp, pf);
         if (!testMv) continue;
         const testVd = ((testMv * I * L) / 1000 / V) * 100;
         const testCap = CURRENT_CAPACITY[getCapacityKey(cableType, material)]?.[size];

@@ -24,7 +24,9 @@ const APPLIANCES: Record<string, { label: string; mjh: number }> = {
   "hot-water-instant": { label: "Instant hot water (26L)", mjh: 199 },
   "hot-water-storage": { label: "Storage hot water", mjh: 45 },
   "heater-wall": { label: "Gas wall heater", mjh: 25 },
-  "heater-ducted": { label: "Ducted gas heater", mjh: 35 },
+  // Real ducted heaters draw 70–130 MJ/h input — the old 35 MJ/h figure
+  // undersized the pipe and starved every appliance on the run.
+  "heater-ducted": { label: "Ducted gas heater", mjh: 90 },
   "heater-outdoor": { label: "Outdoor gas heater", mjh: 46 },
   "bbq": { label: "BBQ", mjh: 32 },
   "fireplace": { label: "Gas fireplace", mjh: 40 },
