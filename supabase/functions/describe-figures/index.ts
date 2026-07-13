@@ -331,7 +331,13 @@ serve(async (req) => {
       .or("clause_number.like.FIGURE%,clause_number.like.TABLE%")
       .eq("is_indexed", true);
 
-    if ((remaining || 0) > 0 && (totalDescribed || 0) < MAX_FIGURES_PER_STANDARD) {
+    // Only retrigger when this run made progress. Retriggering on
+    // remaining>0 alone caused a ~1.5s hot-loop during an API credit outage:
+    // every call failed instantly, described stayed 0, and the function
+    // re-fired itself ~860 times in 20 minutes (each run re-downloading the
+    // multi-MB PDF). If nothing was described, stop — the next upload or a
+    // manual kick resumes the work once the underlying problem is fixed.
+    if (described > 0 && (remaining || 0) > 0 && (totalDescribed || 0) < MAX_FIGURES_PER_STANDARD) {
       // More figures to describe and still under the ceiling — retrigger self
       console.log(`[describe-figures] ${remaining} figures/tables remaining, retriggering`);
       const retrigger = fetch(`${baseUrl}/functions/v1/describe-figures`, {
