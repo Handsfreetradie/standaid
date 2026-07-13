@@ -244,6 +244,36 @@ export function buildBreadcrumb(standardCode: string, version: string, clauseNum
   return `[${standardCode}${version ? ` ${version}` : ""}]${clausePart ? ` ${clausePart}` : ""}\n\n`;
 }
 
+// Hard size enforcement. Client-extracted text has no blank lines, so the
+// paragraph split (\n\s*\n) used to be a no-op there — a 15,000-char clause
+// became ONE chunk, and only its first 8,000 chars were ever embedded
+// (embed-chunks slices the input). Everything past that was silently
+// unsearchable. Oversized "paragraphs" are re-split on line boundaries,
+// then sentences, then hard-cut as a last resort.
+export function splitOversized(text: string, maxChars = MAX_CHUNK_CHARS): string[] {
+  if (text.length <= maxChars) return [text];
+  const pieces: string[] = [];
+  let buffer = "";
+  const units = text.split("\n").flatMap((line) =>
+    line.length > maxChars ? line.split(/(?<=[.!?])\s+/) : [line]
+  );
+  for (const unit of units) {
+    if (buffer.length + unit.length + 1 > TARGET_CHUNK_CHARS && buffer.length > 0) {
+      pieces.push(buffer);
+      buffer = unit;
+    } else {
+      buffer += (buffer ? "\n" : "") + unit;
+    }
+    // A single unbreakable unit longer than the cap gets hard-cut
+    while (buffer.length > maxChars) {
+      pieces.push(buffer.slice(0, TARGET_CHUNK_CHARS));
+      buffer = buffer.slice(TARGET_CHUNK_CHARS);
+    }
+  }
+  if (buffer.trim()) pieces.push(buffer);
+  return pieces;
+}
+
 export function getOverlapTail(text: string, approxChars = 200): string {
   if (text.length <= approxChars) return text;
   // Find the last sentence boundary before approxChars from end
@@ -277,8 +307,10 @@ export function chunkSections(sections: Section[], standardCode: string, version
         chunk_index: chunkIndex++,
       });
     } else {
-      // Split on paragraph boundaries with overlap carry-forward
-      const paragraphs = sectionText.split(/\n\s*\n/);
+      // Split on paragraph boundaries with overlap carry-forward. Oversized
+      // paragraphs (client text has no blank lines) are pre-split so no
+      // chunk can exceed the embedder's effective window.
+      const paragraphs = sectionText.split(/\n\s*\n/).flatMap((p) => splitOversized(p));
       let buffer = "";
       let prevTail = "";
 
@@ -314,7 +346,7 @@ export function chunkSections(sections: Section[], standardCode: string, version
   // Fallback if nothing was detected
   if (chunks.length === 0) {
     const fullText = sections.map(s => s.lines.join("\n")).join("\n");
-    const paragraphs = fullText.split(/\n\s*\n/);
+    const paragraphs = fullText.split(/\n\s*\n/).flatMap((p) => splitOversized(p));
     let buffer = "";
     for (const para of paragraphs) {
       buffer += para + "\n\n";

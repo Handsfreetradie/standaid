@@ -284,3 +284,24 @@ describe("extractTableChunks body capture", () => {
     expect(t!.content).not.toContain("transcription of this table");
   });
 });
+
+describe("splitOversized (hard chunk cap)", () => {
+  it("splits blank-line-free text into chunks under the cap", () => {
+    // Client-extracted text has no blank lines — the paragraph splitter used
+    // to no-op and produce one giant chunk, only the first 8000 chars of
+    // which ever got embedded.
+    const lines = Array.from({ length: 300 }, (_, i) =>
+      `Requirement ${i}: conductors shall be selected per the relevant table with a rating of ${i} A.`
+    ).join("\n"); // ~28,000 chars, zero blank lines
+    const sections = sortIntoSections(`[PAGE 5]\n2.1 SELECTION OF CABLES\n${lines}`);
+    const chunks = chunkSections(sections, "AS/NZS 3000", "2018");
+    expect(chunks.length).toBeGreaterThan(5);
+    for (const c of chunks) {
+      expect(c.content.length).toBeLessThan(3000);
+    }
+    // No content silently dropped: every requirement line survives somewhere
+    const all = chunks.map((c) => c.content).join("\n");
+    expect(all).toContain("Requirement 0:");
+    expect(all).toContain("Requirement 299:");
+  });
+});

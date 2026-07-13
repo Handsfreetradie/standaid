@@ -124,6 +124,7 @@ serve(async (req) => {
 
     let processedCount = 0;
     let timedOut = false;
+    let embedFailure = false;
 
     // Process un-embedded chunks in a loop — re-trigger self if time budget exceeded
     while (true) {
@@ -166,11 +167,13 @@ serve(async (req) => {
         );
 
         // Write embeddings back to DB — parallel updates within each batch
+        let wroteAny = false;
         await Promise.all(
           group.flatMap((batch, gi) =>
             batch.map((chunk, idx) => {
               const emb = results[gi][idx];
               if (!emb) return Promise.resolve();
+              wroteAny = true;
               return supabaseAdmin
                 .from("standard_chunks")
                 .update({ embedding: JSON.stringify(emb), is_indexed: true })
@@ -179,9 +182,21 @@ serve(async (req) => {
           )
         );
 
+        // If the whole group produced zero embeddings (OpenAI down or key
+        // exhausted), the next fetch returns the SAME rows — the old loop
+        // hammered the API for the full time budget, then retriggered itself
+        // indefinitely. Break instead; the frontend recovery kick or the next
+        // upload retriggers once the API recovers.
+        if (!wroteAny) {
+          console.error(`[embed-chunks][${standard_id}] Entire group failed to embed — stopping to avoid a retry hot-loop`);
+          embedFailure = true;
+          break;
+        }
+
         processedCount += group.reduce((sum, b) => sum + b.length, 0);
         console.log(`[embed-chunks][${standard_id}] Processed ${processedCount} chunks — ${Date.now() - t0}ms elapsed`);
       }
+      if (embedFailure) break;
     }
 
     // Check remaining un-embedded chunks — excluding figure placeholders so the
@@ -218,7 +233,7 @@ serve(async (req) => {
     } else if (timedOut) {
       // Re-trigger self to continue from where we left off
       const selfUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/embed-chunks`;
-      fetch(selfUrl, {
+      const retrigger = fetch(selfUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -226,6 +241,9 @@ serve(async (req) => {
         },
         body: JSON.stringify({ standard_id, user_id }),
       }).catch(e => console.error("Failed to re-trigger embed-chunks:", e));
+      // Without waitUntil the runtime can kill this instance before the
+      // retrigger request leaves — the documented mid-embedding stall.
+      (globalThis as any).EdgeRuntime?.waitUntil?.(retrigger);
 
       console.log(`[embed-chunks][${standard_id}] Timed out after ${processedCount} chunks — re-triggered`);
     }

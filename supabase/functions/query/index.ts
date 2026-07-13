@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { buildSystemPrompt, type TradeType } from "./system-prompt.ts";
+import { buildStaticSystemPrompt, buildContextSystemBlock, type TradeType } from "./system-prompt.ts";
 import { detectTrade } from "./trade-detection.ts";
 import { validateResponse } from "./validation.ts";
 import { getAllowedOrigin } from "../_shared/cors.ts";
@@ -105,15 +105,55 @@ serve(async (req) => {
     // Usage count including this request (drives queries_remaining below)
     const todayCount = used;
 
-    // Build retrieval query with conversation context
-    const history: Array<{ role: string; content: string }> = Array.isArray(conversation_history)
-      ? conversation_history.slice(-6)
-      : [];
-    const lastUserMessages = history
-      .filter((m) => m.role === "user")
-      .slice(-2)
-      .map((m) => m.content)
-      .join(" ");
+    // History is raw client input — whitelist roles, force string content and
+    // cap per-message size so fabricated roles or megabyte messages can't
+    // reach the model (prompt-injection surface + cost abuse).
+    const history: Array<{ role: "user" | "assistant"; content: string }> =
+      (Array.isArray(conversation_history) ? conversation_history : [])
+        .filter((m: any) => (m?.role === "user" || m?.role === "assistant") && typeof m?.content === "string" && m.content.trim())
+        .slice(-6)
+        .map((m: any) => ({ role: m.role, content: m.content.slice(0, 4000) }));
+    // Anthropic requires the first message to be from the user
+    while (history.length > 0 && history[0].role === "assistant") history.shift();
+
+    // Condense follow-ups into a standalone retrieval question. The old
+    // approach concatenated the last two USER messages — it dragged retrieval
+    // toward stale topics after a subject change, and missed referents that
+    // lived in assistant replies ("what about in a bathroom?").
+    let retrievalQuestion = effectiveQuestion;
+    if (history.length > 0) {
+      try {
+        const condenseController = new AbortController();
+        const condenseTimeout = setTimeout(() => condenseController.abort(), 8000);
+        try {
+          const condenseRes = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: { "x-api-key": ANTHROPIC_API_KEY, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
+            body: JSON.stringify({
+              model: "claude-haiku-4-5-20251001",
+              max_tokens: 150,
+              messages: [{
+                role: "user",
+                content:
+                  `Conversation so far:\n${history.map((m) => `${m.role}: ${m.content.slice(0, 500)}`).join("\n")}\n\n` +
+                  `Latest question: ${effectiveQuestion}\n\n` +
+                  `Rewrite the latest question as ONE standalone search query for Australian Standards documents, resolving any pronouns or references using the conversation. If it is already standalone, return it unchanged. Output only the query, nothing else.`,
+              }],
+            }),
+            signal: condenseController.signal,
+          });
+          if (condenseRes.ok) {
+            const condenseData = await condenseRes.json();
+            const t = (condenseData.content?.[0]?.text || "").trim();
+            if (t && t.length > 2 && t.length < 500) retrievalQuestion = t;
+          }
+        } finally {
+          clearTimeout(condenseTimeout);
+        }
+      } catch (e) {
+        console.error("[query] condense failed, using raw question:", e);
+      }
+    }
 
     // Vision pre-pass: when a photo is uploaded, get a fast description of what it
     // actually shows (in standards terminology) and use that to drive retrieval.
@@ -160,7 +200,7 @@ serve(async (req) => {
     const imageBoost = hasImage && !imageDescription && (!question || question.trim().length < 40)
       ? "installation compliance requirements wiring rules clearance"
       : "";
-    const retrievalQuery = [lastUserMessages, effectiveQuestion, imageDescription, imageBoost]
+    const retrievalQuery = [retrievalQuestion, imageDescription, imageBoost]
       .filter(Boolean)
       .join(" ");
 
@@ -171,17 +211,14 @@ serve(async (req) => {
     // Detect explicit clause numbers
     const clauseNumberMatches = effectiveQuestion.match(/\b[A-Za-z]?\d+(?:\.\d+){1,4}\b/g) || [];
 
-    // Server-side keyword search: top 5 keywords via ilike (much faster than loading 2000 chunks)
-    // Strip PostgREST filter metacharacters ( , ) . * : " and % so a keyword
-    // can't break out of the .or() filter string or inject extra conditions.
-    const sanitizeKw = (kw: string) => kw.replace(/[(),.*:"%\\]/g, " ").trim();
-    const topKeywords = keywords
-      .slice(0, 5)
-      .map(sanitizeKw)
-      .filter((kw: string) => kw.length > 2);
-    const ilikeParts = topKeywords.length > 0
-      ? topKeywords.map((kw: string) => `content.ilike.%${kw}%`).join(",")
-      : null;
+    // Ranked full-text search replaces the old `ilike '%word%'` scan over the
+    // first five words of the question (which happily searched on "what" and
+    // "does"). Keywords are OR-joined for recall; websearch_to_tsquery drops
+    // stopwords automatically and ts_rank orders by real relevance.
+    const sanitizeKw = (kw: string) => kw.replace(/[(),.*:"%\\!&|<>]/g, " ").trim();
+    const ftsQuery = [...new Set(
+      keywords.slice(0, 10).map(sanitizeKw).filter((kw: string) => kw.length > 2)
+    )].join(" or ");
 
     // Phase 2: all expensive operations in parallel
     const [embResponse, expandedEmbResponse, keywordChunksResult, clauseResult] = await Promise.all([
@@ -197,13 +234,12 @@ serve(async (req) => {
             body: JSON.stringify({ model: "text-embedding-3-small", input: expandedText }),
           })
         : Promise.resolve(null),
-      ilikeParts
-        ? supabase
-            .from("standard_chunks")
-            .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
-            .eq("user_id", userId)
-            .or(ilikeParts)
-            .limit(15)
+      ftsQuery
+        ? supabase.rpc("match_chunks_fts", {
+            match_user_id: userId,
+            query_text: ftsQuery,
+            match_count: 15,
+          })
         : Promise.resolve({ data: [] }),
       clauseNumberMatches.length > 0
         ? supabase
@@ -263,15 +299,36 @@ serve(async (req) => {
       }
     }
 
-    const keywordChunks: any[] = (keywordChunksResult.data || []).map((c: any) => ({ ...c, similarity: 0.5 }));
+    const keywordChunks: any[] = keywordChunksResult.data || [];
     const clauseChunks: any[] = (clauseResult.data || []).map((c: any) => ({ ...c, similarity: 1.0 }));
 
-    // Merge: clause hits → vector → keyword
-    const seenIds = new Set(clauseChunks.map((c: any) => c.id));
-    const uniqueVector = vectorChunks.filter((c: any) => !seenIds.has(c.id));
-    uniqueVector.forEach((c: any) => seenIds.add(c.id));
-    const uniqueKeyword = keywordChunks.filter((c: any) => !seenIds.has(c.id));
-    const matchedChunks = [...clauseChunks, ...uniqueVector, ...uniqueKeyword].slice(0, 15);
+    // Reciprocal-rank fusion across channels. The old merge appended every
+    // expanded-query vector hit after ALL original-query hits and tacked
+    // keyword rows (in arbitrary order) on the end — a 0.62-similarity
+    // expanded hit could be cut by slice(15) in favour of a 0.31 original
+    // hit. RRF scores each chunk by its rank in every channel it appears in,
+    // so agreement between channels floats to the top. Exact clause-number
+    // hits stay pinned first: asking about a clause by number is explicit
+    // intent, not fuzzy matching.
+    const rrf = new Map<string, { chunk: any; score: number }>();
+    const addRanked = (list: any[], weight: number) => {
+      list.forEach((c: any, i: number) => {
+        const prev = rrf.get(c.id);
+        const chunk = prev
+          ? { ...prev.chunk, similarity: Math.max(prev.chunk.similarity || 0, c.similarity || 0) }
+          : c;
+        rrf.set(c.id, { chunk, score: (prev?.score || 0) + weight / (60 + i) });
+      });
+    };
+    addRanked(vectorChunks1, 1.0);
+    addRanked(vectorChunks2, 1.0);
+    addRanked(keywordChunks, 0.8);
+    const clauseIds = new Set(clauseChunks.map((c: any) => c.id));
+    const fused = [...rrf.values()]
+      .sort((a, b) => b.score - a.score)
+      .map((e) => e.chunk)
+      .filter((c: any) => !clauseIds.has(c.id));
+    const matchedChunks = [...clauseChunks, ...fused].slice(0, 15);
 
     // Genuine relevance signal: the best REAL cosine similarity from vector
     // search. Clause hits get a fabricated 1.0 and keyword hits a fabricated
@@ -292,18 +349,53 @@ serve(async (req) => {
     for (const m of refScan.matchAll(/\b(TABLE|FIGURE)S?\s+([A-Z]?\d+(?:\.\d+)*)\b/gi)) {
       refKeys.add(`${m[1].toUpperCase()} ${m[2].toUpperCase()}`);
     }
-    if (refKeys.size > 0) {
-      const { data: refChunks } = await supabase
-        .from("standard_chunks")
-        .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
-        .eq("user_id", userId)
-        .in("clause_number", [...refKeys].slice(0, 12))
-        .limit(8);
+    // Clause cross-references ("in accordance with Clause 3.9.4") and parent
+    // clauses of the top hits (2.3.4.1 → 2.3.4) — standards are cross-
+    // reference-dense, and a sub-clause's conditions often live in its
+    // parent. Without following these the AI answers from fragments.
+    const clauseRefs = new Set<string>();
+    for (const m of refScan.matchAll(/\bCLAUSES?\s+(\d+(?:\.\d+){1,4})\b/gi)) {
+      clauseRefs.add(m[1]);
+    }
+    for (const c of matchedChunks.slice(0, 3)) {
+      const cn = (c.clause_number || "").toString().trim();
+      if (/^\d+(?:\.\d+){1,4}$/.test(cn) && cn.includes(".")) {
+        clauseRefs.add(cn.slice(0, cn.lastIndexOf(".")));
+      }
+    }
+    const haveClauseNums = new Set(matchedChunks.map((c: any) => (c.clause_number || "").toString().trim()));
+    const wantClauses = [...clauseRefs].filter((n) => !haveClauseNums.has(n)).slice(0, 8);
+
+    const [refChunksRes, refClauseRes] = await Promise.all([
+      refKeys.size > 0
+        ? supabase
+            .from("standard_chunks")
+            .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
+            .eq("user_id", userId)
+            .in("clause_number", [...refKeys].slice(0, 12))
+            .limit(8)
+        : Promise.resolve({ data: [] }),
+      wantClauses.length > 0
+        ? supabase
+            .from("standard_chunks")
+            .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
+            .eq("user_id", userId)
+            .in("clause_number", wantClauses)
+            .limit(8)
+        : Promise.resolve({ data: [] }),
+    ]);
+    {
       const haveIds = new Set(matchedChunks.map((c: any) => c.id));
-      for (const rc of refChunks || []) {
+      for (const rc of refChunksRes.data || []) {
         if (!haveIds.has(rc.id) && matchedChunks.length < 20) {
           haveIds.add(rc.id);
           matchedChunks.push({ ...rc, similarity: 0.9 });
+        }
+      }
+      for (const rc of refClauseRes.data || []) {
+        if (!haveIds.has(rc.id) && matchedChunks.length < 20) {
+          haveIds.add(rc.id);
+          matchedChunks.push({ ...rc, similarity: 0.75 });
         }
       }
     }
@@ -395,7 +487,8 @@ ${chunk.content}`;
       );
     }
 
-    const systemPrompt = buildSystemPrompt(trade, contextChunks, matchedPhrases);
+    const staticSystemPrompt = buildStaticSystemPrompt(trade);
+    const contextSystemBlock = buildContextSystemBlock(contextChunks, matchedPhrases);
     const queryId = crypto.randomUUID();
     // Calibrated for genuine text-embedding-3-small similarities (real matches
     // ~0.45–0.65; 0.80 was unreachable and flagged nearly every answer). An
@@ -445,8 +538,15 @@ User's question/context: ${effectiveQuestion}` : "";
           // truncated mid-sentence, losing the metadata separator entirely
           max_tokens: hasImage ? 3500 : 2000,
           stream: true,
+          // Instructions live in the system param (stronger adherence and
+          // prompt-injection resistance than the old user-message prompt,
+          // where client history competed at equal rank). The static block is
+          // cached — ~4k tokens skipped on every repeat call per trade.
+          system: [
+            { type: "text", text: staticSystemPrompt, cache_control: { type: "ephemeral" } },
+            { type: "text", text: contextSystemBlock },
+          ],
           messages: [
-            { role: "user", content: systemPrompt },
             ...history,
             { role: "user", content: lastUserContent },
           ],
@@ -842,6 +942,11 @@ User's question/context: ${effectiveQuestion}` : "";
           // authority. If the answer isn't grounded, it shows no citation.
         }
 
+        // Snapshot the real citations BEFORE gating — the analytics tables
+        // used to permanently store "[Upgrade to Pro to unlock this clause]"
+        // for every free-tier query.
+        const citationsForLog = (parsedResponse.citations || []).map((c: any) => ({ ...c }));
+
         // Free tier clause gating
         if (tier === "free" && parsedResponse.citations) {
           parsedResponse.citations = parsedResponse.citations.map((c: any) => ({
@@ -885,13 +990,13 @@ User's question/context: ${effectiveQuestion}` : "";
             user_id: userId,
             question: effectiveQuestion,
             response: parsedResponse.answer,
-            citations: parsedResponse.citations,
+            citations: citationsForLog,
             confidence_score: topSimilarity,
             safety_flagged: parsedResponse.safety_critical || false,
             subscription_tier_at_time: tier,
           }).select().single();
-          if (queryRecord && parsedResponse.citations?.length > 0) {
-            const citationRecords = parsedResponse.citations.map((c: any) => {
+          if (queryRecord && citationsForLog.length > 0) {
+            const citationRecords = citationsForLog.map((c: any) => {
               const matchedStandard = standards?.find((s: any) => s.standard_code === c.standard_code);
               return {
                 query_id: queryRecord.id,

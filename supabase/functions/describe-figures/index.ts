@@ -315,12 +315,13 @@ serve(async (req) => {
 
     if ((remaining || 0) > 0 && (totalDescribed || 0) < MAX_FIGURES_PER_STANDARD) {
       // More figures to describe and still under the ceiling — retrigger self
-      console.log(`[describe-figures] ${remaining} figures remaining, retriggering`);
-      fetch(`${baseUrl}/functions/v1/describe-figures`, {
+      console.log(`[describe-figures] ${remaining} figures/tables remaining, retriggering`);
+      const retrigger = fetch(`${baseUrl}/functions/v1/describe-figures`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceRoleKey}` },
         body: JSON.stringify({ standard_id, user_id }),
       }).catch(e => console.error("Failed to retrigger describe-figures:", e));
+      (globalThis as any).EdgeRuntime?.waitUntil?.(retrigger);
     } else if ((remaining || 0) > 0) {
       console.warn(`[describe-figures] Reached ${MAX_FIGURES_PER_STANDARD}-figure ceiling for ${standard_id}; ${remaining} left undescribed`);
     }
@@ -332,11 +333,12 @@ serve(async (req) => {
         .update({ extraction_status: "processing" })
         .eq("id", standard_id);
 
-      fetch(`${baseUrl}/functions/v1/embed-chunks`, {
+      const embedTrigger = fetch(`${baseUrl}/functions/v1/embed-chunks`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceRoleKey}` },
         body: JSON.stringify({ standard_id, user_id }),
       }).catch(e => console.error("Failed to trigger embed-chunks:", e));
+      (globalThis as any).EdgeRuntime?.waitUntil?.(embedTrigger);
       console.log(`[describe-figures] Triggered embed-chunks for ${described} described figures`);
     }
 

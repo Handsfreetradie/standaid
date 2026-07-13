@@ -6,26 +6,30 @@ export type TradeType =
   | "building"
   | "general";
 
-export function buildSystemPrompt(
-  trade: TradeType,
+// Static per-trade block — identical for every query of the same trade, so
+// the caller marks it with cache_control and Anthropic prompt-caching skips
+// re-processing its ~4k tokens on every call.
+export function buildStaticSystemPrompt(trade: TradeType): string {
+  const tradeGuidance = TRADE_GUIDANCE[trade] ?? TRADE_GUIDANCE.general;
+  return `${CORE_SYSTEM_PROMPT}
+
+${tradeGuidance}
+
+${EXAMPLES_BY_TRADE[trade] ?? EXAMPLES_BY_TRADE.general}`;
+}
+
+// Dynamic per-query block: retrieved extracts + notes + answering priority.
+export function buildContextSystemBlock(
   contextChunks: string,
   matchedTradieTerms: string[] = [],
 ): string {
-  const tradeGuidance = TRADE_GUIDANCE[trade] ?? TRADE_GUIDANCE.general;
-
-  const conversationNote = `CONVERSATION CONTEXT: If there are prior messages above, the user's latest question may be a follow-up. Use the conversation history to understand what they're referring to (e.g. "its on a 16amp type c" means "16A Type C MCB" in the context of a fault loop question). Always answer the latest question in context.\n`;
+  const conversationNote = `CONVERSATION CONTEXT: If there are prior messages in the conversation, the user's latest question may be a follow-up. Use the conversation history to understand what they're referring to (e.g. "its on a 16amp type c" means "16A Type C MCB" in the context of a fault loop question). Always answer the latest question in context.\n`;
 
   const tradieTermNote = matchedTradieTerms.length > 0
     ? `\nNOTE: The user's question contains tradie shorthand. Detected terms: ${matchedTradieTerms.map(t => `"${t}"`).join(", ")}. The search has already been expanded to find the relevant standard clauses. Answer using plain tradie language in your response.\n`
     : "";
 
-  return `${CORE_SYSTEM_PROMPT}
-
-${tradeGuidance}
-
-${EXAMPLES_BY_TRADE[trade] ?? EXAMPLES_BY_TRADE.general}
-
----
+  return `---
 ${conversationNote}${tradieTermNote}
 RETRIEVED STANDARD EXTRACTS:
 ${contextChunks}

@@ -417,7 +417,7 @@ serve(async (req) => {
       const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
 
       const aiResponse = await callAI({
-          model: "claude-opus-4-8",
+          model: "claude-sonnet-4-6",
           messages: [
             {
               role: "system",
@@ -489,7 +489,7 @@ Max 4 bullet points. Be direct and honest about what is correct vs what needs wo
       }
 
       const aiResponse = await callAI({
-          model: "claude-opus-4-8",
+          model: "claude-sonnet-4-6",
           messages: [
             {
               role: "system",
@@ -934,7 +934,7 @@ Use realistic Australian values. Show clear step-by-step working in the model so
       if (!questionText || !modelAnswer) throw new Error("Missing grading data");
 
       const aiResponse = await callAI({
-        model: "claude-opus-4-8",
+        model: "claude-sonnet-4-6",
         messages: [
           {
             role: "system",
@@ -1053,7 +1053,7 @@ CRITICAL: Never mention any clause number in the question text itself. Clause nu
       if (!questionText || !modelAnswer || !correctClause) throw new Error("Missing grading data");
 
       const aiResponse = await callAI({
-        model: "claude-opus-4-8",
+        model: "claude-sonnet-4-6",
         messages: [
           {
             role: "system",

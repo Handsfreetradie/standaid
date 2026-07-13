@@ -489,7 +489,7 @@ serve(async (req) => {
 
     // Hand off embedding to embed-chunks (runs in its own 150s window)
     const embedUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/embed-chunks`;
-    fetch(embedUrl, {
+    const embedTrigger = fetch(embedUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -497,15 +497,20 @@ serve(async (req) => {
       },
       body: JSON.stringify({ standard_id, user_id: userId }),
     }).catch(e => console.error("Failed to trigger embed-chunks:", e));
+    // waitUntil stops the runtime killing the instance before the request leaves
+    (globalThis as any).EdgeRuntime?.waitUntil?.(embedTrigger);
 
-    // Fire-and-forget: describe-figures generates AI descriptions for figure chunks
-    if (figureChunks.length > 0) {
+    // Fire-and-forget: describe-figures generates AI descriptions for figure
+    // chunks AND markdown transcriptions for table chunks — must fire for
+    // either kind.
+    if (figureChunks.length > 0 || tableChunks.length > 0) {
       const describeUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/describe-figures`;
-      fetch(describeUrl, {
+      const describeTrigger = fetch(describeUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceRoleKey}` },
         body: JSON.stringify({ standard_id, user_id: userId }),
       }).catch(e => console.error("Failed to trigger describe-figures:", e));
+      (globalThis as any).EdgeRuntime?.waitUntil?.(describeTrigger);
     }
 
     return new Response(JSON.stringify({ status: "processing", total_chunks: totalChunks, quality_score: qualityScore, is_partial: isPartial }), {
