@@ -14,6 +14,7 @@ import {
   chunkSections,
   extractTableChunks,
   extractFigureChunks,
+  buildDocumentMapChunk,
 } from "./extraction.ts";
 
 const SCANNED_DOC_RATIO = 0.85;
@@ -606,10 +607,12 @@ serve(async (req) => {
     const clauseChunks = chunkSections(sections, standardCode, version);
     const tableChunks = extractTableChunks(markedText, standardCode, version);
     const figureChunks = extractFigureChunks(markedText, standardCode, version);
-    console.log(`[${standard_id}] Found ${tableChunks.length} table chunks, ${figureChunks.length} figure chunks`);
+    // Free, auto-generated table of contents — see buildDocumentMapChunk
+    const mapChunk = buildDocumentMapChunk(sections, standardCode, version);
+    console.log(`[${standard_id}] Found ${tableChunks.length} table chunks, ${figureChunks.length} figure chunks${mapChunk ? ", + document map" : ""}`);
 
-    // Merge and re-assign chunk_index globally
-    const allChunks: Chunk[] = [...clauseChunks, ...tableChunks, ...figureChunks].map((chunk, idx) => ({
+    // Merge and re-assign chunk_index globally (map first so it's always indexed)
+    const allChunks: Chunk[] = [...(mapChunk ? [mapChunk] : []), ...clauseChunks, ...tableChunks, ...figureChunks].map((chunk, idx) => ({
       ...chunk,
       chunk_index: idx,
     }));

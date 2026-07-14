@@ -9,6 +9,7 @@ import {
   parseExtractedText,
   computeQualityScore,
   hasGoodTextQuality,
+  buildDocumentMapChunk,
 } from "../../supabase/functions/process-standard/extraction";
 
 describe("convertPdfToBase64", () => {
@@ -303,5 +304,41 @@ describe("splitOversized (hard chunk cap)", () => {
     const all = chunks.map((c) => c.content).join("\n");
     expect(all).toContain("Requirement 0:");
     expect(all).toContain("Requirement 299:");
+  });
+});
+
+describe("buildDocumentMapChunk", () => {
+  it("assembles a map from sections, appendices and top-level clauses", () => {
+    const text = [
+      "[PAGE 5]",
+      "SECTION 2 GENERAL ARRANGEMENT AND PROTECTION",
+      "2.1 SCOPE",
+      "Scope body text.",
+      "2.2 ARRANGEMENT OF INSTALLATION",
+      "Arrangement body text.",
+      "2.2.1 Detail sub-clause",
+      "Sub body.",
+      "[PAGE 90]",
+      "SECTION 6 DAMP SITUATIONS",
+      "6.3 Swimming pools and spas",
+      "Pool body text.",
+      "[PAGE 200]",
+      "APPENDIX P",
+      "P1 Electric vehicle charging",
+      "EV body text.",
+    ].join("\n");
+    const map = buildDocumentMapChunk(sortIntoSections(text), "AS/NZS 3000", "2018");
+    expect(map).not.toBeNull();
+    expect(map!.chunk_index).toBe(0);
+    expect(map!.content).toContain("SECTION 2 GENERAL ARRANGEMENT AND PROTECTION (page 5)");
+    expect(map!.content).toContain("SECTION 6 DAMP SITUATIONS (page 90)");
+    expect(map!.content).toContain("APPENDIX P (page 200)");
+    expect(map!.content).toContain("6.3 Swimming pools and spas");
+    expect(map!.content).not.toContain("2.2.1"); // deep clauses excluded
+  });
+
+  it("returns null for unstructured documents", () => {
+    const map = buildDocumentMapChunk(sortIntoSections("Just some prose\nwith no headings at all."), "AS X", "");
+    expect(map).toBeNull();
   });
 });

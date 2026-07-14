@@ -369,6 +369,63 @@ export function chunkSections(sections: Section[], standardCode: string, version
   return chunks;
 }
 
+// ── Document map ─────────────────────────────────────────────────────────────
+
+// Build a "table of contents" chunk from the detected structure — sections,
+// appendices, and their top-level clause titles. Costs nothing (no AI call:
+// it's assembled from headings the sectioner already found) and makes
+// structural questions ("which section covers pools?", "is there an appendix
+// on EV chargers?") retrieve an exact answer instead of fragments.
+export function buildDocumentMapChunk(
+  sections: Section[],
+  standardCode: string,
+  version: string,
+): Chunk | null {
+  const MAX_MAP_CHARS = 6000;
+  const label = `[${standardCode}${version ? ` ${version}` : ""}]`;
+  const lines: string[] = [];
+  let currentHeadingClauses: string[] = [];
+
+  const flushClauses = () => {
+    if (currentHeadingClauses.length > 0) {
+      lines.push("  " + currentHeadingClauses.join("; "));
+      currentHeadingClauses = [];
+    }
+  };
+
+  for (const s of sections) {
+    const isStructural = s.clauseNumber === null && s.heading && SECTION_HEADING.test(s.heading);
+    if (isStructural) {
+      flushClauses();
+      lines.push(`${s.heading!.trim()} (page ${s.pageNumber})`);
+    } else if (s.clauseNumber && s.heading) {
+      // Top-level clauses only (2.3, B1 — not 2.3.4.1) keep the map readable
+      const depth = (s.clauseNumber.match(/\./g) || []).length;
+      if (depth <= 1) {
+        currentHeadingClauses.push(`${s.clauseNumber} ${s.heading.trim()}`);
+      }
+    }
+  }
+  flushClauses();
+
+  // A map needs real structure to be worth a chunk
+  if (lines.length < 4) return null;
+
+  let body = "";
+  for (const line of lines) {
+    if (body.length + line.length + 1 > MAX_MAP_CHARS) break;
+    body += (body ? "\n" : "") + line;
+  }
+
+  return {
+    clause_number: null,
+    clause_title: "Document map — sections and contents",
+    content: `${label} Document map — sections, appendices and contents of this standard\n\n${body}`,
+    page_number: 1,
+    chunk_index: 0, // placed first so even the free tier's 25% cutoff includes it
+  };
+}
+
 // ── Table extraction ─────────────────────────────────────────────────────────
 
 // One chunk per unique table, anchored to its CAPTION page. A table number can
