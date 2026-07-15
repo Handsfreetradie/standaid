@@ -22,7 +22,7 @@ export interface Chunk {
 // The NCC adds lettered sections ("SECTION C FIRE RESISTANCE" — requires an
 // uppercase title after the letter so prose like "Section C of..." doesn't
 // open a false section), lettered parts ("Part C3", "Part 3.7") and volumes.
-export const SECTION_HEADING = /^(SECTION\s+\d+|PART\s+[A-J]?\d+(?:\.\d+)*|APPENDIX\s+[A-Z]|VOLUME\s+(?:ONE|TWO|THREE|\d))/i;
+export const SECTION_HEADING = /^(SECTION\s+\d+|PART\s+[A-J]?\d+(?:\.\d+)*|APPENDIX\s+[A-Z]|VOLUME\s+(?:ONE|TWO|THREE|\d)\s*$)/i;
 
 // NCC lettered sections ("SECTION C FIRE RESISTANCE"). Deliberately
 // case-SENSITIVE: the uppercase title requirement is the guard that stops
@@ -135,9 +135,12 @@ export function hasGoodTextQuality(text: string): boolean {
   // Technical standards should have at least 3% digit density vs letters
   if (digits / letters < 0.03) return false;
 
-  // Count truncated decimals: digit followed by period then whitespace/end-of-line
-  // e.g. "0. " or "3.\n" — these indicate a digit was swallowed by a glyph
-  const truncated = (text.match(/\d\.(?:\s|$)/gm) || []).length;
+  // Count truncated decimals: a digit whose fraction was swallowed by a bad
+  // glyph sits mid-sentence with a lowercase word or unit following ("0. ohms",
+  // "0. m"). Requiring the lowercase/unit continuation stops legitimate list
+  // markers ("1. The building...") and sentence-final numbers ("Class 1.")
+  // from counting — the NCC has hundreds of those and was failing the gate.
+  const truncated = (text.match(/\d\.\s+(?=[a-zΩ°µ])/g) || []).length;
   const normal = (text.match(/\d\.\d/g) || []).length;
   const totalDecimals = truncated + normal;
 
@@ -412,6 +415,16 @@ export function buildDocumentMapChunk(
   const label = `[${standardCode}${version ? ` ${version}` : ""}]`;
   const lines: string[] = [];
   let currentHeadingClauses: string[] = [];
+  // Front-matter amendment lists reuse real clause codes with junk titles
+  // ("H1P1 Various amendments are included...") — when a clause number
+  // appears more than once, only its LAST occurrence (the real body clause)
+  // makes the map.
+  const lastSeen = new Map<string, number>();
+  sections.forEach((s, i) => { if (s.clauseNumber) lastSeen.set(s.clauseNumber, i); });
+  const lastSeenHeading = new Map<string, number>();
+  sections.forEach((s, i) => {
+    if (s.clauseNumber === null && s.heading) lastSeenHeading.set(s.heading.trim(), i);
+  });
 
   const flushClauses = () => {
     if (currentHeadingClauses.length > 0) {
@@ -420,19 +433,21 @@ export function buildDocumentMapChunk(
     }
   };
 
-  for (const s of sections) {
-    const isStructural = s.clauseNumber === null && s.heading && isSectionHeading(s.heading);
+  sections.forEach((s, i) => {
+    const isStructural = s.clauseNumber === null && s.heading && isSectionHeading(s.heading)
+      && s.heading.trim().length <= 70 // prose-length "headings" are wrapped sentences
+      && lastSeenHeading.get(s.heading.trim()) === i; // contents pages list every Part before the body repeats it
     if (isStructural) {
       flushClauses();
       lines.push(`${s.heading!.trim()} (page ${s.pageNumber})`);
-    } else if (s.clauseNumber && s.heading) {
+    } else if (s.clauseNumber && s.heading && lastSeen.get(s.clauseNumber) === i) {
       // Top-level clauses only (2.3, B1 — not 2.3.4.1) keep the map readable
       const depth = (s.clauseNumber.match(/\./g) || []).length;
       if (depth <= 1) {
         currentHeadingClauses.push(`${s.clauseNumber} ${s.heading.trim()}`);
       }
     }
-  }
+  });
   flushClauses();
 
   // A map needs real structure to be worth a chunk
@@ -489,7 +504,7 @@ export function extractTableChunks(text: string, standardCode: string, version: 
   // Number accepts an optional letter prefix for appendix tables ("TABLE C1",
   // "TABLE C2.1") — these hold values like maximum demand that tradies ask
   // about constantly, and the old numeric-only pattern skipped them entirely.
-  const captionPattern = /^(?:\*{0,2})TABLE\s+([A-Z]?\d+(?:\.\d+)*)\s*(?:—|–|-|:)?\s*(.*)$/i;
+  const captionPattern = /^(?:\*{0,2})TABLE\s+([A-Z]\d{1,2}[DGPVOF]\d{1,2}[a-z]?|[A-Z]?\d+(?:\.\d+)*[a-z]?)\s*(?:—|–|-|:)?\s*(.*)$/i;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].replace(/\r$/, "").trim();
     const match = line.match(captionPattern);
@@ -522,7 +537,7 @@ export function extractTableChunks(text: string, standardCode: string, version: 
   }
 
   // ── Pass 2: references ("see Table 8.1") only for tables with no caption ──
-  const refPattern = /\bTABLES?\s+([A-Z]?\d+(?:\.\d+)*)/gi;
+  const refPattern = /\bTABLES?\s+([A-Z]\d{1,2}[DGPVOF]\d{1,2}[a-z]?|[A-Z]?\d+(?:\.\d+)*[a-z]?)/gi;
   for (let i = 0; i < lines.length; i++) {
     let refMatch: RegExpExecArray | null;
     refPattern.lastIndex = 0;
@@ -617,7 +632,7 @@ export function extractFigureChunks(text: string, standardCode: string, version:
   // ── Pass 1: caption lines (line STARTS with "Figure X.X") ─────────────────
   // Accepts dash, colon or plain-space separators and optional **markdown**.
   // Optional letter prefix covers appendix figures ("FIGURE B1")
-  const captionLinePattern = /^(?:\*{0,2})FIGURE\s+([A-Z]?\d+(?:\.\d+)*)\s*(?:—|–|-|:)?\s*(.*)$/i;
+  const captionLinePattern = /^(?:\*{0,2})FIGURE\s+([A-Z]\d{1,2}[DGPVOF]\d{1,2}[a-z]?|[A-Z]?\d+(?:\.\d+)*[a-z]?)\s*(?:—|–|-|:)?\s*(.*)$/i;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].replace(/\r$/, "").trim();
     const match = line.match(captionLinePattern);
@@ -644,11 +659,11 @@ export function extractFigureChunks(text: string, standardCode: string, version:
 
   // ── Pass 2: any "Figure X.X" referenced anywhere (incl. lists like
   //    "Figures 3.7, 3.8, 3.9 and 3.13"). Adds figures we didn't see a caption for.
-  const refPattern = /\bFIGURES?\s+([A-Z]?\d+(?:\.\d+)*(?:\s*(?:,|and|&)\s*[A-Z]?\d+(?:\.\d+)*)*)/gi;
+  const refPattern = /\bFIGURES?\s+((?:[A-Z]\d{1,2}[DGPVOF]\d{1,2}[a-z]?|[A-Z]?\d+(?:\.\d+)*[a-z]?)(?:\s*(?:,|and|&)\s*(?:[A-Z]\d{1,2}[DGPVOF]\d{1,2}[a-z]?|[A-Z]?\d+(?:\.\d+)*[a-z]?))*)/gi;
   let refMatch: RegExpExecArray | null;
   while ((refMatch = refPattern.exec(text)) !== null) {
     // Split a possible list ("3.7, 3.8 and 3.13") into individual numbers.
-    const nums = (refMatch[1].match(/[A-Z]?\d+(?:\.\d+)*/gi) || []).map((n) => n.toUpperCase());
+    const nums = (refMatch[1].match(/[A-Z]\d{1,2}[DGPVOF]\d{1,2}[a-z]?|[A-Z]?\d+(?:\.\d+)*[a-z]?/gi) || []).map((n) => n.toUpperCase());
     const charPos = refMatch.index;
     let lineIdx = 0;
     for (let j = pageOffsets.length - 1; j >= 0; j--) {

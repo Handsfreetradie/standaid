@@ -42,7 +42,15 @@ export function assembleLines(items: PositionedItem[]): string[] {
     line.sort((a, b) => a.x - b.x);
     let text = "";
     let prevEnd = Infinity;
+    let prev: PositionedItem | null = null;
     for (const it of line) {
+      // Some PDFs (the NCC among them) carry each heading twice — a visible
+      // layer and an accessibility/outline layer at the same coordinates.
+      // Without this dedupe the copies fuse into "StructurePart H1—Structure".
+      if (prev && it.str === prev.str && Math.abs(it.x - prev.x) < 1 && Math.abs(it.y - prev.y) < 1) {
+        continue;
+      }
+      prev = it;
       const gap = it.x - prevEnd;
       // A real word/column gap is a decent fraction of the glyph height;
       // kerned fragments of one word sit at gap ≈ 0 (or overlap).
