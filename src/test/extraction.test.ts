@@ -342,3 +342,52 @@ describe("buildDocumentMapChunk", () => {
     expect(map).toBeNull();
   });
 });
+
+describe("NCC structure detection", () => {
+  const nccDoc = [
+    "[PAGE 30]",
+    "SECTION C FIRE RESISTANCE",
+    "C1P1 Fire spread",
+    "A building must avoid the spread of fire to exits and adjoining buildings.",
+    "C3D5 Fire-resistance of building elements",
+    "Building elements must have the required FRL per Specification 5.",
+    "[PAGE 60]",
+    "Part 3.7 Fire safety",
+    "3.7.2.4 Smoke alarm location",
+    "Smoke alarms must be installed on or near the ceiling.",
+    "P2.3.1 Protection from the spread of fire",
+    "A Class 1 building must be protected from the spread of fire.",
+    "[PAGE 90]",
+    "SECTION H SPECIAL USE BUILDINGS",
+    "H1D4 Entertainment venues",
+    "Requirements for stages and backstage areas apply.",
+  ].join("\n");
+
+  it("detects lettered sections, NCC 2022 codes, and legacy clauses", () => {
+    const sections = sortIntoSections(nccDoc);
+    const nums = sections.map((s) => s.clauseNumber);
+    const headings = sections.map((s) => s.heading);
+    expect(headings).toContain("SECTION C FIRE RESISTANCE");
+    expect(headings).toContain("Part 3.7 Fire safety");
+    expect(nums).toContain("C1P1");
+    expect(nums).toContain("C3D5");
+    expect(nums).toContain("3.7.2.4");
+    expect(nums).toContain("P2.3.1");
+  });
+
+  it("builds a document map from NCC structure", () => {
+    const map = buildDocumentMapChunk(sortIntoSections(nccDoc), "NCC Volume Two", "2022");
+    expect(map).not.toBeNull();
+    expect(map!.content).toContain("SECTION C FIRE RESISTANCE (page 30)");
+    expect(map!.content).toContain("C3D5 Fire-resistance of building elements");
+  });
+
+  it("does not treat prose mentioning sections as headings", () => {
+    const sections = sortIntoSections([
+      "[PAGE 5]",
+      "2.1 SCOPE",
+      "Section C of the code covers fire. Part 3 also applies here.",
+    ].join("\n"));
+    expect(sections.map((s) => s.heading)).not.toContain("Section C of the code covers fire. Part 3 also applies here.");
+  });
+});

@@ -17,8 +17,22 @@ export interface Chunk {
   chunk_index: number;
 }
 
-// Heading patterns for AU/NZ standards
-export const SECTION_HEADING = /^(SECTION\s+\d+|PART\s+\d+|APPENDIX\s+[A-Z])/i;
+// Heading patterns for AU/NZ standards AND the NCC (National Construction
+// Code). Standards Australia uses "SECTION 2", "PART 3", "APPENDIX C".
+// The NCC adds lettered sections ("SECTION C FIRE RESISTANCE" — requires an
+// uppercase title after the letter so prose like "Section C of..." doesn't
+// open a false section), lettered parts ("Part C3", "Part 3.7") and volumes.
+export const SECTION_HEADING = /^(SECTION\s+\d+|PART\s+[A-J]?\d+(?:\.\d+)*|APPENDIX\s+[A-Z]|VOLUME\s+(?:ONE|TWO|THREE|\d))/i;
+
+// NCC lettered sections ("SECTION C FIRE RESISTANCE"). Deliberately
+// case-SENSITIVE: the uppercase title requirement is the guard that stops
+// prose like "Section C of the code..." opening a false section — under /i
+// the guard matched lowercase words and was useless.
+export const NCC_SECTION_HEADING = /^SECTION\s+[A-J]\s+[A-Z]{2,}/;
+
+export function isSectionHeading(line: string): boolean {
+  return SECTION_HEADING.test(line) || NCC_SECTION_HEADING.test(line);
+}
 
 // Require: clause number + whitespace + capital letter + alpha char
 // Relaxed from 2+ spaces to 1+ spaces so AI OCR output (single space) also matches.
@@ -71,10 +85,21 @@ export function compareRefNumbers(a: string, b: string): number {
 // the requirements...") into headings.
 export const APPENDIX_CLAUSE_PATTERN = /^([A-Z]\d{1,2}(?:\.\d{1,2}){0,4})[\t ]+([A-Z][A-Za-z].*)/;
 
-function validateHeading(number: string, title: string): ClauseHeading | null {
+// NCC 2022 clause codes: letter-digit-letter-digit ("C3D5 Fire-resistance of
+// building elements", "H1P1 Structure", "F2V2"). The middle letter is the
+// provision type: D deemed-to-satisfy, P performance, V verification,
+// G governing, O objective, F functional. Distinctive enough to match
+// globally without false positives in AS/NZS text.
+export const NCC_CLAUSE_PATTERN = /^([A-J]\d{1,2}[DGPVOF]\d{1,2})[\t ]+([A-Z][A-Za-z].*)/;
+
+// NCC 2019-era performance/objective clauses: "P2.3.1 Fire protection",
+// "O2.1", "V2.1.2". Requires a capitalised title like the other patterns.
+export const NCC_LEGACY_CLAUSE_PATTERN = /^([POV]\d{1,2}(?:\.\d{1,2}){1,3})[\t ]+([A-Z][A-Za-z].*)/;
+
+function validateHeading(number: string, title: string, allowMixedCase = false): ClauseHeading | null {
   if (UNIT_WORD_TITLE.test(title)) return null;
   if (TOC_LEADER.test(title)) return null;
-  if (!number.includes(".") && title !== title.toUpperCase()) return null;
+  if (!allowMixedCase && !number.includes(".") && title !== title.toUpperCase()) return null;
   return { number, title };
 }
 
@@ -84,6 +109,8 @@ export function matchClauseHeading(line: string, inAppendix = false): ClauseHead
     // Groups: [1]=number (tab variant), [2]=title (tab variant), [3]=number (space variant), [4]=title (space variant)
     return validateHeading(m[1] || m[3], (m[2] || m[4] || "").trim());
   }
+  const ncc = line.match(NCC_CLAUSE_PATTERN) || line.match(NCC_LEGACY_CLAUSE_PATTERN);
+  if (ncc) return validateHeading(ncc[1], ncc[2].trim(), true);
   if (inAppendix) {
     const am = line.match(APPENDIX_CLAUSE_PATTERN);
     if (am) return validateHeading(am[1], am[2].trim());
@@ -208,10 +235,10 @@ export function sortIntoSections(markedText: string): Section[] {
     if (pm) { currentPage = parseInt(pm[1], 10) || currentPage; continue; }
 
     // ToC lines ("SECTION 2 ........ 45") must never open a section
-    const sectionMatch = TOC_LEADER.test(line) ? null : line.match(SECTION_HEADING);
+    const sectionMatch = TOC_LEADER.test(line) ? null : (isSectionHeading(line) ? line : null);
     const clauseMatch = matchClauseHeading(line, inAppendix);
 
-    if (sectionMatch) {
+    if (sectionMatch !== null) {
       // Track appendix context so letter-prefixed clauses (B1, C2.1) are
       // detected there — appendices used to collapse into one giant
       // unlabelled section, hiding e.g. maximum-demand rules from retrieval.
@@ -293,7 +320,7 @@ export function chunkSections(sections: Section[], standardCode: string, version
     // and never a clause heading: parent clauses like "8.3 TESTING" carry all
     // their content in sub-clauses, but the heading chunk is what exact
     // clause-number lookups resolve to.
-    const isHeading = section.clauseNumber !== null || SECTION_HEADING.test(section.heading || "");
+    const isHeading = section.clauseNumber !== null || isSectionHeading(section.heading || "");
     if (sectionText.length < 20 && !isHeading) continue;
 
     const breadcrumb = buildBreadcrumb(standardCode, version, section.clauseNumber, section.heading);
@@ -394,7 +421,7 @@ export function buildDocumentMapChunk(
   };
 
   for (const s of sections) {
-    const isStructural = s.clauseNumber === null && s.heading && SECTION_HEADING.test(s.heading);
+    const isStructural = s.clauseNumber === null && s.heading && isSectionHeading(s.heading);
     if (isStructural) {
       flushClauses();
       lines.push(`${s.heading!.trim()} (page ${s.pageNumber})`);
@@ -528,7 +555,7 @@ export function extractTableChunks(text: string, standardCode: string, version: 
         const trimmed = raw.trim();
         if (captionPattern.test(trimmed)) break;
         if (/^(?:\*{0,2})FIGURE\s+[A-Z]?\d/i.test(trimmed)) break;
-        if (!TOC_LEADER.test(raw) && (SECTION_HEADING.test(raw) || matchClauseHeading(raw))) break;
+        if (!TOC_LEADER.test(raw) && (isSectionHeading(raw) || matchClauseHeading(raw))) break;
       }
       surrounding += raw + "\n";
     }
