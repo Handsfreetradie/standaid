@@ -403,7 +403,7 @@ const StandardsUpload = () => {
   // ── INTRO ──
   if (step === "intro") {
     return (
-      <div className="px-5 py-6 pb-24 max-w-md mx-auto">
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md mx-auto">
         <button
           onClick={() => navigate("/standards")}
           className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-6"
@@ -452,7 +452,7 @@ const StandardsUpload = () => {
   // ── FILE UPLOAD ──
   if (step === "upload") {
     return (
-      <div className="px-5 py-6 pb-24 max-w-md mx-auto">
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md mx-auto">
         <button
           onClick={() => setStep("intro")}
           className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-6"
@@ -486,7 +486,7 @@ const StandardsUpload = () => {
   // ── NAMING ──
   if (step === "naming") {
     return (
-      <div className="px-5 py-6 pb-24 max-w-md mx-auto">
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md mx-auto">
         <button
           onClick={() => setStep("upload")}
           className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-6"
@@ -558,7 +558,7 @@ const StandardsUpload = () => {
     const currentIdx = stages.indexOf(progress.stage);
 
     return (
-      <div className="px-5 py-6 pb-24 max-w-md mx-auto">
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md mx-auto">
         <div className="text-center mb-8 mt-8">
           <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
             <Loader2 className="h-8 w-8 text-primary animate-spin" />
@@ -617,7 +617,7 @@ const StandardsUpload = () => {
   // ── SUCCESS ──
   if (step === "success") {
     return (
-      <div className="px-5 py-6 pb-24 max-w-md mx-auto">
+      <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md mx-auto">
         <div className="text-center mb-8 mt-8">
           <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
             <CheckCircle2 className="h-8 w-8 text-primary" />
