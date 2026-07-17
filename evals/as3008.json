@@ -1,0 +1,7 @@
+[
+  { "id": 1, "text": "What is the current-carrying capacity of a 2.5 mm² flexible cord with thermoplastic insulation, in air?", "description": "Table 16 (flexible cords) — 2.5mm² = 20A (single unambiguous column)", "correct_values": ["20"], "wrong_values": ["23", "25", "16", "33"], "clause_hints": ["table 16"], "safety": false },
+  { "id": 2, "text": "What is the current-carrying capacity of a 1.5 mm² flexible cord with thermoplastic insulation, in air?", "description": "Table 16 — 1.5mm² = 16A", "correct_values": ["16"], "wrong_values": ["20", "10", "23"], "clause_hints": ["table 16"], "safety": false },
+  { "id": 3, "text": "What is the current-carrying capacity of a 4.0 mm² flexible cord with thermoplastic insulation, in air?", "description": "Table 16 — 4.0mm² = 25A", "correct_values": ["25"], "wrong_values": ["20", "30", "32"], "clause_hints": ["table 16"], "safety": false },
+  { "id": 4, "text": "For a flexible cord wound on a drum in three layers, what derating factor do I apply to the current-carrying capacity?", "description": "Table 16 Note 1 — 3 layers = 0.47", "correct_values": ["0.47"], "wrong_values": ["0.76", "0.58", "0.40"], "clause_hints": ["table 16"], "safety": false },
+  { "id": 5, "text": "What is the current-carrying capacity of a 2.5 mm² two-core MIMS cable (1/1 kV) clipped to a wall?", "description": "Table 19 (bare MIMS, 1/1kV) — 2.5mm² two-core clipped = 33A", "correct_values": ["33"], "wrong_values": ["36", "30", "27", "29"], "clause_hints": ["table 19"], "safety": false }
+]

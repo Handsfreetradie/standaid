@@ -9,6 +9,82 @@ import { expandQuery } from "./synonyms.ts";
 const SEPARATOR = "---METADATA---";
 const SEP_LEN = SEPARATOR.length;
 
+// Haiku reranking. RRF orders candidates by cross-channel agreement, but a
+// chunk can rank high on keyword overlap while being tangential to the actual
+// question. One cheap Haiku pass reads the top candidates and floats the ones
+// most likely to CONTAIN THE ANSWER, not just share vocabulary. Timeout-
+// guarded and fully degrading: any failure keeps the original RRF order, so
+// this can only ever help.
+async function rerankChunks(question: string, candidates: any[], apiKey: string): Promise<any[]> {
+  if (candidates.length <= 8) return candidates;
+  const pool = candidates.slice(0, 20);
+  const listing = pool.map((c, i) =>
+    `[${i}] ${c.clause_number ? `Clause ${c.clause_number}: ` : ""}${(c.content || "").replace(/\s+/g, " ").slice(0, 280)}`
+  ).join("\n");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 6000);
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": apiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 60,
+        messages: [{
+          role: "user",
+          content: `Question: ${question}\n\nExtracts:\n${listing}\n\nList the extract numbers most likely to contain the answer, best first, max 12. Comma-separated numbers only, nothing else.`,
+        }],
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return candidates;
+    const data = await res.json();
+    const raw = data.content?.[0]?.text || "";
+    const order = [...raw.matchAll(/\d+/g)].map((m: any) => parseInt(m[0], 10)).filter((n: number) => n >= 0 && n < pool.length);
+    if (order.length === 0) return candidates;
+    // Reranked picks float first; everything else keeps its RRF order. Dedupe
+    // by id keeps the first (reranked) occurrence — nothing is lost, so recall
+    // is preserved even if the reranker names only a handful.
+    const ranked = order.map((idx: number) => pool[idx]);
+    const seen = new Set<string>();
+    return [...ranked, ...candidates].filter((c: any) => {
+      if (seen.has(c.id)) return false;
+      seen.add(c.id);
+      return true;
+    });
+  } catch {
+    return candidates;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// Deterministic table-row extraction. When the question contains a specific
+// value ("2.5 mm²", "20 A") and a retrieved table has been transcribed to
+// markdown, pull the exact matching row(s) out and surface them up top. The AI
+// reads tables well but occasionally grabs an adjacent row; handing it the
+// pre-extracted row removes that failure mode for the numbers tradies depend on.
+function extractTableRows(question: string, chunks: any[]): string {
+  const nums = [...new Set(question.match(/\b\d+(?:\.\d+)?\b/g) || [])];
+  if (nums.length === 0) return "";
+  const blocks: string[] = [];
+  for (const c of chunks) {
+    if (!/^TABLE/i.test((c.clause_number || "").toString())) continue;
+    const rows = (c.content || "").split("\n").filter((l: string) => (l.match(/\|/g) || []).length >= 2);
+    if (rows.length < 2) continue;
+    const header = rows[0];
+    const matched = rows.filter((r: string, i: number) =>
+      i > 0 && nums.some((n) => new RegExp(`(^|[^\\d.])${n.replace(".", "\\.")}([^\\d]|$)`).test(r))
+    );
+    if (matched.length > 0 && matched.length <= 8) {
+      blocks.push(`${c.clause_number}${c.clause_title ? ` — ${c.clause_title}` : ""}:\n${header}\n${matched.join("\n")}`);
+    }
+  }
+  return blocks.length > 0
+    ? `\n\n[EXACT TABLE ROWS matching values in the question — quote these precise figures if relevant]\n${blocks.join("\n\n")}`
+    : "";
+}
+
 serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
   const corsHeaders = {
@@ -328,7 +404,12 @@ serve(async (req) => {
       .sort((a, b) => b.score - a.score)
       .map((e) => e.chunk)
       .filter((c: any) => !clauseIds.has(c.id));
-    const matchedChunks = [...clauseChunks, ...fused].slice(0, 15);
+    // Rerank the fused pool before the cut. Exact clause-number hits stay
+    // pinned first (explicit intent, not fuzzy matching); everything else is
+    // reordered by a Haiku pass that judges which chunks actually answer the
+    // question. Falls back to RRF order on any failure.
+    const fusedRanked = await rerankChunks(retrievalQuestion, fused, ANTHROPIC_API_KEY);
+    const matchedChunks = [...clauseChunks, ...fusedRanked].slice(0, 15);
 
     // Genuine relevance signal: the best REAL cosine similarity from vector
     // search. Clause hits get a fabricated 1.0 and keyword hits a fabricated
@@ -400,12 +481,81 @@ serve(async (req) => {
       }
     }
 
+    // Cross-standard reference following. Standards defer to each other
+    // constantly ("...selected in accordance with AS/NZS 3008.1.1"). If the
+    // user owns the referenced standard, pull a few relevant chunks from it so
+    // the AI can actually follow the reference instead of replying "refer to
+    // AS/NZS 3008". Scoped FTS on the fts column — no extra embedding spend.
+    {
+      const scanText = matchedChunks.map((c: any) => c.content).join("\n");
+      const refCodes = new Set<string>();
+      for (const m of scanText.matchAll(/\bAS(?:\/NZS)?\s?(\d{3,5}(?:\.\d+){0,3})\b/gi)) refCodes.add(m[1]);
+      const presentStdIds = new Set(matchedChunks.map((c: any) => c.standard_id));
+      const xFtsQuery = [...new Set(keywords.slice(0, 8).map(sanitizeKw).filter((k: string) => k.length > 2))].join(" OR ");
+      if (refCodes.size > 0 && xFtsQuery) {
+        const { data: ownedStds } = await supabase
+          .from("standards").select("id, standard_code").eq("user_id", userId);
+        const targetIds = (ownedStds || [])
+          .filter((s: any) => !presentStdIds.has(s.id))
+          .filter((s: any) => {
+            const norm = (s.standard_code || "").replace(/[^0-9.]/g, "");
+            return norm && [...refCodes].some((rc) => norm === rc || norm.startsWith(rc + ".") || rc.startsWith(norm + "."));
+          })
+          .map((s: any) => s.id)
+          .slice(0, 3);
+        if (targetIds.length > 0) {
+          const { data: xRows } = await supabase
+            .from("standard_chunks")
+            .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
+            .eq("user_id", userId)
+            .in("standard_id", targetIds)
+            .textSearch("fts", xFtsQuery, { type: "websearch" })
+            .limit(6);
+          const haveIds = new Set(matchedChunks.map((c: any) => c.id));
+          for (const rc of xRows || []) {
+            if (!haveIds.has(rc.id) && matchedChunks.length < 22) {
+              haveIds.add(rc.id);
+              matchedChunks.push({ ...rc, similarity: 0.7 });
+            }
+          }
+        }
+      }
+    }
+
     // Get standard details
     const standardIds = [...new Set(matchedChunks.map((c: any) => c.standard_id))];
     const standards = standardIds.length > 0
       ? (await supabase.from("standards").select("id, standard_code, version, title").in("id", standardIds)).data
       : [];
     const standardMap = new Map(standards?.map((s: any) => [s.id, s]) || []);
+
+    // Definitions injection. Terms like "socket-outlet", "MEN", "damp
+    // situation" carry precise standards meanings; pulling their definition
+    // into context stops the AI answering from a colloquial reading. Search the
+    // matched standards' definitions clauses for the question's key terms.
+    if (standardIds.length > 0) {
+      const stop = new Set(["what","which","where","does","the","and","for","are","can","how","with","from","that","this","when","must","need","should","installation","standard","standards","requirement","requirements","allowed","required","between","there"]);
+      const terms = [...new Set(effectiveQuestion.toLowerCase().match(/\b[a-z][a-z-]{3,}\b/g) || [])]
+        .filter((w) => !stop.has(w)).slice(0, 6);
+      if (terms.length > 0) {
+        const orTerms = terms.map((t) => `content.ilike.%${t}%`).join(",");
+        const { data: defRows } = await supabase
+          .from("standard_chunks")
+          .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
+          .eq("user_id", userId)
+          .in("standard_id", standardIds)
+          .or("clause_title.ilike.%definition%,clause_title.ilike.%terms and definitions%,clause_number.ilike.1.4%")
+          .or(orTerms)
+          .limit(4);
+        const haveIds = new Set(matchedChunks.map((c: any) => c.id));
+        for (const dr of defRows || []) {
+          if (!haveIds.has(dr.id) && matchedChunks.length < 24) {
+            haveIds.add(dr.id);
+            matchedChunks.push({ ...dr, similarity: 0.68 });
+          }
+        }
+      }
+    }
 
     // Detect trade
     const standardCounts = new Map<string, number>();
@@ -451,12 +601,13 @@ serve(async (req) => {
       : "";
 
     // Build context string
+    const tableRowContext = extractTableRows(effectiveQuestion, matchedChunks);
     const contextChunks = matchedChunks.length > 0
       ? matchedChunks.map((chunk: any, i: number) => {
           const std = standardMap.get(chunk.standard_id);
           return `[Source ${i + 1} — ${std?.standard_code || "Unknown"} ${std?.version || ""} Clause ${chunk.clause_number || "N/A"} (Page ${chunk.page_number || "N/A"})]
 ${chunk.content}`;
-        }).join("\n\n") + figCaptionContext + correctionsContext
+        }).join("\n\n") + tableRowContext + figCaptionContext + correctionsContext
       : null;
 
     // Refusal gate — refuse to fabricate rather than answer from weak context.
@@ -840,7 +991,19 @@ User's question/context: ${effectiveQuestion}` : "";
         // Strip hallucinated citations
         if (parsedResponse.citations?.length && matchedChunks.length > 0) {
           const allChunkText = matchedChunks.map((c: any) => c.content.toLowerCase()).join(" ");
+          // Clauses we genuinely put in context. A citation pointing at one of
+          // these is grounded by retrieval — keep it even if the AI paraphrased
+          // the quote. The old filter dropped these whenever relevant_text
+          // wasn't near-verbatim, which is why correct, well-retrieved answers
+          // (MEN, main-earth resistance) came back with no clause chip at all.
+          const retrievedClauseNums = new Set(
+            matchedChunks.map((c: any) => (c.clause_number || "").toString().trim().toUpperCase()).filter(Boolean)
+          );
           parsedResponse.citations = parsedResponse.citations.filter((c: any) => {
+            const cn = (c.clause_number || "").toString().trim().toUpperCase();
+            if (cn && retrievedClauseNums.has(cn)) return true;
+            // Otherwise the clause wasn't retrieved — demand the quote actually
+            // matches the extracts before trusting it (hallucination guard).
             if (!c.relevant_text || c.relevant_text.trim().length < 10) return false;
             const words = c.relevant_text.toLowerCase().split(/\W+/).filter((w: string) => w.length > 3);
             if (words.length === 0) return false;
@@ -939,10 +1102,44 @@ User's question/context: ${effectiveQuestion}` : "";
             }
           }
 
-          // Deliberately NO last-resort citation. Surfacing the top retrieved
-          // chunk when the answer earned no citations attached a legitimate-
-          // looking clause badge to general-knowledge answers — manufactured
-          // authority. If the answer isn't grounded, it shows no citation.
+          // Grounded last-resort citation. If the answer still earned no
+          // citation, recover one ONLY when retrieval was genuinely relevant
+          // (an exact clause hit, or a strong vector match) AND the answer text
+          // lexically overlaps a retrieved clause chunk — proof the answer came
+          // from that clause. The dual guard is exactly what stops this
+          // manufacturing authority on a general-knowledge answer (low
+          // similarity, or no overlap), which is why the blanket version was
+          // removed. Rule 3 keeps clause numbers out of the answer prose, so
+          // without this a correct, well-grounded answer shows no clickable
+          // source at all — the gap the eval surfaced.
+          if (parsedResponse.citations.length === 0 && (hasExactClauseHit || maxVectorSim >= 0.55)) {
+            const answerWords = new Set((parsedResponse.answer || "").toLowerCase().match(/\b[a-z]{5,}\b/g) || []);
+            if (answerWords.size >= 3) {
+              const isRealClause = (cn: string) => cn !== "" && /^[A-Z]?\d+(?:\.\d+)*$/.test(cn);
+              const scored = matchedChunks
+                .filter((c: any) => isRealClause((c.clause_number || "").toString().trim()) && c.chunk_index !== 0)
+                .map((c: any) => {
+                  const chunkLc = (c.content || "").toLowerCase();
+                  let hit = 0;
+                  for (const w of answerWords) if (chunkLc.includes(w)) hit++;
+                  return { c, overlap: hit / answerWords.size };
+                })
+                .filter((s: any) => s.overlap >= 0.30)
+                .sort((a: any, b: any) => b.overlap - a.overlap)
+                .slice(0, 2);
+              for (const { c: hit } of scored) {
+                const std = standardMap.get(hit.standard_id);
+                parsedResponse.citations.push({
+                  standard_code: std?.standard_code || null,
+                  standard_version: std?.version || null,
+                  clause_number: hit.clause_number,
+                  relevant_text: (hit.content || "").replace(/^\[[^\]]*\]\s*/, "").slice(0, 300).trim(),
+                  page_number: hit.page_number,
+                  standard_id: hit.standard_id,
+                });
+              }
+            }
+          }
         }
 
         // Dedupe citation chips and figure/table references — the model

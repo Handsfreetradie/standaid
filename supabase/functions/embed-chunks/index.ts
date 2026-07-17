@@ -6,6 +6,51 @@ const PARALLEL_EMBED = 5;
 // Re-trigger self if elapsed exceeds this — leaves buffer before Supabase's 150s hard limit
 const TIME_BUDGET_MS = 90_000;
 
+// Contextual retrieval (Anthropic's technique). For each chunk, a cheap Haiku
+// pass writes one sentence situating it within the document, prepended to the
+// content before embedding. A bare table row or a sub-clause fragment then
+// carries "which standard, which section, what it covers" — which lifts recall
+// on the vague, keyword-poor questions tradies actually ask. Batched ~10 chunks
+// per call to keep cost down; fully degrading — any failure just embeds the
+// chunk without the extra line.
+async function contextualizeChunks(
+  chunks: Array<{ id: string; content: string; context_generated?: boolean }>,
+  docTitle: string,
+  apiKey: string,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const need = chunks.filter((c) => !c.context_generated && (c.content || "").length > 200);
+  const GROUP = 10;
+  for (let i = 0; i < need.length; i += GROUP) {
+    const group = need.slice(i, i + GROUP);
+    const listing = group.map((c, j) => `[${j}] ${(c.content || "").replace(/\s+/g, " ").slice(0, 500)}`).join("\n\n");
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": apiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 500,
+          messages: [{
+            role: "user",
+            content: `These are numbered excerpts from "${docTitle}". For EACH excerpt, write ONE short sentence (max 20 words) situating it within the document — the section/topic it belongs to and what it covers — so it can be found by search. Reply as "[n] sentence" lines, one per excerpt, and nothing else.\n\n${listing}`,
+          }],
+        }),
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const text = data.content?.[0]?.text || "";
+      for (const m of text.matchAll(/\[(\d+)\]\s*(.+?)(?=\n\[\d+\]|$)/gs)) {
+        const idx = parseInt(m[1], 10);
+        if (group[idx]) out.set(group[idx].id, m[2].trim().replace(/\s+/g, " ").slice(0, 220));
+      }
+    } catch (e) {
+      console.error("[embed-chunks] contextualize batch failed:", e);
+    }
+  }
+  return out;
+}
+
 async function generateEmbeddingsBatch(texts: string[], apiKey: string): Promise<(number[] | null)[]> {
   const MAX_RETRIES = 3;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -53,6 +98,9 @@ serve(async (req) => {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
+  // Optional — contextual retrieval is a nice-to-have. If the key is absent we
+  // simply embed without the situating line rather than failing the upload.
+  const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 
   const t0 = Date.now();
 
@@ -90,7 +138,7 @@ serve(async (req) => {
 
     const { data: standard } = await supabaseAdmin
       .from("standards")
-      .select("total_chunks, extraction_status, user_id")
+      .select("total_chunks, extraction_status, user_id, title")
       .eq("id", standard_id)
       .single();
 
@@ -143,7 +191,7 @@ serve(async (req) => {
       // about most.
       const { data: chunks } = await supabaseAdmin
         .from("standard_chunks")
-        .select("id, chunk_index, content")
+        .select("id, chunk_index, content, context_generated")
         .eq("standard_id", standard_id)
         .is("embedding", null)
         .not("content", "ilike", "%visual description will be generated shortly%")
@@ -153,6 +201,18 @@ serve(async (req) => {
         .limit(EMBED_BATCH_SIZE * PARALLEL_EMBED);
 
       if (!chunks || chunks.length === 0) break;
+
+      // Prepend a one-line situating context to each chunk BEFORE embedding, so
+      // the embedded text and the retrieved text both carry it. Mutates content
+      // in memory; the flag + new content are persisted in the embedding write
+      // below (one round-trip, no extra writes). Skipped entirely if no key.
+      if (ANTHROPIC_API_KEY) {
+        const ctxMap = await contextualizeChunks(chunks, standard.title || "an Australian Standard", ANTHROPIC_API_KEY);
+        for (const c of chunks) {
+          const ctx = ctxMap.get(c.id);
+          if (ctx) c.content = `[Context] ${ctx}\n\n${c.content}`;
+        }
+      }
 
       // Split into batches and process in parallel groups
       const batches: typeof chunks[] = [];
@@ -174,9 +234,14 @@ serve(async (req) => {
               const emb = results[gi][idx];
               if (!emb) return Promise.resolve();
               wroteAny = true;
+              // Persist the (possibly context-prepended) content and mark it
+              // attempted in the same write that stores the embedding — so a
+              // retrigger never re-spends Haiku on an already-embedded chunk.
+              const update: Record<string, unknown> = { embedding: JSON.stringify(emb), is_indexed: true };
+              if (ANTHROPIC_API_KEY) { update.content = chunk.content; update.context_generated = true; }
               return supabaseAdmin
                 .from("standard_chunks")
-                .update({ embedding: JSON.stringify(emb), is_indexed: true })
+                .update(update)
                 .eq("id", chunk.id);
             })
           )
