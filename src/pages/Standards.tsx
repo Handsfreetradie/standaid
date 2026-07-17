@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { useAuth } from "@/hooks/useAuth";
 import { useStandards, useProfile, useProcessingJobs } from "@/hooks/useData";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -21,9 +20,7 @@ const statusIcon = {
 
 const Standards = () => {
   const [searchQuery, setSearchQuery] = useState("");
-  const [uploading, setUploading] = useState(false);
   const [pdfViewer, setPdfViewer] = useState<{ standardId: string; standardCode: string } | null>(null);
-  const { user, session } = useAuth();
   const { data: standards = [], isLoading } = useStandards();
   const { data: profile } = useProfile();
   const { data: processingJobs = [] } = useProcessingJobs();
@@ -37,85 +34,6 @@ const Standards = () => {
       s.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (s.standard_code || "").toLowerCase().includes(searchQuery.toLowerCase())
   );
-
-  const handleUpload = async () => {
-    if (!session) {
-      toast.error("Please sign in to upload standards");
-      return;
-    }
-
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".pdf";
-    input.onchange = async (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-
-      if (file.type !== "application/pdf") {
-        toast.error("Only PDF files are accepted");
-        return;
-      }
-
-      if (file.size > 50 * 1024 * 1024) {
-        toast.error("File must be under 50MB");
-        return;
-      }
-
-      // Extract title from filename
-      const title = file.name.replace(".pdf", "").replace(/[_-]/g, " ");
-
-      setUploading(true);
-      try {
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("title", title);
-
-        const { data, error } = await supabase.functions.invoke("upload-standard", {
-          body: formData,
-        });
-
-        if (error) {
-          const msg = (error as any)?.context?.error || error.message || "Upload failed";
-          if ((error as any)?.context?.upgrade_required) {
-            toast.error(msg);
-          } else {
-            toast.error(msg);
-          }
-          return;
-        }
-
-        toast.success("Standard uploaded! Processing will begin shortly.");
-        queryClient.invalidateQueries({ queryKey: ["standards"] });
-
-        // Poll for processing status
-        const pollInterval = setInterval(async () => {
-          const { data: updated } = await supabase
-            .from("standards")
-            .select("extraction_status")
-            .eq("id", data.standard_id)
-            .single();
-
-          if (updated?.extraction_status === "complete") {
-            clearInterval(pollInterval);
-            toast.success("Standard processing complete!");
-            queryClient.invalidateQueries({ queryKey: ["standards"] });
-          } else if (updated?.extraction_status === "failed") {
-            clearInterval(pollInterval);
-            toast.error("Processing failed. Try a different PDF.");
-            queryClient.invalidateQueries({ queryKey: ["standards"] });
-          }
-        }, 3000);
-
-        // Stop polling after 5 minutes
-        setTimeout(() => clearInterval(pollInterval), 300000);
-      } catch (e: any) {
-        toast.error(e.message || "Upload failed");
-      } finally {
-        setUploading(false);
-      }
-    };
-    input.click();
-  };
 
   const handleDelete = async (standardId: string) => {
     if (!window.confirm("Delete this standard? This cannot be undone.")) return;

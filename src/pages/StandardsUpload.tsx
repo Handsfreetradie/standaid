@@ -193,11 +193,17 @@ const StandardsUpload = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
+  const isPdf = (f: File) =>
+    f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0];
     if (!selected) return;
 
-    if (selected.type !== "application/pdf") {
+    // iOS hands back an empty type for files picked out of iCloud/Drive, so the
+    // filename is the only reliable signal there. process-standard parses the
+    // real bytes regardless, so a misnamed file still fails at extraction.
+    if (!isPdf(selected)) {
       toast.error("Only PDF files are supported");
       return;
     }
@@ -214,7 +220,19 @@ const StandardsUpload = () => {
   };
 
   const startProcessing = async () => {
-    if (!file || !session || !docName.trim() || !licenceConfirmed) return;
+    if (!file) return;
+    if (!session) {
+      toast.error("Your session has expired — please sign in again.");
+      return;
+    }
+    if (!docName.trim()) {
+      toast.error("Give the document a name first.");
+      return;
+    }
+    if (!licenceConfirmed) {
+      toast.error("Please confirm you're licensed to upload this document.");
+      return;
+    }
 
     setStep("processing");
     setProgress({ stage: "reading", percent: 5, message: STAGE_LABELS.reading });
@@ -448,7 +466,7 @@ const StandardsUpload = () => {
         <input
           ref={fileRef}
           type="file"
-          accept=".pdf"
+          accept="application/pdf,.pdf"
           className="hidden"
           onChange={handleFileSelect}
         />
@@ -525,7 +543,6 @@ const StandardsUpload = () => {
 
         <Button
           className="w-full h-12 font-bold rounded-xl gap-2"
-          disabled={!docName.trim() || !licenceConfirmed}
           onClick={startProcessing}
         >
           <Sparkles className="h-4 w-4" />
