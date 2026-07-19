@@ -64,7 +64,7 @@ serve(async (req) => {
     if (standardCode) {
       const { data: existing } = await supabaseAdmin
         .from("standards")
-        .select("id")
+        .select("id, file_path")
         .eq("user_id", userId)
         .eq("standard_code", standardCode)
         .maybeSingle();
@@ -76,15 +76,36 @@ serve(async (req) => {
         await supabaseAdmin.from("standard_tables").delete().eq("standard_id", existing.id);
         await supabaseAdmin.from("processing_jobs").delete().eq("standard_id", existing.id);
         await supabaseAdmin.from("standards").delete().eq("id", existing.id);
+
+        // Remove the replaced standard's storage too — PDFs are 20-50MB each
+        // and were previously orphaned forever on every re-upload.
+        try {
+          if (existing.file_path) {
+            const oldTxt = (existing.file_path as string).replace(/\.pdf$/i, ".txt");
+            await supabaseAdmin.storage.from("standards").remove([existing.file_path, oldTxt]);
+          }
+          const figureFolder = `${userId}/${existing.id}`;
+          const { data: figureFiles } = await supabaseAdmin.storage.from("standard-figures").list(figureFolder);
+          if (figureFiles && figureFiles.length > 0) {
+            await supabaseAdmin.storage.from("standard-figures").remove(
+              figureFiles.map((f) => `${figureFolder}/${f.name}`),
+            );
+          }
+        } catch (cleanupErr) {
+          console.warn(`[upload-standard] Storage cleanup for replaced standard ${existing.id} failed:`, cleanupErr);
+        }
       }
     }
 
-    // Tier limit only applies to brand-new standards (not replacements)
+    // Tier limit only applies to brand-new standards (not replacements).
+    // Failed uploads don't count — a few doomed retries of a bad PDF used to
+    // fill all 5 slots and lock the user out behind an upgrade prompt.
     if (tier === "free" && !isReplacement) {
       const { count } = await supabaseAdmin
         .from("standards")
         .select("*", { count: "exact", head: true })
-        .eq("user_id", userId);
+        .eq("user_id", userId)
+        .neq("extraction_status", "failed");
 
       if ((count || 0) >= 5) {
         return new Response(JSON.stringify({

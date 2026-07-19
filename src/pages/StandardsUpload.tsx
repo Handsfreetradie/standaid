@@ -42,45 +42,62 @@ const STAGE_LABELS: Record<string, string> = {
   done: "Processing complete!",
 };
 
+// Pages are read in fixed-size windows rather than one Promise.all over the
+// whole document — holding 700 page proxies + text content at once is what
+// gets a mobile Safari tab killed on the biggest standards.
+const PAGE_WINDOW = 25;
+
 async function extractPdfText(
   file: File,
   onProgress: (pct: number) => void,
 ): Promise<string> {
   const buffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
-  const numPages = pdf.numPages;
-  let completed = 0;
+  try {
+    const numPages = pdf.numPages;
+    let completed = 0;
+    const pageTexts: string[] = [];
 
-  const pageTexts = await Promise.all(
-    Array.from({ length: numPages }, async (_, i) => {
-      const page = await pdf.getPage(i + 1);
-      const content = await page.getTextContent();
+    for (let start = 0; start < numPages; start += PAGE_WINDOW) {
+      const windowSize = Math.min(PAGE_WINDOW, numPages - start);
+      const windowTexts = await Promise.all(
+        Array.from({ length: windowSize }, async (_, i) => {
+          const page = await pdf.getPage(start + i + 1);
+          const content = await page.getTextContent();
 
-      // Reconstruct lines geometry-aware (see src/lib/pdf-text.ts — pure,
-      // unit-tested). The old fixed 3pt Y-grid split same-line items across
-      // buckets (a decimal point 0.02pt off became its own "line", turning
-      // 0.5 into 05) and join("") fused adjacent table columns into one
-      // number.
-      const items: PositionedItem[] = [];
-      for (const item of content.items) {
-        if (!("str" in item) || !item.str) continue;
-        const t = (item as any).transform;
-        items.push({
-          str: item.str,
-          x: t[4],
-          y: t[5],
-          w: (item as any).width ?? 0,
-          h: (item as any).height || Math.hypot(t[2], t[3]) || 10,
-        });
-      }
-      const sortedLines = assembleLines(items);
+          // Reconstruct lines geometry-aware (see src/lib/pdf-text.ts — pure,
+          // unit-tested). The old fixed 3pt Y-grid split same-line items across
+          // buckets (a decimal point 0.02pt off became its own "line", turning
+          // 0.5 into 05) and join("") fused adjacent table columns into one
+          // number.
+          const items: PositionedItem[] = [];
+          for (const item of content.items) {
+            if (!("str" in item) || !item.str) continue;
+            const t = (item as any).transform;
+            items.push({
+              str: item.str,
+              x: t[4],
+              y: t[5],
+              w: (item as any).width ?? 0,
+              h: (item as any).height || Math.hypot(t[2], t[3]) || 10,
+            });
+          }
+          const sortedLines = assembleLines(items);
+          page.cleanup();
 
-      onProgress(++completed / numPages);
-      return sortedLines.join("\n");
-    }),
-  );
+          onProgress(++completed / numPages);
+          return sortedLines.join("\n");
+        }),
+      );
+      pageTexts.push(...windowTexts);
+    }
 
-  return pageTexts.map((text, i) => `\n[PAGE ${i + 1}]\n${text}`).join("");
+    return pageTexts.map((text, i) => `\n[PAGE ${i + 1}]\n${text}`).join("");
+  } finally {
+    // Frees the worker's copy of the document — without this the figure pass
+    // later holds a second full document alongside this one.
+    pdf.destroy();
+  }
 }
 
 async function extractAndUploadFigures(
@@ -174,6 +191,9 @@ async function extractAndUploadFigures(
     }
   }
 
+  // Per-figure failures are caught above, so this is reached on every path
+  // that got as far as opening the document.
+  pdf.destroy();
   return uploaded;
 }
 
@@ -362,6 +382,7 @@ const StandardsUpload = () => {
   ): Promise<{ totalChunks: number; indexedChunks: number; quality: number }> => {
     const maxAttempts = 300; // 15 min max (3s × 300)
     let stallKickTriggered = false;
+    let pendingKickTriggered = false;
 
     for (let i = 0; i < maxAttempts; i++) {
       await delay(3000);
@@ -371,9 +392,21 @@ const StandardsUpload = () => {
 
       const { data: job } = await (supabase as any)
         .from("processing_jobs")
-        .select("status")
+        .select("status, error_message")
         .eq("standard_id", standardId)
         .single();
+
+      // Rescue kick: upload-standard starts processing with one fire-and-forget
+      // request — if that single request is lost, the job sits "pending"
+      // forever (there is no server-side queue worker). Still pending after a
+      // minute means it was lost; process-standard accepts direct user calls
+      // and only picks up jobs still in "pending", so this can't double-run.
+      if (!pendingKickTriggered && i >= 20 && (job as any)?.status === "pending") {
+        pendingKickTriggered = true;
+        console.log("Job still pending after 60s — kicking process-standard directly");
+        supabase.functions.invoke("process-standard", { body: { standard_id: standardId } })
+          .catch(e => console.warn("process-standard kick failed:", e));
+      }
 
       const { data } = await supabase
         .from("standards")
@@ -409,7 +442,10 @@ const StandardsUpload = () => {
       }
 
       if (data.extraction_status === "failed") {
-        throw new Error("Processing failed. Try a different file.");
+        // The server writes specific, actionable failure reasons (copy-protected
+        // PDF, daily budget, low quality) — show those, not a generic line that
+        // invites doomed retries of the same file.
+        throw new Error((job as any)?.error_message || "Processing failed. Try a different file.");
       }
 
       if (data.total_chunks && data.total_chunks > 0) {
@@ -624,7 +660,7 @@ const StandardsUpload = () => {
 
         <p className="text-xs text-muted-foreground text-center mt-8">
           {canBackground
-            ? "Large documents take longer — it's safe to leave this running."
+            ? "Large documents take longer — it's safe to leave this running. Note: figure images only finish extracting while this screen stays open."
             : "This may take a minute depending on document size."}
         </p>
 

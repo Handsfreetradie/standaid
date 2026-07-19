@@ -385,7 +385,7 @@ serve(async (req) => {
 
     // Mark job as processing
     await supabaseAdmin.from("processing_jobs")
-      .update({ status: "processing", started_at: new Date().toISOString() })
+      .update({ status: "processing", started_at: new Date().toISOString(), heartbeat_at: new Date().toISOString() })
       .eq("standard_id", standard_id)
       .eq("status", "pending");
 
@@ -509,7 +509,7 @@ serve(async (req) => {
           // Persist progress and retrigger self to continue from nextPage.
           clearTimeout(timeoutHandle);
           await supabaseAdmin.from("processing_jobs")
-            .update({ ocr_text: outcome.ocrText, ocr_next_page: outcome.nextPage, status: "processing" })
+            .update({ ocr_text: outcome.ocrText, ocr_next_page: outcome.nextPage, status: "processing", heartbeat_at: new Date().toISOString() })
             .eq("standard_id", standard_id);
           const selfUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/process-standard`;
           const retrigger = fetch(selfUrl, {
@@ -533,7 +533,7 @@ serve(async (req) => {
         if (Date.now() - requestStart > 60_000) {
           clearTimeout(timeoutHandle);
           await supabaseAdmin.from("processing_jobs")
-            .update({ ocr_text: outcome.rawText, ocr_next_page: outcome.totalPages + 1, status: "processing" })
+            .update({ ocr_text: outcome.rawText, ocr_next_page: outcome.totalPages + 1, status: "processing", heartbeat_at: new Date().toISOString() })
             .eq("standard_id", standard_id);
           const selfUrl2 = `${Deno.env.get("SUPABASE_URL")}/functions/v1/process-standard`;
           const chunkTrigger = fetch(selfUrl2, {
@@ -693,7 +693,7 @@ serve(async (req) => {
       indexed_chunks: 0,
     }).eq("id", standard_id);
     await supabaseAdmin.from("processing_jobs")
-      .update({ status: "processing", error_message: null, completed_at: null })
+      .update({ status: "processing", error_message: null, completed_at: null, heartbeat_at: new Date().toISOString() })
       .eq("standard_id", standard_id)
       .eq("status", "failed");
 

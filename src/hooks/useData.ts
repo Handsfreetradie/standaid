@@ -85,7 +85,8 @@ export function useProcessingJobs() {
         .from("processing_jobs")
         .select("id, standard_id, status, attempts, error_message, created_at, started_at")
         .eq("user_id", user.id)
-        .in("status", ["pending", "processing"])
+        // "failed" included so the library can show the real failure reason
+        .in("status", ["pending", "processing", "failed"])
         .order("created_at", { ascending: true });
       if (error) throw error;
       return data || [];
