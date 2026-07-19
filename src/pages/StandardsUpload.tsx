@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import * as pdfjsLib from "pdfjs-dist";
 import { assembleLines, type PositionedItem } from "@/lib/pdf-text";
+import { scanTooLargeForOcr } from "@/lib/scanned-check";
 import {
   Upload, FileText, CheckCircle2, Loader2, ArrowLeft, ArrowRight,
   BookOpen, Zap, Search, Shield, Sparkles,
@@ -252,6 +253,17 @@ const StandardsUpload = () => {
       extractedText = "";
     }
 
+    // A big scanned copy is guaranteed to be refused server-side (OCR has a
+    // 10MB ceiling) — tell the user now, before wasting the upload.
+    if (scanTooLargeForOcr(extractedText, file.size)) {
+      toast.error(
+        "This looks like a scanned copy — the pages are pictures rather than text, and a scan this large can't be processed. Try a digital PDF version of the standard instead.",
+        { duration: 10000 },
+      );
+      setStep("naming");
+      return;
+    }
+
     // Upload PDF directly to storage (bypasses the edge function body size limit)
     setProgress({ stage: "uploading", percent: 38, message: STAGE_LABELS.uploading });
     const filePath = `${session.user.id}/${crypto.randomUUID()}.pdf`;
@@ -478,7 +490,9 @@ const StandardsUpload = () => {
         </button>
 
         <h2 className="font-display text-xl font-extrabold text-foreground mb-2">Select your document</h2>
-        <p className="text-sm text-muted-foreground mb-6">PDF only, up to 50MB.</p>
+        <p className="text-sm text-muted-foreground mb-6">
+          PDF only, up to 50MB. Digital PDFs work best — large scanned copies (photos of pages) can't be read.
+        </p>
 
         <input
           ref={fileRef}
