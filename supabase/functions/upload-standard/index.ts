@@ -42,7 +42,7 @@ serve(async (req) => {
 
     // Parse JSON body — file was uploaded directly to storage by the browser
     const body = await req.json();
-    const { title, standard_code: standardCode, version, trade_category: tradeCategory, file_path: filePath, extracted_text: extractedText } = body;
+    const { title, standard_code: standardCode, version, trade_category: tradeCategory, file_path: filePath, extracted_text: extractedText, extracted_text_path: extractedTextPath } = body;
 
     if (!title || !filePath) {
       return new Response(JSON.stringify({ error: "title and file_path are required" }), {
@@ -50,8 +50,8 @@ serve(async (req) => {
       });
     }
 
-    // Ensure the file_path belongs to this user
-    if (!filePath.startsWith(`${userId}/`)) {
+    // Ensure the file paths belong to this user
+    if (!filePath.startsWith(`${userId}/`) || (extractedTextPath && !extractedTextPath.startsWith(`${userId}/`))) {
       return new Response(JSON.stringify({ error: "Unauthorised file path" }), {
         status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
@@ -136,7 +136,7 @@ serve(async (req) => {
         Authorization: `Bearer ${serviceRoleKey}`,
         "x-user-auth": authHeader,
       },
-      body: JSON.stringify({ standard_id: standard.id, user_id: userId, extracted_text: extractedText }),
+      body: JSON.stringify({ standard_id: standard.id, user_id: userId, extracted_text: extractedText, extracted_text_path: extractedTextPath }),
     }).then(async r => {
       if (!r.ok) {
         const text = await r.text();
