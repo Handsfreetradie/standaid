@@ -277,7 +277,7 @@ const StandardsUpload = () => {
     // 10MB ceiling) — tell the user now, before wasting the upload.
     if (scanTooLargeForOcr(extractedText, file.size)) {
       toast.error(
-        "This looks like a scanned copy — the pages are pictures rather than text, and a scan this large can't be processed. Try a digital PDF version of the standard instead.",
+        "This looks like a long scanned copy — the pages are pictures rather than text, and scans this big can't be processed. Try a digital PDF version of the standard instead.",
         { duration: 10000 },
       );
       setStep("naming");
@@ -527,7 +527,7 @@ const StandardsUpload = () => {
 
         <h2 className="font-display text-xl font-extrabold text-foreground mb-2">Select your document</h2>
         <p className="text-sm text-muted-foreground mb-6">
-          PDF only, up to 50MB. Digital PDFs work best — large scanned copies (photos of pages) can't be read.
+          PDF only, up to 50MB. Digital PDFs work best — very long scanned copies (photos of pages) can't be read.
         </p>
 
         <input
