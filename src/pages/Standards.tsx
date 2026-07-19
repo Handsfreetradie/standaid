@@ -37,13 +37,40 @@ const Standards = () => {
 
   const handleDelete = async (standardId: string) => {
     if (!window.confirm("Delete this standard? This cannot be undone.")) return;
+
+    // Collect storage paths BEFORE deleting the row — the figure rows
+    // cascade-delete with it, after which the paths are unrecoverable.
+    // Previously only the DB row was removed and the 20-50MB PDF plus every
+    // figure image stayed in storage forever.
+    const standard = standards.find((s) => s.id === standardId);
+    const { data: { user } } = await supabase.auth.getUser();
+
     const { error } = await supabase.from("standards").delete().eq("id", standardId);
     if (error) {
       toast.error("Failed to delete standard");
-    } else {
-      toast.success("Standard deleted");
-      queryClient.invalidateQueries({ queryKey: ["standards"] });
+      return;
     }
+
+    try {
+      const filePath = (standard as any)?.file_path as string | undefined;
+      if (filePath) {
+        await supabase.storage.from("standards").remove([filePath, filePath.replace(/\.pdf$/i, ".txt")]);
+      }
+      if (user) {
+        const figureFolder = `${user.id}/${standardId}`;
+        const { data: figureFiles } = await supabase.storage.from("standard-figures").list(figureFolder);
+        if (figureFiles && figureFiles.length > 0) {
+          await supabase.storage.from("standard-figures").remove(
+            figureFiles.map((f) => `${figureFolder}/${f.name}`),
+          );
+        }
+      }
+    } catch (e) {
+      console.warn("Storage cleanup after delete failed (non-fatal):", e);
+    }
+
+    toast.success("Standard deleted");
+    queryClient.invalidateQueries({ queryKey: ["standards"] });
   };
 
   return (
@@ -155,11 +182,18 @@ const Standards = () => {
                   );
                 })()}
 
-                {s.extraction_status === "failed" && (
-                  <div className="mt-3">
-                    <Badge variant="destructive" className="text-xs">Extraction failed — try re-uploading</Badge>
-                  </div>
-                )}
+                {s.extraction_status === "failed" && (() => {
+                  const failedJob = processingJobs.find((j: any) => j.standard_id === s.id);
+                  return (
+                    <div className="mt-3 space-y-1.5">
+                      <Badge variant="destructive" className="text-xs">Extraction failed</Badge>
+                      <p className="text-xs text-muted-foreground">
+                        {(failedJob as any)?.error_message ||
+                          "Something went wrong reading this PDF. Deleting this entry and re-uploading may help."}
+                      </p>
+                    </div>
+                  );
+                })()}
 
                 {s.extraction_status === "complete" && (
                   <div className="mt-3 space-y-1.5">

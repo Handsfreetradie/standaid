@@ -149,7 +149,11 @@ serve(async (req) => {
       });
     }
 
-    if (!standard || standard.extraction_status === "complete" || standard.extraction_status === "failed") {
+    // "complete" standards are allowed through: describe-figures rewrites
+    // figure/table placeholders AFTER completion and re-triggers this function
+    // to embed them. The chunk query below only picks un-embedded rows, so a
+    // fully-embedded complete standard costs one cheap no-op query.
+    if (!standard || standard.extraction_status === "failed") {
       return new Response(JSON.stringify({ status: "skipped" }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -157,6 +161,13 @@ serve(async (req) => {
 
     // Tier is always looked up from the standard's owner, never a body value
     const user_id = standard.user_id;
+
+    // Heartbeat: each ~90s work window (including self-retriggers) refreshes
+    // this, so the stale-job sweeper knows a long embedding chain is alive.
+    await supabaseAdmin.from("processing_jobs")
+      .update({ heartbeat_at: new Date().toISOString() })
+      .eq("standard_id", standard_id)
+      .in("status", ["pending", "processing"]);
 
     const { data: profile } = await supabaseAdmin
       .from("profiles")

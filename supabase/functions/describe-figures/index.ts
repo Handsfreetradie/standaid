@@ -417,12 +417,10 @@ serve(async (req) => {
     }
 
     if (described > 0) {
-      // Reset extraction_status to 'processing' so embed-chunks won't skip
-      await supabaseAdmin
-        .from("standards")
-        .update({ extraction_status: "processing" })
-        .eq("id", standard_id);
-
+      // embed-chunks accepts "complete" standards that still have un-embedded
+      // chunks, so the status is left alone. The old approach flipped it back
+      // to "processing" — and if the embed trigger below was ever lost, the
+      // standard stayed demoted forever with no recovery path.
       const embedTrigger = fetch(`${baseUrl}/functions/v1/embed-chunks`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceRoleKey}` },
