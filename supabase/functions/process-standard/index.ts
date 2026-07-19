@@ -336,7 +336,8 @@ serve(async (req) => {
 
     const body = await req.json();
     standard_id = body.standard_id;
-    const clientExtractedText: string | null = body.extracted_text || null;
+    let clientExtractedText: string | null = body.extracted_text || null;
+    const extractedTextPath: string | null = body.extracted_text_path || null;
     console.log(`[DIAG] standard_id=${standard_id} client_text_length=${clientExtractedText?.length ?? 0}`);
     if (!standard_id) {
       return new Response(JSON.stringify({ error: "standard_id is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -403,6 +404,26 @@ serve(async (req) => {
     }
 
     let extracted: { text: string; pages: string[]; totalPages: number; pagesWithContent: number } | null = null;
+
+    // Big documents: the browser's extracted text was too large for the request
+    // body, so the client parked it in storage and sent the path instead. Load
+    // it here — this skips server-side PDF re-extraction, which is the path
+    // that times out or OOMs on the largest standards.
+    if (!clientExtractedText && extractedTextPath && extractedTextPath.startsWith(`${userId}/`) && extractedTextPath.endsWith(".txt")) {
+      const { data: textFile, error: textDlError } = await supabaseAdmin.storage
+        .from("standards")
+        .download(extractedTextPath);
+      if (textDlError || !textFile) {
+        console.warn(`[${standard_id}] Failed to download client text at ${extractedTextPath}: ${textDlError?.message ?? "no data"} — falling back to server extraction`);
+      } else {
+        clientExtractedText = await textFile.text();
+        console.log(`[${standard_id}] Loaded client-extracted text from storage: ${clientExtractedText.length} chars`);
+      }
+      // One-shot handoff file — remove it whatever the quality gate decides
+      const textCleanup = supabaseAdmin.storage.from("standards").remove([extractedTextPath])
+        .then(({ error }) => { if (error) console.warn(`[${standard_id}] Failed to clean up ${extractedTextPath}:`, error.message); });
+      (globalThis as any).EdgeRuntime?.waitUntil?.(textCleanup);
+    }
 
     if (clientExtractedText && clientExtractedText.length > 100) {
       // Use pre-extracted text from the browser — bypasses server-side DRM decryption issues.
@@ -660,13 +681,21 @@ serve(async (req) => {
       .eq("standard_id", standard_id);
     clearTimeout(timeoutHandle);
 
-    // Update standard with chunk count — stays "processing" until embed-chunks finishes
+    // Update standard with chunk count — stays "processing" until embed-chunks
+    // finishes. extraction_status is re-asserted here because the 110s cleanup
+    // timer can fire while chunking is still succeeding on a big document; the
+    // stale "failed" it wrote would make embed-chunks skip a healthy standard.
     await supabaseAdmin.from("standards").update({
+      extraction_status: "processing",
       extraction_quality_score: qualityScore,
       is_partial: isPartial,
       total_chunks: totalChunks,
       indexed_chunks: 0,
     }).eq("id", standard_id);
+    await supabaseAdmin.from("processing_jobs")
+      .update({ status: "processing", error_message: null, completed_at: null })
+      .eq("standard_id", standard_id)
+      .eq("status", "failed");
 
     // Hand off embedding to embed-chunks (runs in its own 150s window)
     const embedUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/embed-chunks`;

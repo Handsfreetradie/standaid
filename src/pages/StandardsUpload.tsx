@@ -271,8 +271,22 @@ const StandardsUpload = () => {
       ? extractedText
       : undefined;
 
+    // Oversized text can't ride in the function body (~6MB limit), but dropping
+    // it forces the server to re-extract the whole PDF — the path that fails on
+    // the biggest standards. Park it in storage next to the PDF and send the path.
+    let textPathToSend: string | undefined;
     if (extractedText && !textToSend) {
-      console.warn(`Extracted text too large (${extractedText.length} chars) — server will re-extract from storage`);
+      const textPath = filePath.replace(/\.pdf$/i, ".txt");
+      const { error: textError } = await supabase.storage
+        .from("standards")
+        .upload(textPath, new Blob([extractedText], { type: "text/plain" }), {
+          contentType: "text/plain",
+        });
+      if (textError) {
+        console.warn("Extracted-text upload failed — server will re-extract from the PDF:", textError.message);
+      } else {
+        textPathToSend = textPath;
+      }
     }
 
     try {
@@ -282,12 +296,15 @@ const StandardsUpload = () => {
           standard_code: standardCode.trim() || undefined,
           file_path: filePath,
           extracted_text: textToSend,
+          extracted_text_path: textPathToSend,
         },
       });
 
       if (error) {
-        // Clean up orphaned storage file
-        await supabase.storage.from("standards").remove([filePath]);
+        // Clean up orphaned storage files
+        await supabase.storage.from("standards").remove(
+          textPathToSend ? [filePath, textPathToSend] : [filePath],
+        );
         toast.error((error as any)?.context?.error || error.message || "Upload failed");
         setStep("naming");
         return;
