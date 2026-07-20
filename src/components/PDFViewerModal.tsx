@@ -84,7 +84,15 @@ export function PDFViewerModal({ isOpen, onClose: rawOnClose, clauseNumber, stan
       pdfjsLib.GlobalWorkerOptions.workerSrc =
         `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
-      const doc = await pdfjsLib.getDocument({ url, rangeChunkSize: 65536 }).promise;
+      // disableAutoFetch stops pdf.js downloading the whole file in the
+      // background — a 50MB standard costs ~50MB of egress per open otherwise,
+      // even if the user only reads one page.
+      const doc = await pdfjsLib.getDocument({
+        url,
+        rangeChunkSize: 65536,
+        disableAutoFetch: true,
+        disableStream: true,
+      }).promise;
       setTotalPages(doc.numPages);
       setPdfDoc(doc);
       // Rendering is driven by the effect below — it waits until `loading` is
