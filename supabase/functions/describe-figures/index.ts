@@ -85,10 +85,11 @@ serve(async (req) => {
     // is the only reliable source of cell-accurate values.
     const { data: figureChunks, error: fetchError } = await supabaseAdmin
       .from("standard_chunks")
-      .select("id, clause_number, clause_title, page_number, content")
+      .select("id, clause_number, clause_title, page_number, content, index_attempts")
       .eq("standard_id", standard_id)
       .or("clause_number.like.FIGURE%,clause_number.like.TABLE%")
-      .eq("is_indexed", false);
+      .eq("is_indexed", false)
+      .lt("index_attempts", 3);
 
     if (fetchError) {
       console.error("Error fetching figure/table chunks:", fetchError);
@@ -362,6 +363,13 @@ serve(async (req) => {
           console.log(`[describe-figures] Described ${kind} ${refNumber} (${described}/${workChunks.length})`);
         } catch (figureErr) {
           console.error(`Error processing chunk ${chunk.id}:`, figureErr);
+          // Cap retries — without this, a chunk the API can never process
+          // (bad page image, always-rejected content) gets re-fetched and
+          // re-attempted forever by every future retrigger.
+          await supabaseAdmin
+            .from("standard_chunks")
+            .update({ index_attempts: (chunk.index_attempts || 0) + 1 })
+            .eq("id", chunk.id);
         }
       }
     } catch (e) {
@@ -378,13 +386,15 @@ serve(async (req) => {
         .select("*", { count: "exact", head: true })
         .eq("standard_id", standard_id)
         .like("clause_number", "FIGURE%")
-        .eq("is_indexed", false),
+        .eq("is_indexed", false)
+        .lt("index_attempts", 3),
       supabaseAdmin.from("standard_chunks")
         .select("*", { count: "exact", head: true })
         .eq("standard_id", standard_id)
         .like("clause_number", "TABLE%")
         .ilike("content", "%transcription of this table will be generated shortly%")
-        .eq("is_indexed", false),
+        .eq("is_indexed", false)
+        .lt("index_attempts", 3),
     ]);
     const remaining = (remainingFigs || 0) + (remainingTbls || 0);
 

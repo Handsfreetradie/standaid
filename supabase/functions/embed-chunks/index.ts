@@ -202,9 +202,10 @@ serve(async (req) => {
       // about most.
       const { data: chunks } = await supabaseAdmin
         .from("standard_chunks")
-        .select("id, chunk_index, content, context_generated")
+        .select("id, chunk_index, content, context_generated, index_attempts")
         .eq("standard_id", standard_id)
         .is("embedding", null)
+        .lt("index_attempts", 3)
         .not("content", "ilike", "%visual description will be generated shortly%")
         .not("content", "ilike", "%transcription of this table will be generated shortly%")
         .or(`chunk_index.lt.${indexLimit},clause_number.like.TABLE%,clause_number.like.FIGURE%`)
@@ -243,7 +244,16 @@ serve(async (req) => {
           group.flatMap((batch, gi) =>
             batch.map((chunk, idx) => {
               const emb = results[gi][idx];
-              if (!emb) return Promise.resolve();
+              if (!emb) {
+                // Cap retries — a chunk whose content the API always rejects
+                // would otherwise be re-fetched and re-attempted forever by
+                // every future retrigger (self-retrigger, new upload, or the
+                // resume-stalled-indexing sweep).
+                return supabaseAdmin
+                  .from("standard_chunks")
+                  .update({ index_attempts: (chunk.index_attempts || 0) + 1 })
+                  .eq("id", chunk.id);
+              }
               wroteAny = true;
               // Persist the (possibly context-prepended) content and mark it
               // attempted in the same write that stores the embedding — so a
@@ -282,6 +292,7 @@ serve(async (req) => {
       .select("id", { count: "exact", head: true })
       .eq("standard_id", standard_id)
       .is("embedding", null)
+      .lt("index_attempts", 3)
       .not("content", "ilike", "%visual description will be generated shortly%")
       .not("content", "ilike", "%transcription of this table will be generated shortly%")
       .or(`chunk_index.lt.${indexLimit},clause_number.like.TABLE%,clause_number.like.FIGURE%`);
