@@ -107,9 +107,9 @@ serve(async (req) => {
         .eq("user_id", userId)
         .neq("extraction_status", "failed");
 
-      if ((count || 0) >= 5) {
+      if ((count || 0) >= 1) {
         return new Response(JSON.stringify({
-          error: "Free tier limit reached. You can upload up to 5 standards on the free plan. Upgrade to Pro for unlimited uploads.",
+          error: "Free tier limit reached. The free plan includes 1 standard. Upgrade to Pro for unlimited uploads.",
           upgrade_required: true
         }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
