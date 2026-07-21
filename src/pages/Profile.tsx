@@ -1,12 +1,15 @@
-import { useState } from "react";
-import { User, ChevronRight, ChevronDown, Shield, Zap, HelpCircle, LogOut, CreditCard, Bell, Mail, ExternalLink, CheckCircle2, BookOpen, FileText, CalendarDays } from "lucide-react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { User, ChevronRight, ChevronDown, Shield, Zap, HelpCircle, LogOut, CreditCard, Bell, Mail, ExternalLink, CheckCircle2, BookOpen, FileText, CalendarDays, Loader2, Users } from "lucide-react";
+import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/hooks/useAuth";
-import { useProfile, useStandards } from "@/hooks/useData";
+import { useProfile, useStandards, useOrganization } from "@/hooks/useData";
+import { supabase } from "@/integrations/supabase/client";
 
 const TRADE_LABELS: Record<string, string> = {
   electrical: "Electrical",
@@ -41,9 +44,11 @@ const FAQS = [
 ];
 
 const Profile = () => {
+  const navigate = useNavigate();
   const { user, signOut } = useAuth();
   const { data: profile } = useProfile();
   const { data: standards } = useStandards();
+  const { data: org } = useOrganization();
   const [activePanel, setActivePanel] = useState<string | null>(null);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const [notifFeatures, setNotifFeatures] = useState(() =>
@@ -64,6 +69,47 @@ const Profile = () => {
 
   const togglePanel = (panel: string) =>
     setActivePanel((prev) => (prev === panel ? null : panel));
+
+  const [billingBusy, setBillingBusy] = useState(false);
+
+  // Surface the outcome when Stripe redirects back to /profile.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const outcome = params.get("checkout");
+    if (outcome === "success") toast.success("Subscription active — thanks for upgrading!");
+    else if (outcome === "cancelled") toast("Checkout cancelled — no charge made.");
+    if (outcome) window.history.replaceState({}, "", "/profile");
+  }, []);
+
+  // Start a Stripe Checkout session for the chosen tier and redirect to it.
+  const startCheckout = async (chosenTier: "pro" | "business") => {
+    if (billingBusy) return;
+    setBillingBusy(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("create-checkout", { body: { tier: chosenTier } });
+      if (error || !data?.url) throw error ?? new Error("No checkout URL");
+      window.location.href = data.url;
+    } catch (e) {
+      console.error("[checkout] error:", e);
+      toast.error("Couldn't start checkout — please try again.");
+      setBillingBusy(false);
+    }
+  };
+
+  // Open the Stripe billing portal so the user can manage or cancel.
+  const openPortal = async () => {
+    if (billingBusy) return;
+    setBillingBusy(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("customer-portal", { body: {} });
+      if (error || !data?.url) throw error ?? new Error("No portal URL");
+      window.location.href = data.url;
+    } catch (e) {
+      console.error("[portal] error:", e);
+      toast.error("Couldn't open the billing portal — please try again.");
+      setBillingBusy(false);
+    }
+  };
 
   const setNotif = (key: string, value: boolean, setter: (v: boolean) => void) => {
     setter(value);
@@ -138,8 +184,12 @@ const Profile = () => {
                 </div>
               </div>
               {!isPro && (
-                <Button className="w-full h-11 text-sm font-semibold gap-1.5">
-                  <Zap className="h-4 w-4" />
+                <Button
+                  className="w-full h-11 text-sm font-semibold gap-1.5"
+                  disabled={billingBusy}
+                  onClick={() => startCheckout("pro")}
+                >
+                  {billingBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
                   Upgrade to Pro — $19.99/mo
                 </Button>
               )}
@@ -188,22 +238,43 @@ const Profile = () => {
                 <div className="grid grid-cols-3 gap-2">
                   {[
                     { name: "Free", price: "$0", features: ["1 standard", "5 queries/day", "Partial clauses"] },
-                    { name: "Pro", price: "$19.99", features: ["Unlimited", "Unlimited", "Full clauses", "Voice & Photo"], highlight: true },
-                    { name: "Business", price: "$49.99", features: ["Unlimited", "Unlimited", "Full clauses", "Team libraries"] },
+                    { name: "Pro", price: "$19.99", features: ["Unlimited", "Unlimited", "Full clauses", "Voice & Photo"], highlight: true, tier: "pro" as const },
+                    { name: "Business", price: "per seat", features: ["Unlimited", "Unlimited", "Full clauses", "Team libraries"], goToTeam: true },
                   ].map((plan) => (
                     <Card
                       key={plan.name}
-                      className={`p-3 text-center ${plan.highlight ? "border-primary ring-1 ring-primary" : ""}`}
+                      className={`p-3 text-center flex flex-col ${plan.highlight ? "border-primary ring-1 ring-primary" : ""}`}
                     >
                       <p className="text-xs font-bold text-foreground">{plan.name}</p>
                       <p className="text-lg font-extrabold text-foreground mt-1">{plan.price}</p>
-                      <p className="text-[10px] text-muted-foreground">/month</p>
+                      <p className="text-[10px] text-muted-foreground">{plan.goToTeam ? "" : "/month"}</p>
                       <Separator className="my-2" />
-                      <div className="space-y-1">
+                      <div className="space-y-1 flex-1">
                         {plan.features.map((f) => (
                           <p key={f} className="text-[10px] text-muted-foreground">{f}</p>
                         ))}
                       </div>
+                      {plan.tier && (
+                        <Button
+                          size="sm"
+                          variant={plan.highlight ? "default" : "outline"}
+                          className="w-full mt-2 h-7 text-[10px]"
+                          disabled={billingBusy}
+                          onClick={() => startCheckout(plan.tier)}
+                        >
+                          Upgrade
+                        </Button>
+                      )}
+                      {plan.goToTeam && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full mt-2 h-7 text-[10px]"
+                          onClick={() => navigate("/team")}
+                        >
+                          Set up a team
+                        </Button>
+                      )}
                     </Card>
                   ))}
                 </div>
@@ -245,7 +316,7 @@ const Profile = () => {
                         <div className="flex justify-between text-xs">
                           <span className="text-muted-foreground">Price</span>
                           <span className="font-semibold text-foreground">
-                            {isPro ? (tier === "business" ? "$49.99/month" : "$19.99/month") : "Free"}
+                            {!isPro ? "Free" : org ? "Per-seat billing" : tier === "business" ? "$49.99/month" : "$19.99/month"}
                           </span>
                         </div>
                         <div className="flex justify-between text-xs">
@@ -255,18 +326,46 @@ const Profile = () => {
                           </span>
                         </div>
                       </div>
+                      {isPro ? (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="w-full gap-1.5"
+                            disabled={billingBusy}
+                            onClick={openPortal}
+                          >
+                            {billingBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
+                            Manage Subscription
+                          </Button>
+                          {org && (
+                            <Button
+                              size="sm"
+                              className="w-full gap-1.5"
+                              onClick={() => navigate("/team")}
+                            >
+                              <Users className="h-3.5 w-3.5" />
+                              Manage Team
+                            </Button>
+                          )}
+                        </>
+                      ) : (
+                        <Button
+                          size="sm"
+                          className="w-full gap-1.5"
+                          disabled={billingBusy}
+                          onClick={() => startCheckout("pro")}
+                        >
+                          {billingBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+                          Upgrade to Pro — $19.99/mo
+                        </Button>
+                      )}
                       <p className="text-xs text-muted-foreground leading-relaxed">
-                        To manage or cancel your subscription, contact us at{" "}
+                        Questions about billing? Contact us at{" "}
                         <a href="mailto:hello@standaid.ai" className="text-primary underline">
                           hello@standaid.ai
                         </a>
                       </p>
-                      {!isPro && (
-                        <Button size="sm" className="w-full gap-1.5">
-                          <Zap className="h-3.5 w-3.5" />
-                          Upgrade to Pro — $19.99/mo
-                        </Button>
-                      )}
                     </div>
                   )}
                 </div>

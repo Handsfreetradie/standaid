@@ -134,7 +134,7 @@ serve(async (req) => {
 
     const { data: standard, error: standardError } = await supabaseAdmin
       .from("standards")
-      .select("file_path, standard_code, version")
+      .select("file_path, standard_code, version, organization_id")
       .eq("id", standard_id)
       .eq("user_id", user_id)
       .single();
@@ -375,6 +375,7 @@ serve(async (req) => {
             const { error: tblInsertError } = await supabaseAdmin.from("standard_tables").insert({
               standard_id,
               user_id,
+              organization_id: standard.organization_id ?? null,
               table_number: refNumber,
               caption: caption || null,
               page_number: usedPage,

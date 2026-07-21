@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { useStandards, useProfile, useProcessingJobs } from "@/hooks/useData";
+import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -24,6 +25,7 @@ const Standards = () => {
   const { data: standards = [], isLoading } = useStandards();
   const { data: profile } = useProfile();
   const { data: processingJobs = [] } = useProcessingJobs();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
@@ -145,6 +147,9 @@ const Standards = () => {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    {s.organization_id && s.user_id !== user?.id && (
+                      <Badge variant="outline" className="text-xs">Shared by teammate</Badge>
+                    )}
                     {s.trade_category && (
                       <Badge variant="secondary" className="text-xs">
                         {s.trade_category}

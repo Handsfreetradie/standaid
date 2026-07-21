@@ -17,3 +17,19 @@ verify_jwt = false
 
 [functions.analyze-audit-photo]
 verify_jwt = false
+
+# Billing: create-checkout, customer-portal, and add-team-seat verify the user
+# JWT in-code; stripe-webhook is called by Stripe (no Supabase JWT) and
+# verifies the Stripe signature instead — so all four run with the gateway
+# JWT check off.
+[functions.create-checkout]
+verify_jwt = false
+
+[functions.customer-portal]
+verify_jwt = false
+
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.add-team-seat]
+verify_jwt = false

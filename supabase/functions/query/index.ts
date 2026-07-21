@@ -112,6 +112,22 @@ serve(async (req) => {
     }
     const userId = user.id;
 
+    // Team members share one standards library — resolve the caller's active
+    // org once and reuse this filter everywhere the standards-library tables
+    // (standard_chunks/standards/standard_figures/standard_tables) are
+    // queried directly, so org-shared content is included alongside their
+    // own uploads. Chat/question history itself stays personal — this only
+    // widens which STANDARDS are visible, matching the RLS extension already
+    // applied to those tables.
+    const { data: membershipRow } = await supabase
+      .from("organization_members")
+      .select("organization_id")
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .maybeSingle();
+    const orgId = membershipRow?.organization_id ?? null;
+    const ownershipFilter = orgId ? `user_id.eq.${userId},organization_id.eq.${orgId}` : `user_id.eq.${userId}`;
+
     const { question, conversation_history, image_base64 } = await req.json();
     const hasImage = typeof image_base64 === "string" && image_base64.length > 0;
     if ((!question || typeof question !== "string" || question.trim().length === 0) && !hasImage) {
@@ -321,7 +337,7 @@ serve(async (req) => {
         ? supabase
             .from("standard_chunks")
             .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
-            .eq("user_id", userId)
+            .or(ownershipFilter)
             .in("clause_number", clauseNumberMatches)
             .limit(20)
         : Promise.resolve({ data: [] }),
@@ -452,7 +468,7 @@ serve(async (req) => {
         ? supabase
             .from("standard_chunks")
             .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
-            .eq("user_id", userId)
+            .or(ownershipFilter)
             .in("clause_number", [...refKeys].slice(0, 12))
             .limit(8)
         : Promise.resolve({ data: [] }),
@@ -460,7 +476,7 @@ serve(async (req) => {
         ? supabase
             .from("standard_chunks")
             .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
-            .eq("user_id", userId)
+            .or(ownershipFilter)
             .in("clause_number", wantClauses)
             .limit(8)
         : Promise.resolve({ data: [] }),
@@ -494,7 +510,7 @@ serve(async (req) => {
       const xFtsQuery = [...new Set(keywords.slice(0, 8).map(sanitizeKw).filter((k: string) => k.length > 2))].join(" OR ");
       if (refCodes.size > 0 && xFtsQuery) {
         const { data: ownedStds } = await supabase
-          .from("standards").select("id, standard_code").eq("user_id", userId);
+          .from("standards").select("id, standard_code").or(ownershipFilter);
         const targetIds = (ownedStds || [])
           .filter((s: any) => !presentStdIds.has(s.id))
           .filter((s: any) => {
@@ -507,7 +523,7 @@ serve(async (req) => {
           const { data: xRows } = await supabase
             .from("standard_chunks")
             .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
-            .eq("user_id", userId)
+            .or(ownershipFilter)
             .in("standard_id", targetIds)
             .textSearch("fts", xFtsQuery, { type: "websearch" })
             .limit(6);
@@ -542,7 +558,7 @@ serve(async (req) => {
         const { data: defRows } = await supabase
           .from("standard_chunks")
           .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
-          .eq("user_id", userId)
+          .or(ownershipFilter)
           .in("standard_id", standardIds)
           .or("clause_title.ilike.%definition%,clause_title.ilike.%terms and definitions%,clause_number.ilike.1.4%")
           .or(orTerms)
@@ -582,7 +598,7 @@ serve(async (req) => {
       const { data: preFigData } = await supabase
         .from("standard_figures")
         .select("figure_number, caption, page_number")
-        .eq("user_id", userId)
+        .or(ownershipFilter)
         .in("figure_number", preFigNums);
       if (preFigData?.length) {
         figCaptionContext = "\n\n[FIGURE REFERENCE]\n" + preFigData.map((f: any) =>
@@ -879,11 +895,11 @@ User's question/context: ${effectiveQuestion}` : "";
           const [figRows, tblRows] = await Promise.all([
             figNums.length > 0
               ? supabase.from("standard_figures").select("figure_number, image_url, caption, page_number, standard_id")
-                  .eq("user_id", userId).in("figure_number", figNums).in("standard_id", standardIds)
+                  .or(ownershipFilter).in("figure_number", figNums).in("standard_id", standardIds)
               : Promise.resolve({ data: [] }),
             tblNums.length > 0
               ? supabase.from("standard_tables").select("table_number, image_url, caption, page_number, standard_id")
-                  .eq("user_id", userId).in("table_number", tblNums).in("standard_id", standardIds)
+                  .or(ownershipFilter).in("table_number", tblNums).in("standard_id", standardIds)
               : Promise.resolve({ data: [] }),
           ]);
 
@@ -971,7 +987,7 @@ User's question/context: ${effectiveQuestion}` : "";
           const { data: verifiedRows } = await supabase
             .from("standard_chunks")
             .select("clause_number")
-            .eq("user_id", userId)
+            .or(ownershipFilter)
             .in("standard_id", standardIds)
             .in("clause_number", answerNums)
             .limit(50);

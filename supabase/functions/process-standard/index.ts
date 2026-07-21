@@ -722,6 +722,7 @@ serve(async (req) => {
       const chunkRecords = batch.map(chunk => ({
         standard_id,
         user_id: userId,
+        organization_id: standard.organization_id ?? null,
         clause_number: chunk.clause_number,
         clause_title: chunk.clause_title,
         content: chunk.content,

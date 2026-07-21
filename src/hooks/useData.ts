@@ -44,15 +44,65 @@ export function useStandards() {
     queryKey: ["standards", user?.id],
     queryFn: async () => {
       if (!user) return [];
+      // No client-side .eq("user_id", ...) filter here — RLS is the sole
+      // gate, and it now also permits a team member's shared org standards
+      // alongside their own. Filtering by user_id here would silently hide
+      // teammates' uploads even though RLS would return them.
       const { data, error } = await supabase
         .from("standards")
         .select("*")
-        .eq("user_id", user.id)
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data || [];
     },
     enabled: !!user,
+  });
+}
+
+export function useOrganization() {
+  const { user } = useAuth();
+
+  return useQuery({
+    queryKey: ["organization", user?.id],
+    queryFn: async () => {
+      if (!user) return null;
+
+      const { data: owned } = await supabase
+        .from("organizations")
+        .select("*")
+        .eq("owner_user_id", user.id)
+        .maybeSingle();
+      if (owned) return { ...owned, role: "owner" as const };
+
+      const { data: membership } = await supabase
+        .from("organization_members")
+        .select("role, organizations(*)")
+        .eq("user_id", user.id)
+        .eq("status", "active")
+        .maybeSingle();
+      if (membership?.organizations) {
+        return { ...(membership.organizations as any), role: (membership.role as string) || "member" };
+      }
+      return null;
+    },
+    enabled: !!user,
+  });
+}
+
+export function useOrganizationMembers(organizationId: string | undefined) {
+  return useQuery({
+    queryKey: ["organization-members", organizationId],
+    queryFn: async () => {
+      if (!organizationId) return [];
+      const { data, error } = await supabase
+        .from("organization_members")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!organizationId,
   });
 }
 

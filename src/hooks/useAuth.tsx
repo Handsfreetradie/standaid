@@ -1,4 +1,4 @@
-import { useState, useEffect, createContext, useContext } from "react";
+import { useState, useEffect, useRef, createContext, useContext } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
 
@@ -19,12 +19,26 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Fire-and-forget, once per user id becoming active (not on every token
+  // refresh) — covers the case where a teammate's email is added to a team
+  // after they already have an account, so they get linked without needing
+  // a fresh signup.
+  const linkedUserRef = useRef<string | null>(null);
+  const maybeLinkOrgMembership = (u: User | null) => {
+    if (!u || linkedUserRef.current === u.id) return;
+    linkedUserRef.current = u.id;
+    supabase.rpc("link_pending_org_membership").then(({ error }) => {
+      if (error) console.warn("[useAuth] link_pending_org_membership failed:", error);
+    });
+  };
+
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
+        maybeLinkOrgMembership(session?.user ?? null);
       }
     );
 
@@ -32,6 +46,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
+      maybeLinkOrgMembership(session?.user ?? null);
     });
 
     return () => subscription.unsubscribe();

@@ -12,6 +12,7 @@ import Tools from "./pages/Tools";
 import Chat from "./pages/Chat";
 import Learn from "./pages/Learn";
 import Profile from "./pages/Profile";
+import Team from "./pages/Team";
 import Auth from "./pages/Auth";
 import StandardsUpload from "./pages/StandardsUpload";
 import Audits from "./pages/Audits";
@@ -109,6 +110,7 @@ const AppRoutes = () => (
       <Route path="/learn" element={<Learn />} />
       <Route path="/chat" element={<Chat />} />
       <Route path="/profile" element={<Profile />} />
+      <Route path="/team" element={<Team />} />
       <Route path="/standards/upload" element={<StandardsUpload />} />
       <Route path="/audits" element={<Audits />} />
       <Route path="/audits/:id" element={<AuditDetail />} />

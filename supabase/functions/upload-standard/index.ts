@@ -40,6 +40,17 @@ serve(async (req) => {
 
     const tier = profile?.subscription_tier || "free"; // least privilege — a missing profile must never grant pro
 
+    // A team member contributing to a paid team library shouldn't be gated
+    // by their own personal tier — the org's paid seats are what's being
+    // billed for, not this individual's subscription.
+    const { data: membership } = await supabaseAdmin
+      .from("organization_members")
+      .select("organization_id")
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .maybeSingle();
+    const organizationId = membership?.organization_id ?? null;
+
     // Parse JSON body — file was uploaded directly to storage by the browser
     const body = await req.json();
     const { title, standard_code: standardCode, version, trade_category: tradeCategory, file_path: filePath, extracted_text: extractedText, extracted_text_path: extractedTextPath } = body;
@@ -62,12 +73,16 @@ serve(async (req) => {
     // of existing standards don't incorrectly count against the limit.
     let isReplacement = false;
     if (standardCode) {
-      const { data: existing } = await supabaseAdmin
+      // Team members share one library — match on the org's copy (any
+      // member's upload), not just this caller's own, so re-uploading an
+      // existing team standard replaces it rather than duplicating it.
+      const existingQuery = supabaseAdmin
         .from("standards")
         .select("id, file_path")
-        .eq("user_id", userId)
-        .eq("standard_code", standardCode)
-        .maybeSingle();
+        .eq("standard_code", standardCode);
+      const { data: existing } = await (
+        organizationId ? existingQuery.eq("organization_id", organizationId) : existingQuery.eq("user_id", userId)
+      ).maybeSingle();
 
       if (existing) {
         isReplacement = true;
@@ -97,10 +112,12 @@ serve(async (req) => {
       }
     }
 
-    // Tier limit only applies to brand-new standards (not replacements).
+    // Tier limit only applies to brand-new standards (not replacements),
+    // and only to individual users — an active team member is covered by
+    // the org's paid seats instead.
     // Failed uploads don't count — a few doomed retries of a bad PDF used to
     // fill all 5 slots and lock the user out behind an upgrade prompt.
-    if (tier === "free" && !isReplacement) {
+    if (tier === "free" && !isReplacement && !organizationId) {
       const { count } = await supabaseAdmin
         .from("standards")
         .select("*", { count: "exact", head: true })
@@ -120,13 +137,14 @@ serve(async (req) => {
       .from("standards")
       .insert({
         user_id: userId,
+        organization_id: organizationId,
         title,
         standard_code: standardCode || null,
         version: version || null,
         trade_category: tradeCategory || null,
         file_path: filePath,
         extraction_status: "pending",
-        is_partial: tier === "free",
+        is_partial: tier === "free" && !organizationId,
       })
       .select()
       .single();
