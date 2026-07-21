@@ -10,6 +10,21 @@ const TIME_BUDGET_MS = 85_000;
 // Opus vision spend.
 const MAX_FIGURES_PER_STANDARD = 200;
 
+// Postgres text columns reject the null byte outright (and other control
+// characters can trip up storage/display), so a vision transcription that
+// happens to include one fails the DB write with no visible symptom besides
+// a logged error — which, combined with symbol-heavy engineering tables
+// (degree signs, superscripts, OCR artifacts), is what silently broke a
+// batch of table descriptions in production. Strip anything Postgres text
+// can't hold before it's ever written.
+function sanitizeForPostgres(text: string): string {
+  // Null byte (rejected outright by Postgres text columns) plus other C0
+  // control characters, excluding tab/newline/carriage-return which are
+  // legitimate in transcribed table text.
+  // deno-lint-ignore no-control-regex
+  return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
+}
+
 // Convert bytes to base64 in fixed slices. Spreading a whole file into
 // String.fromCharCode(...bytes) overflows the call stack above ~125KB, which
 // crashed this function on every real (multi-MB) standard.
@@ -323,9 +338,11 @@ serve(async (req) => {
             }
           }
 
-          const newContent = isTable
-            ? `${label} Table ${refNumber}${caption ? `: ${caption}` : ""}\n\n${description}`
-            : `${label} Figure ${refNumber}${caption ? ` — ${caption}` : ""}\n\n${description}`;
+          const newContent = sanitizeForPostgres(
+            isTable
+              ? `${label} Table ${refNumber}${caption ? `: ${caption}` : ""}\n\n${description}`
+              : `${label} Figure ${refNumber}${caption ? ` — ${caption}` : ""}\n\n${description}`
+          );
 
           // Set is_indexed: true so re-triggered runs skip this item; correct
           // the page anchor if the table was found on the retry page.
@@ -336,6 +353,13 @@ serve(async (req) => {
 
           if (updateError) {
             console.error(`Failed to update chunk for ${kind} ${refNumber}:`, updateError);
+            // Cap retries here too — Claude was already paid for this description;
+            // without this, a chunk whose DB write keeps failing gets re-described
+            // (re-billed) every 10 minutes forever by the resume-stalled-indexing sweep.
+            await supabaseAdmin
+              .from("standard_chunks")
+              .update({ index_attempts: (chunk.index_attempts || 0) + 1 })
+              .eq("id", chunk.id);
             continue;
           }
 
