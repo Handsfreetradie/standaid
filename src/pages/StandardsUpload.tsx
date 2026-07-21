@@ -14,9 +14,44 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import {
+  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogFooter,
+  AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
 import { useAuth } from "@/hooks/useAuth";
+import { useStandards } from "@/hooks/useData";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
+
+// Loose match so re-worded titles of the same standard still get caught
+// (e.g. "Wiring Rules" vs "AS NZS 3000 2018 Electrical Installations (Wiring
+// Rules)") — this is a soft warning, not a hard block, so false positives on
+// short generic names are an acceptable trade-off.
+function normalizeStandardName(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function findLikelyDuplicate(
+  newName: string,
+  newCode: string,
+  existing: { title: string; standard_code: string | null }[],
+): string | null {
+  const normNew = normalizeStandardName(newName);
+  const codeNew = newCode.trim().toLowerCase();
+
+  for (const s of existing) {
+    if (codeNew && s.standard_code && s.standard_code.trim().toLowerCase() === codeNew) {
+      return s.title;
+    }
+    const normExisting = normalizeStandardName(s.title);
+    if (normExisting === normNew) return s.title;
+    if (normNew.length > 4 && normExisting.length > 4 &&
+        (normExisting.includes(normNew) || normNew.includes(normExisting))) {
+      return s.title;
+    }
+  }
+  return null;
+}
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
@@ -208,11 +243,13 @@ const StandardsUpload = () => {
   const [result, setResult] = useState<{ totalChunks: number; indexedChunks: number; quality: number; figuresExtracted: number } | null>(null);
   const [licenceConfirmed, setLicenceConfirmed] = useState(false);
   const [canBackground, setCanBackground] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const { session } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { data: existingStandards } = useStandards();
 
   const isPdf = (f: File) =>
     f.type === "application/pdf" || /\.pdf$/i.test(f.name);
@@ -240,7 +277,7 @@ const StandardsUpload = () => {
     setStep("naming");
   };
 
-  const startProcessing = async () => {
+  const startProcessing = async (skipDuplicateCheck = false) => {
     if (!file) return;
     if (!session) {
       toast.error("Your session has expired — please sign in again.");
@@ -253,6 +290,14 @@ const StandardsUpload = () => {
     if (!licenceConfirmed) {
       toast.error("Please confirm you're licensed to upload this document.");
       return;
+    }
+
+    if (!skipDuplicateCheck) {
+      const match = findLikelyDuplicate(docName, standardCode, existingStandards || []);
+      if (match) {
+        setDuplicateWarning(match);
+        return;
+      }
     }
 
     setStep("processing");
@@ -610,11 +655,29 @@ const StandardsUpload = () => {
 
         <Button
           className="w-full h-12 font-bold rounded-xl gap-2"
-          onClick={startProcessing}
+          onClick={() => startProcessing()}
         >
           <Sparkles className="h-4 w-4" />
           Process Document
         </Button>
+
+        <AlertDialog open={!!duplicateWarning} onOpenChange={(open) => { if (!open) setDuplicateWarning(null); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Looks like a duplicate</AlertDialogTitle>
+              <AlertDialogDescription>
+                You already have "{duplicateWarning}" in your library. Uploading another copy re-processes the
+                whole document from scratch and may just give you two entries for the same standard. Upload anyway?
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => { setDuplicateWarning(null); startProcessing(true); }}>
+                Upload anyway
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     );
   }

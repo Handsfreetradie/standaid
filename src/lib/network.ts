@@ -11,6 +11,12 @@ export class NetworkError extends Error {
   }
 }
 
+// HTTP errors in this set won't succeed on retry — the request itself is the
+// problem (bad input, no permission, rate-limited), not a dropped connection.
+// Retrying and then reporting "check your internet" on these was actively
+// misleading users whose connection was fine.
+const NON_RETRYABLE_STATUSES = new Set([400, 401, 403, 404, 429]);
+
 export async function retryWithBackoff<T>(
   fn: () => Promise<T>,
   options: { maxRetries?: number; baseDelayMs?: number; timeoutMs?: number } = {},
@@ -28,6 +34,10 @@ export async function retryWithBackoff<T>(
       ]);
     } catch (e) {
       lastError = e instanceof Error ? e : new Error(String(e));
+      const status = (lastError as { status?: number }).status;
+      if (status !== undefined && NON_RETRYABLE_STATUSES.has(status)) {
+        throw lastError;
+      }
       if (attempt < maxRetries) {
         const delayMs = baseDelayMs * Math.pow(2, attempt) + Math.random() * 1000;
         await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -39,7 +49,11 @@ export async function retryWithBackoff<T>(
     lastError.retriesLeft = 0;
     throw lastError;
   }
-  throw new NetworkError("FAILED", `Operation failed after ${maxRetries + 1} attempts`, 0);
+  // Preserve the real failure instead of replacing it with a generic message —
+  // retries were exhausted, but the cause (server error, malformed response,
+  // etc.) is still whatever lastError says, and the user shouldn't be told
+  // it's their internet connection when it isn't.
+  throw lastError ?? new NetworkError("FAILED", `Operation failed after ${maxRetries + 1} attempts`, 0);
 }
 
 // Human-friendly error messages for common failures.
@@ -49,13 +63,23 @@ export function getUserMessage(error: unknown): string {
     if (error.code === "FAILED") return "Lost connection — please check your internet and try again.";
   }
 
+  // Check the real HTTP status first — the server's error message doesn't
+  // always spell out the status code as a substring (e.g. "Daily limit
+  // reached" for a 429), so relying on msg.includes() alone missed these.
+  const status = (error as { status?: number })?.status;
+  if (status === 401) return "Your session expired — please sign in again.";
+  if (status === 403) return "You don't have permission for that.";
+  if (status === 404) return "That resource wasn't found.";
+  if (status === 429) return "You've hit your daily limit — try again tomorrow.";
+  if (status !== undefined && status >= 500) return "Server error — we're looking into it. Try again in a moment.";
+
   const msg = error instanceof Error ? error.message : String(error);
 
-  if (msg.includes("401") || msg.includes("401")) return "Your session expired — please sign in again.";
+  if (msg.includes("401")) return "Your session expired — please sign in again.";
   if (msg.includes("403")) return "You don't have permission for that.";
   if (msg.includes("404")) return "That resource wasn't found.";
   if (msg.includes("429")) return "You've hit your daily limit — try again tomorrow.";
-  if (msg.includes("500") || msg.includes("500")) return "Server error — we're looking into it. Try again in a moment.";
+  if (msg.includes("500")) return "Server error — we're looking into it. Try again in a moment.";
 
   if (msg.includes("network")) return "Lost connection — check your internet and try again.";
   if (msg.includes("timeout")) return "Operation timed out — check your connection and retry.";

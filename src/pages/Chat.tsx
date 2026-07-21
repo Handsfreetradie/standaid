@@ -292,7 +292,9 @@ const Chat = () => {
 
           if (!response.ok || !response.body) {
             const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-            throw new Error(err.error || `HTTP ${response.status}`);
+            const httpError = new Error(err.error || `HTTP ${response.status}`) as Error & { status?: number };
+            httpError.status = response.status;
+            throw httpError;
           }
 
           update("Reading answer...", 20);

@@ -5,6 +5,7 @@ const APP_URL = "https://standaid-9mas.vercel.app";
 const LOGO_URL = "https://standaid-9mas.vercel.app/pwa-192.png";
 const FROM_EMAIL = "hello@standaid.ai";
 const FROM_NAME = "StandAId";
+const ADMIN_NOTIFY_EMAIL = "hello@standaid.ai";
 
 function buildHtmlEmail(name: string): string {
   const firstName = name?.split(" ")[0] || "there";
@@ -146,6 +147,35 @@ Always verify AI answers against the original standard before relying on them on
 `;
 }
 
+async function sendAdminSignupNotification(
+  resendApiKey: string,
+  email: string,
+  displayName: string
+): Promise<void> {
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${resendApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: `${FROM_NAME} <${FROM_EMAIL}>`,
+        to: [ADMIN_NOTIFY_EMAIL],
+        subject: `New StandAId signup: ${email}`,
+        text: `New signup:\n\nEmail: ${email}\nName: ${displayName}\nTime: ${new Date().toISOString()}`,
+      }),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => null);
+      console.error("[welcome-email] Admin notification failed:", JSON.stringify(errBody));
+    }
+  } catch (e) {
+    // Never let a notification failure affect the user-facing welcome email.
+    console.error("[welcome-email] Admin notification threw:", e);
+  }
+}
+
 serve(async (req) => {
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
@@ -222,6 +252,10 @@ serve(async (req) => {
 
     const result = await emailRes.json();
     console.log(`[welcome-email] Sent to ${email}, id: ${result.id}`);
+
+    // Fire-and-forget: never let this block or fail the user's welcome email.
+    sendAdminSignupNotification(RESEND_API_KEY, email, displayName);
+
     return new Response(JSON.stringify({ ok: true, id: result.id }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
