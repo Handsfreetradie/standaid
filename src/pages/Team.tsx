@@ -27,6 +27,8 @@ const Team = () => {
   const [newEmail, setNewEmail] = useState("");
   const [addingMember, setAddingMember] = useState(false);
   const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null);
+  const [seatsToBuy, setSeatsToBuy] = useState("5");
+  const [buyingSeats, setBuyingSeats] = useState(false);
 
   const isOwner = org?.role === "owner";
   const seatsUsed = members.length;
@@ -84,6 +86,31 @@ const Team = () => {
       toast.error(e?.message || "Couldn't add that teammate — please try again.");
     } finally {
       setAddingMember(false);
+    }
+  };
+
+  const buySeats = async () => {
+    if (!org) return;
+    const count = Number(seatsToBuy);
+    if (!Number.isInteger(count) || count < 1 || count > 500) {
+      toast.error("Enter a whole number between 1 and 500.");
+      return;
+    }
+    setBuyingSeats(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("add-team-seat", {
+        body: { organization_id: org.id, count },
+      });
+      if (error) throw error;
+      toast.success(`Bought ${count} more seat${count === 1 ? "" : "s"} — now ${data?.seat_limit ?? "?"} total.`);
+      // useOrganization() keys on the user id, not the org id — invalidate by
+      // the shared "organization" prefix so it refetches regardless.
+      queryClient.invalidateQueries({ queryKey: ["organization"] });
+    } catch (e: any) {
+      console.error("[buy seats] error:", e);
+      toast.error(e?.message || "Couldn't buy more seats — please try again.");
+    } finally {
+      setBuyingSeats(false);
     }
   };
 
@@ -167,6 +194,29 @@ const Team = () => {
               </p>
             </div>
           </div>
+
+          {isOwner && (
+            <Card className="p-4 mb-4 space-y-3">
+              <Label className="text-sm">Buy seats in bulk</Label>
+              <p className="text-xs text-muted-foreground">
+                Pre-purchase capacity before onboarding a batch of people — each seat is a prorated charge, right away.
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  className="h-11"
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={seatsToBuy}
+                  onChange={(e) => setSeatsToBuy(e.target.value)}
+                />
+                <Button className="h-11 gap-1.5 flex-shrink-0" disabled={buyingSeats} onClick={buySeats}>
+                  {buyingSeats ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  Buy seats
+                </Button>
+              </div>
+            </Card>
+          )}
 
           {isOwner && (
             <Card className="p-4 mb-4 space-y-3">

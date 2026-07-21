@@ -3,9 +3,11 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getAllowedOrigin } from "../_shared/cors.ts";
 import { getStripe } from "../_shared/stripe.ts";
 
-// Buys one more seat on a team's Stripe subscription (prorated, charged
-// immediately) and raises organizations.seat_limit to match — called before
-// add_org_member() when a team is already at capacity. Owner-only.
+// Buys one or more seats on a team's Stripe subscription (prorated, charged
+// immediately) and raises organizations.seat_limit to match. Called with the
+// default count of 1 before add_org_member() when a team is already at
+// capacity, or with an explicit count for an owner bulk-buying seats ahead
+// of onboarding people. Owner-only.
 
 serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
@@ -31,8 +33,13 @@ serve(async (req) => {
     const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
     if (userError || !user) return json({ error: "Unauthorized" }, 401);
 
-    const { organization_id } = await req.json();
+    const { organization_id, count } = await req.json();
     if (!organization_id) return json({ error: "organization_id is required" }, 400);
+
+    const seatsToAdd = count === undefined ? 1 : Number(count);
+    if (!Number.isInteger(seatsToAdd) || seatsToAdd < 1 || seatsToAdd > 500) {
+      return json({ error: "count must be a whole number between 1 and 500" }, 400);
+    }
 
     const { data: org, error: orgError } = await supabaseAdmin
       .from("organizations")
@@ -49,7 +56,7 @@ serve(async (req) => {
     const item = subscription.items.data[0];
     if (!item) return json({ error: "Subscription has no billable item" }, 500);
 
-    const newQuantity = (item.quantity ?? org.seat_limit) + 1;
+    const newQuantity = (item.quantity ?? org.seat_limit) + seatsToAdd;
 
     await stripe.subscriptionItems.update(item.id, {
       quantity: newQuantity,
@@ -70,7 +77,7 @@ serve(async (req) => {
       .update({ quantity: newQuantity })
       .eq("stripe_subscription_id", org.stripe_subscription_id);
 
-    console.log(`[add-team-seat] org ${org.id} seat_limit → ${newQuantity}`);
+    console.log(`[add-team-seat] org ${org.id} seat_limit → ${newQuantity} (+${seatsToAdd})`);
     return json({ seat_limit: newQuantity });
   } catch (e) {
     console.error("[add-team-seat] error:", e);
