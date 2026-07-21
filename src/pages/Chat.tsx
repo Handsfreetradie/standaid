@@ -58,6 +58,7 @@ interface Message {
   accuracy_score?: number;
   accuracy_reason?: string;
   queryId?: string;
+  cached?: boolean;
 }
 
 function FeedbackButtons({ queryId }: { queryId: string }) {
@@ -357,6 +358,7 @@ const Chat = () => {
                     answer_found: event.answer_found,
                     follow_up_questions: event.follow_up_questions || [],
                     queryId: event.queryId || null,
+                    cached: event.cached || false,
                   } : m
                 ));
                 scrollToBottom();
@@ -528,6 +530,17 @@ const Chat = () => {
                     <div className="flex items-center gap-1.5 mb-3 text-xs font-semibold text-amber-600 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-400 rounded-lg px-3 py-1.5 w-fit">
                       <AlertTriangle className="h-3.5 w-3.5" />
                       Compliance Check
+                    </div>
+                  )}
+
+                  {/* Cached badge — answer reused from a teammate's close-enough
+                      question rather than freshly generated. Always shown, never
+                      hidden, so the user can judge for themselves and re-ask if
+                      their situation might differ. */}
+                  {!msg.isTyping && msg.cached && (
+                    <div className="flex items-center gap-1.5 mb-3 text-xs font-semibold text-blue-600 bg-blue-50 dark:bg-blue-950/30 dark:text-blue-400 rounded-lg px-3 py-1.5 w-fit">
+                      <Zap className="h-3.5 w-3.5" />
+                      Instant — a teammate already asked this
                     </div>
                   )}
 

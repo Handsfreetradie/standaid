@@ -346,9 +346,99 @@ serve(async (req) => {
     // Vector search 1 — original query; also search for past feedback corrections in parallel
     let vectorChunks1: any[] = [];
     let feedbackCorrections: Array<{ question_text: string; user_comment: string }> = [];
+    // Hoisted so the cache-write step near the end of a cache MISS can reuse
+    // the same embedding — no second OpenAI call needed either way.
+    let cachedQueryEmbedding: number[] | null = null;
     if (embResponse.ok) {
       const embData = await embResponse.json();
       const queryEmbedding = embData.data[0].embedding;
+      cachedQueryEmbedding = queryEmbedding;
+
+      // Shared team question cache — a close-enough repeat question within
+      // the org reuses a previous answer instead of paying for Claude again.
+      // Deliberately conservative (high threshold, bounded age — see the
+      // migration) since answers here are safety-critical: a wrong "close
+      // enough" reuse is a real correctness risk, not just a cost detail.
+      // Chat history stays private per person regardless — a hit still
+      // writes a normal queries/citations row under THIS user's own id.
+      if (orgId) {
+        const { data: cacheRows } = await supabase.rpc("match_cached_question", {
+          query_embedding: queryEmbedding,
+          match_organization_id: orgId,
+        });
+        const cacheHit = cacheRows?.[0];
+        if (cacheHit) {
+          const cached = cacheHit.response as Record<string, any>;
+          const cachedCitationsForLog = (cached.citations || []).map((c: any) => ({ ...c }));
+          let outCitations = cachedCitationsForLog;
+          let gated = false;
+          let gatedMessage: string | undefined;
+          if (tier === "free" && outCitations.length > 0) {
+            outCitations = outCitations.map((c: any) => ({
+              ...c,
+              clause_number: "[Upgrade to Pro to unlock this clause]",
+              relevant_text: "This clause is available with a Pro subscription.",
+              gated: true,
+            }));
+            gated = true;
+            gatedMessage = "You're on the right track — upgrade to Pro to get the full clause and complete guidance.";
+          }
+
+          const cacheQueryId = crypto.randomUUID();
+          const donePayload = {
+            done: true,
+            ...cached,
+            citations: outCitations,
+            gated,
+            ...(gated ? { gated_message: gatedMessage } : {}),
+            cached: true,
+            queries_remaining: tier === "free" ? Math.max(0, maxQueries - todayCount) : null,
+            queryId: cacheQueryId,
+            confidence_score: cacheHit.similarity,
+          };
+
+          // Non-blocking — mirrors the miss-path logging below.
+          (async () => {
+            await supabase.rpc("bump_question_cache_hit", { p_id: cacheHit.id });
+            const { data: queryRecord } = await supabase.from("queries").insert({
+              user_id: userId,
+              question: effectiveQuestion,
+              response: cached.answer,
+              citations: cachedCitationsForLog,
+              confidence_score: cacheHit.similarity,
+              safety_flagged: cached.safety_critical || false,
+              subscription_tier_at_time: tier,
+            }).select().single();
+            if (queryRecord && cachedCitationsForLog.length > 0) {
+              await supabase.from("citations").insert(cachedCitationsForLog.map((c: any) => ({
+                query_id: queryRecord.id,
+                standard_id: c.standard_id || null,
+                clause_number: c.clause_number,
+                standard_code: c.standard_code,
+                version: c.standard_version,
+                page_number: c.page_number,
+                confidence_score: cacheHit.similarity,
+                chunk_content: c.relevant_text,
+              })));
+            }
+            try {
+              const { data: profileRow } = await supabase.from("profiles")
+                .select("daily_query_count").eq("user_id", userId).single();
+              await supabase.from("profiles")
+                .update({ daily_query_count: (profileRow?.daily_query_count ?? 0) + 1 })
+                .eq("user_id", userId);
+            } catch (countErr) {
+              console.error("[query] cache-hit daily_query_count update failed:", countErr);
+            }
+          })();
+
+          return new Response(
+            `data: ${JSON.stringify(donePayload)}\n\n`,
+            { headers: { ...corsHeaders, "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } }
+          );
+        }
+      }
+
       const [chunksResult, correctionsResult] = await Promise.all([
         supabase.rpc("match_chunks", {
           query_embedding: queryEmbedding,
@@ -1235,21 +1325,53 @@ User's question/context: ${effectiveQuestion}` : "";
             safety_flagged: parsedResponse.safety_critical || false,
             subscription_tier_at_time: tier,
           }).select().single();
-          if (queryRecord && citationsForLog.length > 0) {
-            const citationRecords = citationsForLog.map((c: any) => {
-              const matchedStandard = standards?.find((s: any) => s.standard_code === c.standard_code);
-              return {
-                query_id: queryRecord.id,
-                standard_id: matchedStandard?.id || standardIds[0],
-                clause_number: c.clause_number,
-                standard_code: c.standard_code,
-                version: c.standard_version,
-                page_number: c.page_number,
-                confidence_score: topSimilarity,
-                chunk_content: c.relevant_text,
-              };
+          const resolvedCitations = citationsForLog.map((c: any) => ({
+            ...c,
+            standard_id: standards?.find((s: any) => s.standard_code === c.standard_code)?.id || standardIds[0],
+          }));
+          if (queryRecord && resolvedCitations.length > 0) {
+            await supabase.from("citations").insert(resolvedCitations.map((c: any) => ({
+              query_id: queryRecord.id,
+              standard_id: c.standard_id,
+              clause_number: c.clause_number,
+              standard_code: c.standard_code,
+              version: c.standard_version,
+              page_number: c.page_number,
+              confidence_score: topSimilarity,
+              chunk_content: c.relevant_text,
+            })));
+          }
+
+          // Write into the shared team question cache so a teammate's
+          // close-enough repeat question can reuse this instead of paying
+          // for Claude again. Skipped for gated/safety-flagged answers and
+          // whenever the embedding call failed — never cache a degraded or
+          // unverified response. Citations are stored WITH standard_id
+          // already resolved (above) since a cache-hit read has no access
+          // to the `standards` metadata lookup used to resolve it here.
+          if (orgId && cachedQueryEmbedding && !parsedResponse.gated && !parsedResponse.safety_critical) {
+            await supabase.from("question_cache").insert({
+              organization_id: orgId,
+              standard_id: standardIds[0] || null,
+              question: effectiveQuestion,
+              // Table INSERT of a vector column needs the JSON-stringified
+              // form to be parsed correctly by PostgREST — RPC parameters
+              // (e.g. match_chunks/match_cached_question above) accept the
+              // raw array directly, but a plain table write does not (same
+              // pattern already used in embed-chunks/index.ts).
+              question_embedding: JSON.stringify(cachedQueryEmbedding),
+              response: {
+                answer: parsedResponse.answer,
+                citations: resolvedCitations,
+                figures_referenced: parsedResponse.figures_referenced || [],
+                tables_referenced: parsedResponse.tables_referenced || [],
+                confidence: parsedResponse.confidence,
+                follow_up_questions: parsedResponse.follow_up_questions || [],
+                safety_critical: parsedResponse.safety_critical || false,
+                safety_message: parsedResponse.safety_message,
+                answer_found: parsedResponse.answer_found,
+              },
             });
-            await supabase.from("citations").insert(citationRecords);
           }
 
           // Increment daily_query_count on profiles (best-effort, never crashes the response)
