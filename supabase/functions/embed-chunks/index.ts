@@ -306,9 +306,19 @@ serve(async (req) => {
         .eq("standard_id", standard_id)
         .eq("is_indexed", true);
 
+      // Chunks that hit the retry cap without ever embedding are permanently
+      // missing from search — surface the count so the UI can tell the user,
+      // instead of silently serving an incomplete document.
+      const { count: failedCount } = await supabaseAdmin
+        .from("standard_chunks")
+        .select("id", { count: "exact", head: true })
+        .eq("standard_id", standard_id)
+        .is("embedding", null)
+        .gte("index_attempts", 3);
+
       await supabaseAdmin
         .from("standards")
-        .update({ extraction_status: "complete", indexed_chunks: indexedCount || 0 })
+        .update({ extraction_status: "complete", indexed_chunks: indexedCount || 0, failed_chunks_count: failedCount || 0 })
         .eq("id", standard_id);
 
       await supabaseAdmin

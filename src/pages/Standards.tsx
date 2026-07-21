@@ -218,6 +218,13 @@ const Standards = () => {
                         )}
                       </div>
                     </div>
+                    {(s.failed_chunks_count || 0) > 0 && (
+                      <p className="text-xs text-amber-600 dark:text-amber-500 flex items-center gap-1">
+                        <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                        {s.failed_chunks_count} figure{s.failed_chunks_count === 1 ? "" : "s"}/table{s.failed_chunks_count === 1 ? "" : "s"} couldn't
+                        be processed — the rest of the document is fully searchable.
+                      </p>
+                    )}
                   </div>
                 )}
 
