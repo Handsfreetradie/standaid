@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Users, ArrowLeft, Loader2, Mail, Trash2, Crown, Clock, CheckCircle2, Plus } from "lucide-react";
+import { Users, ArrowLeft, Loader2, Mail, Trash2, Crown, Clock, CheckCircle2, Plus, Minus } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +29,7 @@ const Team = () => {
   const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null);
   const [seatsToBuy, setSeatsToBuy] = useState("5");
   const [buyingSeats, setBuyingSeats] = useState(false);
+  const [removingSeats, setRemovingSeats] = useState(false);
 
   const isOwner = org?.role === "owner";
   const seatsUsed = members.length;
@@ -111,6 +112,29 @@ const Team = () => {
       toast.error(e?.message || "Couldn't buy more seats — please try again.");
     } finally {
       setBuyingSeats(false);
+    }
+  };
+
+  const removeSeats = async () => {
+    if (!org) return;
+    const count = Number(seatsToBuy);
+    if (!Number.isInteger(count) || count < 1 || count > 500) {
+      toast.error("Enter a whole number between 1 and 500.");
+      return;
+    }
+    setRemovingSeats(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("remove-team-seat", {
+        body: { organization_id: org.id, count },
+      });
+      if (error) throw error;
+      toast.success(`Removed ${count} seat${count === 1 ? "" : "s"} — now ${data?.seat_limit ?? "?"} total.`);
+      queryClient.invalidateQueries({ queryKey: ["organization"] });
+    } catch (e: any) {
+      console.error("[remove seats] error:", e);
+      toast.error(e?.message || "Couldn't remove seats — please try again.");
+    } finally {
+      setRemovingSeats(false);
     }
   };
 
@@ -210,11 +234,27 @@ const Team = () => {
                   value={seatsToBuy}
                   onChange={(e) => setSeatsToBuy(e.target.value)}
                 />
-                <Button className="h-11 gap-1.5 flex-shrink-0" disabled={buyingSeats} onClick={buySeats}>
+                <Button
+                  variant="outline"
+                  className="h-11 gap-1.5 flex-shrink-0"
+                  disabled={removingSeats || buyingSeats}
+                  onClick={removeSeats}
+                >
+                  {removingSeats ? <Loader2 className="h-4 w-4 animate-spin" /> : <Minus className="h-4 w-4" />}
+                  Remove
+                </Button>
+                <Button
+                  className="h-11 gap-1.5 flex-shrink-0"
+                  disabled={buyingSeats || removingSeats}
+                  onClick={buySeats}
+                >
                   {buyingSeats ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                  Buy seats
+                  Buy
                 </Button>
               </div>
+              <p className="text-xs text-muted-foreground">
+                Removing seats can't go below your current member count, and credits the unused portion to your next invoice.
+              </p>
             </Card>
           )}
 

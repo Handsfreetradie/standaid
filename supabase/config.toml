@@ -33,3 +33,6 @@ verify_jwt = false
 
 [functions.add-team-seat]
 verify_jwt = false
+
+[functions.remove-team-seat]
+verify_jwt = false
