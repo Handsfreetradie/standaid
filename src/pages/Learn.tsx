@@ -11,10 +11,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { extractPdfText } from "@/lib/pdf-text";
 
 type Mode = "menu" | "quiz" | "exam" | "exam-active" | "exam-result" | "study-guide" | "study-view" | "photo-analysis" | "exam-prep" | "exam-prep-result" | "short-answer" | "short-answer-result" | "calculation";
 
 interface CalculationQuestion {
+  id: string;
   calculation_type: "voltage_drop" | "maximum_demand" | "cable_sizing" | "fault_current";
   scenario: string;
   given_data: string[];
@@ -25,6 +28,7 @@ interface CalculationQuestion {
 }
 
 interface ShortAnswerQuestion {
+  id: string;
   question: string;
   model_answer: string;
   clause_reference: string;
@@ -461,13 +465,10 @@ const Learn = () => {
     if (!calcQuestion) return;
     setCalcGrading(true);
     try {
-      const fullQuestion = `${calcQuestion.scenario}\n\nGiven:\n${calcQuestion.given_data.join("\n")}\n\nQuestions:\n${calcQuestion.question_parts.join("\n")}`;
       const { data, error } = await supabase.functions.invoke("capstone", {
         body: {
           action: "grade_calculation",
-          questionText: fullQuestion,
-          modelAnswer: calcQuestion.model_solution,
-          correctClause: String(calcQuestion.total_marks),
+          practiceQuestionId: calcQuestion.id,
           userAnswer: calcWorking,
         },
       });
@@ -511,9 +512,7 @@ const Learn = () => {
       const { data, error } = await supabase.functions.invoke("capstone", {
         body: {
           action: "grade_short_answer",
-          questionText: q.question,
-          modelAnswer: q.model_answer,
-          correctClause: q.clause_reference,
+          practiceQuestionId: q.id,
           userAnswer: shortAnswerText,
           userClauseRef: shortAnswerClause,
         },
@@ -636,62 +635,24 @@ const Learn = () => {
       if (!file) return;
       if (file.size > 20 * 1024 * 1024) { toast.error("PDF must be under 20MB"); return; }
       setExamPrepPdfName(file.name);
-      
-      // Extract text client-side using simple approach
-      const arrayBuffer = await file.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
-      let text = "";
-      // Simple text extraction from PDF
-      const decoder = new TextDecoder("utf-8", { fatal: false });
-      const raw = decoder.decode(bytes);
-      // Extract text between BT/ET blocks
-      const btEtRegex = /BT\s([\s\S]*?)ET/g;
-      let match;
-      while ((match = btEtRegex.exec(raw)) !== null) {
-        const block = match[1];
-        const tjMatches = block.match(/\(([^)]*)\)\s*Tj/g);
-        if (tjMatches) {
-          for (const tj of tjMatches) {
-            const content = tj.match(/\(([^)]*)\)/);
-            if (content) text += content[1] + " ";
-          }
-        }
-        const tjArrayMatches = block.match(/\[(.*?)\]\s*TJ/gi);
-        if (tjArrayMatches) {
-          for (const tja of tjArrayMatches) {
-            const parts = tja.match(/\(([^)]*)\)/g);
-            if (parts) {
-              for (const p of parts) {
-                const c = p.match(/\(([^)]*)\)/);
-                if (c) text += c[1];
-              }
-              text += " ";
-            }
-          }
-        }
-      }
 
-      if (text.trim().length < 50) {
-        // If extraction failed, send it to process-standard for better extraction
-        toast.info("Extracting text from PDF...");
-        try {
-          const base64 = btoa(String.fromCharCode(...bytes.slice(0, 3 * 1024 * 1024)));
-          const { data, error } = await supabase.functions.invoke("capstone", {
-            body: { action: "exam_prep", examPdfText: `[PDF uploaded: ${file.name} — client extraction yielded minimal text. The student uploaded a previous exam paper.]`, examTopics: examPrepTopics || "", standardId: selectedStandard || undefined },
-          });
-          if (error) throw await extractFnError(error);
-          if (data?.error) throw new Error(data.error);
-          setExamPrepResult(data);
-          setMode("exam-prep-result");
-          return;
-        } catch (err: any) {
-          toast.error(err.message || "Failed to process exam PDF");
+      try {
+        const text = await extractPdfText(file, () => {});
+        const contentPages = (text.match(/\[PAGE \d+\]\n?([^[]*)/g) || [])
+          .filter((p) => p.replace(/\[PAGE \d+\]\n?/, "").trim().length >= 15);
+
+        if (contentPages.length === 0) {
+          toast.error("Couldn't read any text from this PDF — try a clearer digital copy or a different scan.");
+          setExamPrepPdfName(null);
           return;
         }
-      }
 
-      setExamPrepPdfText(text.trim());
-      toast.success(`Extracted text from ${file.name}`);
+        setExamPrepPdfText(text.trim());
+        toast.success(`Extracted text from ${file.name}`);
+      } catch (err: any) {
+        toast.error(err.message || "Failed to read this PDF");
+        setExamPrepPdfName(null);
+      }
     };
     input.click();
   };
@@ -1111,7 +1072,7 @@ const Learn = () => {
         <h2 className="font-sans text-lg font-extrabold text-foreground mb-4">{activeGuide.title}</h2>
         <Card className="p-5">
           <div className="prose prose-sm dark:prose-invert max-w-none text-foreground">
-            <ReactMarkdown>{activeGuide.content}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeGuide.content}</ReactMarkdown>
           </div>
         </Card>
       </ScrollPage>
@@ -1146,7 +1107,7 @@ const Learn = () => {
           <Card className="p-5">
             <Badge className="bg-accent text-primary border-0 text-xs mb-3">AI Hints</Badge>
             <div className="prose prose-sm dark:prose-invert max-w-none text-foreground">
-              <ReactMarkdown>{photoAnalysis}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{photoAnalysis}</ReactMarkdown>
             </div>
           </Card>
         )}
@@ -1273,7 +1234,7 @@ const Learn = () => {
           <Card className="p-4 mb-4">
             <p className="text-sm font-bold text-foreground mb-3">📖 Study Guide</p>
             <div className="prose prose-sm dark:prose-invert max-w-none text-foreground">
-              <ReactMarkdown>{examPrepResult.guide.content}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{examPrepResult.guide.content}</ReactMarkdown>
             </div>
           </Card>
         )}

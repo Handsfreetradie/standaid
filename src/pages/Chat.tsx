@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Mic, ThumbsUp, ThumbsDown, HelpCircle, Check, FileText, History, X, ExternalLink, ShoppingCart } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import VoiceMode from "@/components/VoiceMode";
 import ChatHistory, { HistoryItem } from "@/components/ChatHistory";
 import { PDFViewerModal } from "@/components/PDFViewerModal";
@@ -581,7 +582,7 @@ const Chat = () => {
                     <ThinkingBubble isComplianceCheck={msg.isComplianceCheck} />
                   ) : (
                     <div className="chat-answer text-card-foreground">
-                      <ReactMarkdown>{msg.content || " "}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content || " "}</ReactMarkdown>
                       {msg.isTyping && (
                         <span className="inline-block w-0.5 h-4 bg-primary ml-0.5 animate-pulse align-middle" />
                       )}

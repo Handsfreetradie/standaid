@@ -1,9 +1,13 @@
-// Geometry-aware PDF text line assembly, shared by StandardsUpload and the
-// extraction regression tests. This is where the "0.5 ohms → 05 ohms" class
-// of corruption lives, so the logic is pure and unit-tested: PDFs emit kerned
-// runs as separate items ("0", ".", "5"), and table cells on one row as
-// separate items — get clustering or joining wrong and numbers are silently
-// fabricated.
+// Geometry-aware PDF text line assembly, shared by StandardsUpload, Learn's
+// exam-prep upload, and the extraction regression tests. This is where the
+// "0.5 ohms → 05 ohms" class of corruption lives, so the logic is pure and
+// unit-tested: PDFs emit kerned runs as separate items ("0", ".", "5"), and
+// table cells on one row as separate items — get clustering or joining wrong
+// and numbers are silently fabricated.
+
+import * as pdfjsLib from "pdfjs-dist";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
 export interface PositionedItem {
   str: string;
@@ -62,4 +66,62 @@ export function assembleLines(items: PositionedItem[]): string[] {
     }
     return text;
   });
+}
+
+// Pages are read in fixed-size windows rather than one Promise.all over the
+// whole document — holding 700 page proxies + text content at once is what
+// gets a mobile Safari tab killed on the biggest standards.
+const PAGE_WINDOW = 25;
+
+export async function extractPdfText(
+  file: File,
+  onProgress: (pct: number) => void,
+): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  try {
+    const numPages = pdf.numPages;
+    let completed = 0;
+    const pageTexts: string[] = [];
+
+    for (let start = 0; start < numPages; start += PAGE_WINDOW) {
+      const windowSize = Math.min(PAGE_WINDOW, numPages - start);
+      const windowTexts = await Promise.all(
+        Array.from({ length: windowSize }, async (_, i) => {
+          const page = await pdf.getPage(start + i + 1);
+          const content = await page.getTextContent();
+
+          // Reconstruct lines geometry-aware (see assembleLines above — pure,
+          // unit-tested). The old fixed 3pt Y-grid split same-line items across
+          // buckets (a decimal point 0.02pt off became its own "line", turning
+          // 0.5 into 05) and join("") fused adjacent table columns into one
+          // number.
+          const items: PositionedItem[] = [];
+          for (const item of content.items) {
+            if (!("str" in item) || !item.str) continue;
+            const t = (item as any).transform;
+            items.push({
+              str: item.str,
+              x: t[4],
+              y: t[5],
+              w: (item as any).width ?? 0,
+              h: (item as any).height || Math.hypot(t[2], t[3]) || 10,
+            });
+          }
+          const sortedLines = assembleLines(items);
+          page.cleanup();
+
+          onProgress(++completed / numPages);
+          return sortedLines.join("\n");
+        }),
+      );
+      pageTexts.push(...windowTexts);
+    }
+
+    return pageTexts.map((text, i) => `\n[PAGE ${i + 1}]\n${text}`).join("");
+  } finally {
+    // Frees the worker's copy of the document — without this the figure pass
+    // later holds a second full document alongside this one.
+    pdf.destroy();
+  }
 }

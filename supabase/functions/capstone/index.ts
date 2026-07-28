@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getAllowedOrigin } from "../_shared/cors.ts";
+import { parseExtractedText } from "../process-standard/extraction.ts";
 
 type StandardChunk = {
   content: string;
@@ -275,7 +276,7 @@ serve(async (req) => {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) throw new Error("Unauthorized");
 
-    const { action, standardId, topic, difficulty, questionCount, examId, questionId, userAnswer, imageBase64, chunkId, examTopics, examPdfText, sectionFilter: rawSectionFilter, userClauseRef, modelAnswer, correctClause, questionText } = await req.json();
+    const { action, standardId, topic, difficulty, questionCount, examId, questionId, userAnswer, imageBase64, chunkId, examTopics, examPdfText, sectionFilter: rawSectionFilter, userClauseRef, practiceQuestionId } = await req.json();
     const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
     if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
 
@@ -300,8 +301,11 @@ serve(async (req) => {
     // Atomic: the RPC records usage under an advisory lock, so concurrent
     // requests can't race past the cap. Recorded at the gate (not post-call),
     // so this replaces the old scattered capstone_usage inserts.
+    // start_exam is not in AI_ACTIONS: it only calls Claude when the question
+    // pool is short, so it invokes enforceAiRateLimit() itself at that point
+    // rather than charging a slot for every exam start.
     const AI_ACTIONS = ["generate_questions", "analyze_photo", "explain_chunk", "generate_study_guide", "generate_short_answer", "generate_calculation", "grade_calculation", "grade_short_answer", "exam_prep"];
-    if (AI_ACTIONS.includes(action)) {
+    const enforceAiRateLimit = async (): Promise<Response | null> => {
       // check_and_record_ai_usage is locked to service_role (migration
       // 20260706000001) — the user-scoped client would get permission denied.
       const serviceClient = createClient(
@@ -325,6 +329,11 @@ serve(async (req) => {
           error: "Hourly limit reached. You can make 20 AI requests per hour. Please try again later.",
         }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
+      return null;
+    };
+    if (AI_ACTIONS.includes(action)) {
+      const limited = await enforceAiRateLimit();
+      if (limited) return limited;
     }
 
     // ── GENERATE QUIZ QUESTIONS ──
@@ -545,6 +554,8 @@ Rules:
 
       // Auto-generate if not enough questions in the pool
       if (!existingQuestions || existingQuestions.length < count) {
+        const limited = await enforceAiRateLimit();
+        if (limited) return limited;
         const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 30, undefined, sectionFilter);
         if (!chunks?.length) throw new Error("No content found for this standard. Please ensure it has been fully processed.");
         const figureChunks = await fetchDescribedFigures(supabase, standardId, 5, sectionFilter);
@@ -718,10 +729,25 @@ Rules:
 
     // ── EXAM PREP: Generate from uploaded exam or listed topics ──
     if (action === "exam_prep") {
+      // examPdfText arrives as [PAGE N]-marked text from the client's PDF.js
+      // extraction. Strip the markers and check real page coverage rather than
+      // raw length — a failed extraction can still produce a >100-char string
+      // (e.g. an error note) that says nothing about the actual exam.
+      let pdfText = "";
+      if (examPdfText && examPdfText.trim().length > 0) {
+        const parsed = parseExtractedText(examPdfText);
+        if (parsed.pagesWithContent === 0) {
+          return new Response(JSON.stringify({
+            error: "We couldn't read this PDF — try a clearer digital copy or a different scan.",
+          }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+        pdfText = parsed.text;
+      }
+
       // FIX 3 — require meaningful grounding input
       const hasStandard = !!standardId;
       const hasTopics = examTopics && examTopics.trim().length > 0;
-      const hasPdfText = examPdfText && examPdfText.trim().length >= 100;
+      const hasPdfText = pdfText.trim().length >= 100;
       if (!hasStandard && !hasTopics && !hasPdfText) {
         return new Response(JSON.stringify({
           error: "Please select a standard or provide exam topics before generating prep materials.",
@@ -730,8 +756,8 @@ Rules:
 
       let contextParts: string[] = [];
 
-      if (examPdfText && examPdfText.trim().length > 0) {
-        contextParts.push(`PREVIOUS EXAM CONTENT:\n${examPdfText.slice(0, 15000)}`);
+      if (pdfText.trim().length > 0) {
+        contextParts.push(`PREVIOUS EXAM CONTENT:\n${pdfText.slice(0, 15000)}`);
       }
 
       if (examTopics && examTopics.trim().length > 0) {
@@ -924,14 +950,29 @@ Use realistic Australian values. Show clear step-by-step working in the model so
       const aiData = await aiResponse.json();
       const question = getToolInput(aiData);
       if (!question) throw new Error("No calculation generated");
-      return new Response(JSON.stringify({ question }), {
+      // Persist so grade_calculation marks against the server's copy of the
+      // question and model solution, not client-supplied grading data.
+      const { data: saved, error: saveErr } = await supabase
+        .from("capstone_practice_questions")
+        .insert({ user_id: user.id, standard_id: standardId, kind: "calculation", payload: question })
+        .select("id").single();
+      if (saveErr) throw saveErr;
+      return new Response(JSON.stringify({ question: { ...question, id: saved.id } }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     // ── GRADE CALCULATION ──
     if (action === "grade_calculation") {
-      if (!questionText || !modelAnswer) throw new Error("Missing grading data");
+      if (!practiceQuestionId) throw new Error("Missing grading data");
+      const { data: stored, error: storedErr } = await supabase
+        .from("capstone_practice_questions")
+        .select("payload")
+        .eq("id", practiceQuestionId).eq("kind", "calculation")
+        .single();
+      if (storedErr || !stored) throw new Error("Question not found. Please generate a new one.");
+      const q = stored.payload as { scenario: string; given_data: string[]; question_parts: string[]; model_solution: string; total_marks: number };
+      const questionText = `${q.scenario}\n\nGiven:\n${(q.given_data || []).join("\n")}\n\nQuestions:\n${(q.question_parts || []).join("\n")}`;
 
       const aiResponse = await callAI({
         model: "claude-sonnet-4-6",
@@ -945,7 +986,7 @@ Give specific, helpful feedback.`,
           },
           {
             role: "user",
-            content: `Scenario + question:\n${questionText}\n\nModel solution:\n${modelAnswer}\n\nTotal marks: ${correctClause || "4"}\n\nStudent's working:\n${userAnswer || "(nothing submitted)"}\n\nGrade this.`,
+            content: `Scenario + question:\n${questionText}\n\nModel solution:\n${q.model_solution}\n\nTotal marks: ${q.total_marks || 4}\n\nStudent's working:\n${(userAnswer || "(nothing submitted)").slice(0, 4000)}\n\nGrade this.`,
           },
         ],
         tools: [{
@@ -1043,14 +1084,28 @@ CRITICAL: Never mention any clause number in the question text itself. Clause nu
       const input = getToolInput(aiData);
       if (!input) throw new Error("No questions generated");
       const { questions } = input;
-      return new Response(JSON.stringify({ questions: questions.map((q: any) => ({ ...q, marks: 2 })) }), {
+      // Persist so grade_short_answer marks against the server's copy of the
+      // model answer and clause reference, not client-supplied grading data.
+      const { data: savedRows, error: saveErr } = await supabase
+        .from("capstone_practice_questions")
+        .insert(questions.map((q: any) => ({ user_id: user.id, standard_id: standardId, kind: "short_answer", payload: q })))
+        .select("id, payload");
+      if (saveErr) throw saveErr;
+      return new Response(JSON.stringify({ questions: (savedRows || []).map((row: any) => ({ ...row.payload, id: row.id, marks: 2 })) }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     // ── GRADE SHORT ANSWER ──
     if (action === "grade_short_answer") {
-      if (!questionText || !modelAnswer || !correctClause) throw new Error("Missing grading data");
+      if (!practiceQuestionId) throw new Error("Missing grading data");
+      const { data: stored, error: storedErr } = await supabase
+        .from("capstone_practice_questions")
+        .select("payload")
+        .eq("id", practiceQuestionId).eq("kind", "short_answer")
+        .single();
+      if (storedErr || !stored) throw new Error("Question not found. Please generate a new one.");
+      const q = stored.payload as { question: string; model_answer: string; clause_reference: string };
 
       const aiResponse = await callAI({
         model: "claude-sonnet-4-6",
@@ -1065,7 +1120,7 @@ Be strict but fair. Accept minor wording differences if the meaning is correct. 
           },
           {
             role: "user",
-            content: `Question: ${questionText}\n\nModel answer: ${modelAnswer}\nCorrect clause: ${correctClause}\n\nStudent's answer: ${userAnswer || "(no answer provided)"}\nStudent's clause reference: ${userClauseRef || "(none provided)"}\n\nGrade this response.`,
+            content: `Question: ${q.question}\n\nModel answer: ${q.model_answer}\nCorrect clause: ${q.clause_reference}\n\nStudent's answer: ${(userAnswer || "(no answer provided)").slice(0, 4000)}\nStudent's clause reference: ${(userClauseRef || "(none provided)").slice(0, 100)}\n\nGrade this response.`,
           },
         ],
         tools: [{
