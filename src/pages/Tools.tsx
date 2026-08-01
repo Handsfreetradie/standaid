@@ -16,19 +16,17 @@ import DuctSizingTool from "@/components/tools/DuctSizingTool";
 import GasPipeSizingTool from "@/components/tools/GasPipeSizingTool";
 import DrainageFallTool from "@/components/tools/DrainageFallTool";
 import EarthConductorTool from "@/components/tools/EarthConductorTool";
-import RCDBreakerTool from "@/components/tools/RCDBreakerTool";
 import BackflowPreventionTool from "@/components/tools/BackflowPreventionTool";
 import SteelLintelTool from "@/components/tools/SteelLintelTool";
 import StairComplianceTool from "@/components/tools/StairComplianceTool";
 import StormwaterSizingTool from "@/components/tools/StormwaterSizingTool";
 import VentilationSizingTool from "@/components/tools/VentilationSizingTool";
 import FaultLoopTool from "@/components/tools/FaultLoopTool";
-import EarthElectrodeTool from "@/components/tools/EarthElectrodeTool";
 import PVStringSizingTool from "@/components/tools/PVStringSizingTool";
 import DCIsolatorTool from "@/components/tools/DCIsolatorTool";
 import BatteryComplianceTool from "@/components/tools/BatteryComplianceTool";
 
-type ToolMode = "menu" | "earth-conductor" | "voltage-drop" | "concrete-volume" | "pipe-sizing" | "cable-sizer" | "conduit-fill" | "max-demand" | "brick-calc" | "timber-span" | "roof-pitch" | "heat-load" | "duct-sizing" | "gas-pipe" | "drainage-fall" | "rcd-breaker" | "backflow" | "steel-lintel" | "stair-compliance" | "stormwater" | "ventilation" | "fault-loop" | "earth-electrode" | "pv-string" | "dc-isolator" | "battery-check";
+type ToolMode = "menu" | "earth-conductor" | "voltage-drop" | "concrete-volume" | "pipe-sizing" | "cable-sizer" | "conduit-fill" | "max-demand" | "brick-calc" | "timber-span" | "roof-pitch" | "heat-load" | "duct-sizing" | "gas-pipe" | "drainage-fall" | "backflow" | "steel-lintel" | "stair-compliance" | "stormwater" | "ventilation" | "fault-loop" | "pv-string" | "dc-isolator" | "battery-check";
 
 const TOOLS: { id: ToolMode; title: string; desc: string; category: string }[] = [
   // Electrical
@@ -37,9 +35,7 @@ const TOOLS: { id: ToolMode; title: string; desc: string; category: string }[] =
   { id: "max-demand", title: "Maximum Demand", desc: "Diversity & main breaker sizing", category: "Electrical" },
   { id: "conduit-fill", title: "Conduit Fill", desc: "Space-factor multi-cable fill check", category: "Electrical" },
   { id: "earth-conductor", title: "Earth Conductor Size", desc: "AS/NZS 3000 Table 5.1 minimum earth", category: "Electrical" },
-  { id: "rcd-breaker", title: "RCD & Breaker Selection", desc: "RCD type, sensitivity & MCB curve", category: "Electrical" },
   { id: "fault-loop", title: "Fault Loop Impedance", desc: "AS/NZS 3000 App B — max Zs check", category: "Electrical" },
-  { id: "earth-electrode", title: "Earth Electrode", desc: "Driven-rod resistance & EPR estimate", category: "Electrical" },
   // Solar / Battery
   { id: "pv-string", title: "PV String Sizing", desc: "Temp-corrected string voltage vs inverter", category: "Solar / Battery" },
   { id: "dc-isolator", title: "DC Isolator Rating", desc: "Min ratings from array datasheet values", category: "Solar / Battery" },
@@ -79,14 +75,12 @@ const TOOL_COMPONENTS: Record<string, React.FC<{ onBack: () => void }>> = {
   "duct-sizing": DuctSizingTool,
   "gas-pipe": GasPipeSizingTool,
   "drainage-fall": DrainageFallTool,
-  "rcd-breaker": RCDBreakerTool,
   "backflow": BackflowPreventionTool,
   "steel-lintel": SteelLintelTool,
   "stair-compliance": StairComplianceTool,
   "stormwater": StormwaterSizingTool,
   "ventilation": VentilationSizingTool,
   "fault-loop": FaultLoopTool,
-  "earth-electrode": EarthElectrodeTool,
   "pv-string": PVStringSizingTool,
   "dc-isolator": DCIsolatorTool,
   "battery-check": BatteryComplianceTool,
