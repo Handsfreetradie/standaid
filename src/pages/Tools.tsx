@@ -24,8 +24,11 @@ import StormwaterSizingTool from "@/components/tools/StormwaterSizingTool";
 import VentilationSizingTool from "@/components/tools/VentilationSizingTool";
 import FaultLoopTool from "@/components/tools/FaultLoopTool";
 import EarthElectrodeTool from "@/components/tools/EarthElectrodeTool";
+import PVStringSizingTool from "@/components/tools/PVStringSizingTool";
+import DCIsolatorTool from "@/components/tools/DCIsolatorTool";
+import BatteryComplianceTool from "@/components/tools/BatteryComplianceTool";
 
-type ToolMode = "menu" | "earth-conductor" | "voltage-drop" | "concrete-volume" | "pipe-sizing" | "cable-sizer" | "conduit-fill" | "max-demand" | "brick-calc" | "timber-span" | "roof-pitch" | "heat-load" | "duct-sizing" | "gas-pipe" | "drainage-fall" | "rcd-breaker" | "backflow" | "steel-lintel" | "stair-compliance" | "stormwater" | "ventilation" | "fault-loop" | "earth-electrode";
+type ToolMode = "menu" | "earth-conductor" | "voltage-drop" | "concrete-volume" | "pipe-sizing" | "cable-sizer" | "conduit-fill" | "max-demand" | "brick-calc" | "timber-span" | "roof-pitch" | "heat-load" | "duct-sizing" | "gas-pipe" | "drainage-fall" | "rcd-breaker" | "backflow" | "steel-lintel" | "stair-compliance" | "stormwater" | "ventilation" | "fault-loop" | "earth-electrode" | "pv-string" | "dc-isolator" | "battery-check";
 
 const TOOLS: { id: ToolMode; title: string; desc: string; category: string }[] = [
   // Electrical
@@ -37,6 +40,10 @@ const TOOLS: { id: ToolMode; title: string; desc: string; category: string }[] =
   { id: "rcd-breaker", title: "RCD & Breaker Selection", desc: "RCD type, sensitivity & MCB curve", category: "Electrical" },
   { id: "fault-loop", title: "Fault Loop Impedance", desc: "AS/NZS 3000 App B — max Zs check", category: "Electrical" },
   { id: "earth-electrode", title: "Earth Electrode", desc: "Driven-rod resistance & EPR estimate", category: "Electrical" },
+  // Solar / Battery
+  { id: "pv-string", title: "PV String Sizing", desc: "Temp-corrected string voltage vs inverter", category: "Solar / Battery" },
+  { id: "dc-isolator", title: "DC Isolator Rating", desc: "Min ratings from array datasheet values", category: "Solar / Battery" },
+  { id: "battery-check", title: "Battery Install Checker", desc: "AS/NZS 5139 location screening", category: "Solar / Battery" },
   // HVAC / Refrigeration
   { id: "heat-load", title: "Heat Load", desc: "Cooling & heating capacity estimator", category: "HVAC" },
   { id: "duct-sizing", title: "Duct Sizing", desc: "Round & rectangular duct by airflow", category: "HVAC" },
@@ -80,6 +87,9 @@ const TOOL_COMPONENTS: Record<string, React.FC<{ onBack: () => void }>> = {
   "ventilation": VentilationSizingTool,
   "fault-loop": FaultLoopTool,
   "earth-electrode": EarthElectrodeTool,
+  "pv-string": PVStringSizingTool,
+  "dc-isolator": DCIsolatorTool,
+  "battery-check": BatteryComplianceTool,
 };
 
 const Tools = () => {
