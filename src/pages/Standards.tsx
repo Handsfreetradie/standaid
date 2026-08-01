@@ -76,7 +76,8 @@ const Standards = () => {
   };
 
   return (
-    <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-2xl md:mx-auto">
+    <div className="h-full overflow-y-auto">
+      <div className="px-5 py-6 pb-24 md:pb-8 max-w-5xl md:mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="font-sans text-2xl font-extrabold tracking-tight text-foreground">
@@ -114,18 +115,17 @@ const Standards = () => {
           <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
       ) : (
-        <div className="space-y-3 mb-6">
-          {filteredStandards.length === 0 && (
-            <div className="text-center py-12">
-              <BookOpen className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
-              <p className="text-sm text-muted-foreground">
-                {standards.length === 0
-                  ? "No standards uploaded yet. Upload a PDF to get started."
-                  : "No standards match your search."}
-              </p>
-            </div>
-          )}
-
+        filteredStandards.length === 0 ? (
+          <div className="text-center py-12 mb-6">
+            <BookOpen className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
+            <p className="text-sm text-muted-foreground">
+              {standards.length === 0
+                ? "No standards uploaded yet. Upload a PDF to get started."
+                : "No standards match your search."}
+            </p>
+          </div>
+        ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-6">
           {filteredStandards.map((s) => {
             const indexedPercent =
               s.total_chunks && s.total_chunks > 0
@@ -133,7 +133,7 @@ const Standards = () => {
                 : 0;
 
             return (
-              <Card key={s.id} className="p-4">
+              <Card key={s.id} className="p-4 flex flex-col h-full">
                 <div className="flex items-start justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <BookOpen className="h-5 w-5 text-primary" />
@@ -233,7 +233,7 @@ const Standards = () => {
                   </div>
                 )}
 
-                <div className="flex items-center justify-between mt-3">
+                <div className="flex items-center justify-between mt-auto pt-3">
                   <span className="text-xs text-muted-foreground">
                     {new Date(s.created_at).toLocaleDateString("en-AU", {
                       day: "numeric",
@@ -267,6 +267,7 @@ const Standards = () => {
             );
           })}
         </div>
+        )
       )}
 
       <PDFViewerModal
@@ -297,6 +298,7 @@ const Standards = () => {
           </div>
         </Card>
       )}
+      </div>
     </div>
   );
 };

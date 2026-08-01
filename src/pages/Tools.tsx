@@ -70,7 +70,8 @@ const Tools = () => {
   const categories = [...new Set(TOOLS.map(t => t.category))];
 
   return (
-    <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 md:px-8 max-w-md md:max-w-5xl mx-auto">
+    <div className="h-full overflow-y-auto">
+      <div className="px-5 py-6 pb-24 md:pb-8 md:px-8 max-w-md md:max-w-5xl mx-auto">
       <div className="flex items-center gap-3 mb-6">
         <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
           <Calculator className="h-5 w-5 text-primary" />
@@ -120,6 +121,7 @@ const Tools = () => {
           </div>
         </div>
       ))}
+      </div>
     </div>
   );
 };
