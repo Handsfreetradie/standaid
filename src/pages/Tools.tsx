@@ -16,8 +16,16 @@ import DuctSizingTool from "@/components/tools/DuctSizingTool";
 import GasPipeSizingTool from "@/components/tools/GasPipeSizingTool";
 import DrainageFallTool from "@/components/tools/DrainageFallTool";
 import EarthConductorTool from "@/components/tools/EarthConductorTool";
+import RCDBreakerTool from "@/components/tools/RCDBreakerTool";
+import BackflowPreventionTool from "@/components/tools/BackflowPreventionTool";
+import SteelLintelTool from "@/components/tools/SteelLintelTool";
+import StairComplianceTool from "@/components/tools/StairComplianceTool";
+import StormwaterSizingTool from "@/components/tools/StormwaterSizingTool";
+import VentilationSizingTool from "@/components/tools/VentilationSizingTool";
+import FaultLoopTool from "@/components/tools/FaultLoopTool";
+import EarthElectrodeTool from "@/components/tools/EarthElectrodeTool";
 
-type ToolMode = "menu" | "earth-conductor" | "voltage-drop" | "concrete-volume" | "pipe-sizing" | "cable-sizer" | "conduit-fill" | "max-demand" | "brick-calc" | "timber-span" | "roof-pitch" | "heat-load" | "duct-sizing" | "gas-pipe" | "drainage-fall";
+type ToolMode = "menu" | "earth-conductor" | "voltage-drop" | "concrete-volume" | "pipe-sizing" | "cable-sizer" | "conduit-fill" | "max-demand" | "brick-calc" | "timber-span" | "roof-pitch" | "heat-load" | "duct-sizing" | "gas-pipe" | "drainage-fall" | "rcd-breaker" | "backflow" | "steel-lintel" | "stair-compliance" | "stormwater" | "ventilation" | "fault-loop" | "earth-electrode";
 
 const TOOLS: { id: ToolMode; title: string; desc: string; category: string }[] = [
   // Electrical
@@ -26,18 +34,26 @@ const TOOLS: { id: ToolMode; title: string; desc: string; category: string }[] =
   { id: "max-demand", title: "Maximum Demand", desc: "Diversity & main breaker sizing", category: "Electrical" },
   { id: "conduit-fill", title: "Conduit Fill", desc: "Space-factor multi-cable fill check", category: "Electrical" },
   { id: "earth-conductor", title: "Earth Conductor Size", desc: "AS/NZS 3000 Table 5.1 minimum earth", category: "Electrical" },
+  { id: "rcd-breaker", title: "RCD & Breaker Selection", desc: "RCD type, sensitivity & MCB curve", category: "Electrical" },
+  { id: "fault-loop", title: "Fault Loop Impedance", desc: "AS/NZS 3000 App B — max Zs check", category: "Electrical" },
+  { id: "earth-electrode", title: "Earth Electrode", desc: "Driven-rod resistance & EPR estimate", category: "Electrical" },
   // HVAC / Refrigeration
   { id: "heat-load", title: "Heat Load", desc: "Cooling & heating capacity estimator", category: "HVAC" },
   { id: "duct-sizing", title: "Duct Sizing", desc: "Round & rectangular duct by airflow", category: "HVAC" },
+  { id: "ventilation", title: "Ventilation Sizing", desc: "AS 1668.2 exhaust & outside-air rates", category: "HVAC" },
   // Plumbing / Gas
   { id: "pipe-sizing", title: "Pipe Sizing", desc: "Flow rate to pipe diameter", category: "Plumbing / Gas" },
   { id: "gas-pipe", title: "Gas Pipe Sizing", desc: "AS/NZS 5601 — size by load & run", category: "Plumbing / Gas" },
   { id: "drainage-fall", title: "Drainage Fall", desc: "AS/NZS 3500.2 pipe grades & fall", category: "Plumbing / Gas" },
+  { id: "backflow", title: "Backflow Prevention", desc: "AS/NZS 3500.1 device by hazard rating", category: "Plumbing / Gas" },
+  { id: "stormwater", title: "Stormwater Sizing", desc: "AS/NZS 3500.3 gutters & downpipes", category: "Plumbing / Gas" },
   // Building / Carpentry
   { id: "brick-calc", title: "Brick & Block", desc: "Estimate bricks, mortar & sand", category: "Building" },
   { id: "timber-span", title: "Timber Span", desc: "AS 1684 — joist, rafter & bearer spans", category: "Building" },
   { id: "roof-pitch", title: "Roof Pitch", desc: "Pitch, rafter length & roof area", category: "Building" },
   { id: "concrete-volume", title: "Concrete Volume", desc: "Slabs, footings & pads with waste", category: "Building" },
+  { id: "steel-lintel", title: "Steel Lintel Sizing", desc: "Indicative lintel guide — engineer to verify", category: "Building" },
+  { id: "stair-compliance", title: "Stair Rise & Going", desc: "NCC riser, going & 2R+G check", category: "Building" },
 ];
 
 
@@ -56,6 +72,14 @@ const TOOL_COMPONENTS: Record<string, React.FC<{ onBack: () => void }>> = {
   "duct-sizing": DuctSizingTool,
   "gas-pipe": GasPipeSizingTool,
   "drainage-fall": DrainageFallTool,
+  "rcd-breaker": RCDBreakerTool,
+  "backflow": BackflowPreventionTool,
+  "steel-lintel": SteelLintelTool,
+  "stair-compliance": StairComplianceTool,
+  "stormwater": StormwaterSizingTool,
+  "ventilation": VentilationSizingTool,
+  "fault-loop": FaultLoopTool,
+  "earth-electrode": EarthElectrodeTool,
 };
 
 const Tools = () => {
