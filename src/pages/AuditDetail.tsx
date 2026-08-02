@@ -15,6 +15,7 @@ import {
   summariseAudit, sortForReport, SEVERITY_META, getPhotoLabels, type AuditPhoto, type Severity,
 } from "@/lib/audit";
 import { generateAuditReportPdf, urlToBase64, type ReportPhoto } from "@/lib/auditReport";
+import MicButton from "@/components/MicButton";
 
 const sb = supabase as any;
 
@@ -39,6 +40,7 @@ const AuditDetail = () => {
   const [pendingLabel, setPendingLabel] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [pendingNote, setPendingNote] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Sign-off + report
@@ -102,14 +104,16 @@ const AuditDetail = () => {
       const path = `${user.id}/${auditId}/${crypto.randomUUID()}.jpg`;
       const { error: upErr } = await supabase.storage.from("audit-photos").upload(path, blob, { contentType: "image/jpeg", upsert: true });
       if (upErr) throw upErr;
+      const note = pendingNote.trim() || null;
       const { data: row, error: insErr } = await sb.from("audit_photos")
-        .insert({ audit_id: auditId, user_id: user.id, storage_path: path, label: pendingLabel, status: "pending" })
+        .insert({ audit_id: auditId, user_id: user.id, storage_path: path, label: pendingLabel, status: "pending", user_notes: note })
         .select().single();
       if (insErr) throw insErr;
       const { data: signed } = await supabase.storage.from("audit-photos").createSignedUrl(path, 3600);
       if (signed?.signedUrl) setUrls((u) => ({ ...u, [row.id]: signed.signedUrl }));
       setPhotos((prev) => [...prev, row as AuditPhoto]);
-      analyse(row.id); // kick analysis immediately
+      setPendingNote("");
+      analyse(row.id); // kick analysis immediately — note (if any) is already on the row
 
       // New content invalidates any existing sign-off — it no longer covers
       // everything in the report.
@@ -126,12 +130,24 @@ const AuditDetail = () => {
   };
 
   const submitAnswers = async (photoId: string) => {
-    const notes = answers[photoId]?.trim();
-    if (!notes) return;
+    const newNote = answers[photoId]?.trim();
+    if (!newNote) return;
+    const existing = photos.find((p) => p.id === photoId)?.user_notes;
+    // Accumulate rather than overwrite — each round (an answered question, or
+    // something the tradie spotted that the AI missed) stays in context for
+    // future re-analysis instead of erasing what came before.
+    const notes = existing ? `${existing}\n${newNote}` : newNote;
     await sb.from("audit_photos").update({ user_notes: notes }).eq("id", photoId);
     setPhotos((prev) => prev.map((p) => p.id === photoId ? { ...p, user_notes: notes } : p));
     setAnswers((a) => ({ ...a, [photoId]: "" }));
-    analyse(photoId); // re-run with the answers folded in
+    analyse(photoId); // re-run with the notes folded in
+
+    // A correction can change findings just like a new photo would — the
+    // sign-off no longer covers what's about to be re-assessed.
+    if (audit?.signed_off_at) {
+      await sb.from("audits").update({ signed_off_by: null, signed_off_licence: null, signed_off_at: null }).eq("id", auditId);
+      setAudit((a: any) => a ? { ...a, signed_off_by: null, signed_off_licence: null, signed_off_at: null } : a);
+    }
   };
 
   const buildAndDownloadReport = async (auditForReport: any) => {
@@ -273,6 +289,16 @@ const AuditDetail = () => {
               </Badge>
             ))}
           </div>
+          <div className="flex items-start gap-1.5 mb-2">
+            <textarea
+              value={pendingNote}
+              onChange={(e) => setPendingNote(e.target.value)}
+              placeholder="Optional: describe what you see, or anything you want it to specifically check…"
+              rows={2}
+              className="flex-1 text-xs rounded-md border border-border bg-background px-2 py-1.5 resize-none focus:outline-none focus:border-primary"
+            />
+            <MicButton value={pendingNote} onChange={setPendingNote} className="mt-0.5" />
+          </div>
           <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFilePicked} />
           <Button className="w-full gap-1.5" onClick={() => fileRef.current?.click()} disabled={busy}>
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
@@ -312,28 +338,39 @@ const AuditDetail = () => {
                         ))}
                       </div>
                     )}
-                    {/* Q&A loop */}
-                    {p.needs_to_know?.length > 0 && !p.user_notes && (
-                      <div className="rounded-lg bg-yellow-50 border border-yellow-200 p-2 space-y-1.5">
-                        <p className="text-[11px] font-semibold text-yellow-800">The AI needs to know:</p>
-                        {p.needs_to_know.map((q, i) => (
-                          <p key={i} className="text-[11px] text-yellow-800">• {q}</p>
-                        ))}
+                    {/* Q&A loop — always available, not just when the AI has an
+                        outstanding question, so the tradie can flag something
+                        the AI missed entirely. */}
+                    {p.user_notes && (
+                      <p className="text-[11px] text-muted-foreground italic whitespace-pre-line">Your notes: {p.user_notes}</p>
+                    )}
+                    <div className="rounded-lg bg-yellow-50 border border-yellow-200 p-2 space-y-1.5">
+                      {p.needs_to_know?.length > 0 && (
+                        <>
+                          <p className="text-[11px] font-semibold text-yellow-800">The AI needs to know:</p>
+                          {p.needs_to_know.map((q, i) => (
+                            <p key={i} className="text-[11px] text-yellow-800">• {q}</p>
+                          ))}
+                        </>
+                      )}
+                      <div className="flex items-start gap-1.5 mt-1">
                         <textarea
                           value={answers[p.id] || ""}
                           onChange={(e) => setAnswers((a) => ({ ...a, [p.id]: e.target.value }))}
-                          placeholder="Type your measurements / answers…"
+                          placeholder="Answer a question, or tell it something it missed…"
                           rows={2}
-                          className="w-full text-xs rounded-md border border-border bg-background px-2 py-1.5 mt-1 resize-none focus:outline-none focus:border-primary"
+                          className="flex-1 text-xs rounded-md border border-border bg-background px-2 py-1.5 resize-none focus:outline-none focus:border-primary"
                         />
-                        <Button size="sm" className="h-7 text-xs gap-1" onClick={() => submitAnswers(p.id)} disabled={!answers[p.id]?.trim()}>
-                          <Send className="h-3 w-3" /> Re-assess with answers
-                        </Button>
+                        <MicButton
+                          value={answers[p.id] || ""}
+                          onChange={(text) => setAnswers((a) => ({ ...a, [p.id]: text }))}
+                          className="mt-0.5"
+                        />
                       </div>
-                    )}
-                    {p.user_notes && (
-                      <p className="text-[11px] text-muted-foreground italic">Your notes: {p.user_notes}</p>
-                    )}
+                      <Button size="sm" className="h-7 text-xs gap-1" onClick={() => submitAnswers(p.id)} disabled={!answers[p.id]?.trim()}>
+                        <Send className="h-3 w-3" /> Re-assess
+                      </Button>
+                    </div>
                   </>
                 )}
               </div>

@@ -24,7 +24,7 @@ const TRADE_PERSONA: Record<string, string> = {
 };
 
 const TRADE_KEYWORDS: Record<string, string> = {
-  electrical: "clearance zone RCD earthing socket outlet switchboard wiring rules",
+  electrical: "clearance zone RCD RCBO earthing socket outlet switchboard wiring rules main switch isolator orientation line load polarity termination conductor size neutral",
   plumbing: "backflow prevention pipe fall drainage water supply fixture",
   gas: "gas pipe sizing appliance connection flue isolation valve",
   hvac: "refrigerant line ductwork condensate drain clearance electrical isolation",
@@ -34,6 +34,52 @@ const TRADE_KEYWORDS: Record<string, string> = {
   engineering: "structural member weld connection mechanical fixing",
   food_safety: "food prep surface storage temperature handwash waste pest control",
   other: "compliance clearance installation requirements",
+};
+
+// Category checklists — steer the model to actively check for the specific
+// things an experienced tradesperson checks by trained habit, not just
+// describe whatever's most visually obvious. Without this, vision models
+// reliably report messy wiring / missing covers but miss quieter defects
+// like a reversed RCD or an upside-down isolator.
+const TRADE_CHECKLIST: Record<string, string> = {
+  electrical: `- Main switch / isolators: correct orientation and mechanical operation (not fitted upside down), clearly labelled
+- Terminations: conductor fully inside the terminal with no bare copper exposed outside it, screws/lugs appear tight, no over- or under-stripped insulation
+- Conductor sizing: active, neutral and earth consistent in size for each circuit — flag a neutral that looks visibly thinner than its actives
+- RCDs/RCBOs: check line and load are not reversed (supply lands on line, circuit conductors on load), and that each device's active is fed from an appropriate upstream supply point — not spurred off another breaker's load/output terminals
+- Earthing: earth bar terminals not overloaded with multiple conductors under one screw unless rated for it, visible earth continuity
+- Enclosure: cover/door fitted, no exposed live parts, cable entries have grommets/glands (no bare cable over a sharp edge)
+- Labelling: circuit directory present and legible`,
+  plumbing: `- Pipe falls/grades appear consistent with flow direction (not visibly back-falling)
+- Backflow prevention device fitted and orientated correctly (flow-direction arrow)
+- Fixture connections fully seated, no visible gaps or cross-threading
+- Isolation valves present and accessible`,
+  gas: `- Isolation valve present, correct type, and accessible
+- Flue/appliance clearances from combustibles look correct
+- Pipe joints show no obvious sealant/thread issues
+- Appliance connection fittings match the pipe material`,
+  hvac: `- Electrical isolation switch present near the unit and correctly labelled
+- Condensate drain has a visible fall away from the unit, not pooling
+- Refrigerant line insulation intact, no visible kinks or crush points
+- Unit mounted level and clearances from walls/obstructions look adequate`,
+  building: `- Structural connections/fixings appear complete (no missing fasteners)
+- Waterproofing membrane/flashing continuity at penetrations and junctions
+- Fire-rated elements not visibly compromised by penetrations
+- Bracing/tie-downs present where expected`,
+  carpentry: `- Framing connections fully fixed (no missing nails/screws/joist hangers)
+- Span/bracing looks adequate for what's visible
+- No visible notching/boring that looks excessive for the member size`,
+  health_safety: `- Required signage present, correct, and legible
+- Egress path clear and exit signage visible
+- PPE appropriate for the visible hazard is in use
+- Guarding/barriers in place around visible hazards`,
+  engineering: `- Weld/connection quality visibly consistent (no obvious undercut, porosity, or missing welds)
+- Mechanical fixings fully seated and of a consistent type/size
+- No visible corrosion or damage at load-bearing connections`,
+  food_safety: `- Food-contact surfaces appear intact, non-porous, and clean
+- Raw/cooked separation visible where relevant
+- Handwash station accessible and stocked
+- No visible pest evidence`,
+  other: `- Check for anything visibly incomplete, incorrectly orientated, or inconsistent with the rest of the installation`,
 };
 
 serve(async (req) => {
@@ -95,6 +141,7 @@ serve(async (req) => {
     const trade: string | null = auditRow?.trade ?? null;
     const persona = TRADE_PERSONA[trade ?? ""] ?? "tradesperson";
     const keywords = TRADE_KEYWORDS[trade ?? ""] ?? TRADE_KEYWORDS.other;
+    const checklist = TRADE_CHECKLIST[trade ?? ""] ?? TRADE_CHECKLIST.other;
 
     await supabase.from("audit_photos").update({ status: "analyzing" }).eq("id", photo_id);
 
@@ -123,7 +170,7 @@ serve(async (req) => {
       if (embRes.ok) {
         const emb = (await embRes.json()).data[0].embedding;
         const { data: chunks } = await supabase.rpc("match_chunks", {
-          query_embedding: emb, match_user_id: userId, match_threshold: 0.3, match_count: 12,
+          query_embedding: emb, match_user_id: userId, match_threshold: 0.25, match_count: 16,
         });
         if (chunks?.length) {
           contextChunks = chunks.map((c: any, i: number) =>
@@ -138,11 +185,15 @@ serve(async (req) => {
 
 CRITICAL RULES:
 - Assess ONLY what is clearly visible. NEVER guess measurements, distances, heights, clearances, cable sizes, or whether something is RCD-protected from a photo — a wrong value is dangerous.
+- Use your general trade knowledge to identify issues and explain your reasoning — you are not limited to only what's in the retrieved extracts below.
+- However, only put a clause number in "clause" when that exact clause appears in the retrieved standard extracts below. If you're confident something is wrong from general knowledge but no matching clause was retrieved, still raise it (leave "clause" empty) and say plainly that the exact clause should be checked against the standard. NEVER invent or guess a clause number.
 - For anything you cannot determine from the image, put a specific question in "needs_to_know" (e.g. "What is the horizontal distance from the socket to the sink edge?").
-- Cite clause numbers ONLY from the retrieved standard extracts below. If the extracts don't cover a point, say so plainly — do not invent clauses.
 - This is a reference aid, not a certified inspection.
 
-${photo.user_notes ? `The tradie has provided these answers to earlier questions — use them:\n${photo.user_notes}\n` : ""}
+Don't just describe the most visually obvious things (mess, dust, missing covers). Actively work through this checklist and call out anything wrong, even if subtle — these are the kinds of things an experienced ${persona} checks by habit:
+${checklist}
+
+${photo.user_notes ? `The tradie has added the following notes across one or more rounds — this may include answers to your earlier questions, and/or something they've spotted on site that you missed. Treat it as reliable first-hand information: fold it into "what_i_see" and "assessments" (with a clause if the extracts support one), don't just repeat it back:\n${photo.user_notes}\n` : ""}
 RETRIEVED STANDARD EXTRACTS:
 ${contextChunks || "(none found — assess visually and flag what to check in the standard)"}`;
 
@@ -202,6 +253,93 @@ ${contextChunks || "(none found — assess visually and flag what to check in th
     if (!result) {
       await supabase.from("audit_photos").update({ status: "failed" }).eq("id", photo_id);
       return json({ error: "No assessment generated" }, 502);
+    }
+
+    // ── Second-pass retrieval for flagged issues with no clause ──
+    // The first pass runs one generic retrieval before the model even knows
+    // what it's going to find. If it flags a concern but the generic query
+    // didn't surface the right clause, try again with a query built from the
+    // actual flagged points, then a small text-only Haiku call (no image —
+    // far cheaper than another vision pass) to match points to clauses. A
+    // clause is only ever accepted if it's copied verbatim from a retrieved
+    // extract — this never gets to invent one.
+    const unclausedFlags = (result.assessments || [])
+      .map((a: any, i: number) => ({ ...a, index: i }))
+      .filter((a: any) => !a.clause && (a.verdict === "concern" || a.verdict === "non_compliant"))
+      .slice(0, 5);
+
+    if (unclausedFlags.length) {
+      try {
+        const followUpQuery = unclausedFlags.map((a: any) => a.point).join(". ");
+        const embRes2 = await fetch("https://api.openai.com/v1/embeddings", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ model: "text-embedding-3-small", input: followUpQuery }),
+        });
+        if (embRes2.ok) {
+          const emb2 = (await embRes2.json()).data[0].embedding;
+          const { data: moreChunks } = await supabase.rpc("match_chunks", {
+            query_embedding: emb2, match_user_id: userId, match_threshold: 0.2, match_count: 10,
+          });
+          if (moreChunks?.length) {
+            const knownClauses = new Set(moreChunks.map((c: any) => c.clause_number).filter(Boolean));
+            const extractsText = moreChunks.map((c: any, i: number) =>
+              `[Extract ${i + 1} — ${c.clause_number || "N/A"}]\n${c.content}`).join("\n\n");
+            const itemsText = unclausedFlags.map((a: any, i: number) =>
+              `${i + 1}. "${a.point}" (verdict: ${a.verdict})`).join("\n");
+
+            const matchRes = await fetch("https://api.anthropic.com/v1/messages", {
+              method: "POST",
+              headers: { "x-api-key": ANTHROPIC_API_KEY, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
+              body: JSON.stringify({
+                model: "claude-haiku-4-5-20251001",
+                max_tokens: 400,
+                system: "Match already-identified issues to specific clauses from the extracts below. Only include an item if one of the extracts clearly supports citing a specific clause for that exact point — copy the clause exactly as shown (never \"N/A\"). Never invent a clause. Omit any item with no clear match.",
+                tools: [{
+                  name: "return_clause_matches",
+                  description: "Return clause matches for the numbered items",
+                  input_schema: {
+                    type: "object",
+                    properties: {
+                      matches: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            item_number: { type: "number" },
+                            clause: { type: "string" },
+                          },
+                          required: ["item_number", "clause"],
+                        },
+                      },
+                    },
+                    required: ["matches"],
+                  },
+                }],
+                tool_choice: { type: "tool", name: "return_clause_matches" },
+                messages: [{
+                  role: "user",
+                  content: `NUMBERED ITEMS:\n${itemsText}\n\nEXTRACTS:\n${extractsText}`,
+                }],
+              }),
+            });
+
+            if (matchRes.ok) {
+              const matchData = await matchRes.json();
+              const matchBlock = matchData.content?.find?.((b: any) => b.type === "tool_use");
+              const matches = matchBlock?.input?.matches || [];
+              for (const m of matches) {
+                const flag = unclausedFlags[m.item_number - 1];
+                if (flag && m.clause && knownClauses.has(m.clause)) {
+                  result.assessments[flag.index].clause = m.clause;
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error("[analyze-audit-photo] second-pass clause match failed:", e);
+      }
     }
 
     const citations = (result.assessments || [])
