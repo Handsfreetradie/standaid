@@ -44,12 +44,14 @@ const AppLayout = () => {
       {/* Sidebar — desktop only */}
       <aside className="hidden md:flex flex-col w-56 flex-shrink-0 border-r border-border bg-white/80 backdrop-blur-sm z-40 relative">
         <div className="px-5 py-5 border-b border-border flex-shrink-0">
-          <h1 className="text-[24px] font-bold tracking-[-0.02em] leading-tight">
-            <span className="text-foreground">Stand</span>
-            <span className="text-primary">A</span>
-            <span className="text-primary">I</span>
-            <span className="text-foreground">d</span>
-          </h1>
+          <button onClick={() => navigate("/")} className="text-left">
+            <h1 className="text-[24px] font-bold tracking-[-0.02em] leading-tight">
+              <span className="text-foreground">Stand</span>
+              <span className="text-primary">A</span>
+              <span className="text-primary">I</span>
+              <span className="text-foreground">d</span>
+            </h1>
+          </button>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {NAV_TABS.map(({ path, icon: Icon, label }) => {
@@ -85,12 +87,14 @@ const AppLayout = () => {
               : "bg-transparent border-b border-transparent"
           }`}
         >
-          <h1 className="text-[28px] font-bold tracking-[-0.02em] leading-tight">
-            <span className="text-foreground">Stand</span>
-            <span className="text-primary">A</span>
-            <span className="text-primary">I</span>
-            <span className="text-foreground">d</span>
-          </h1>
+          <button onClick={() => navigate("/")} className="text-left">
+            <h1 className="text-[28px] font-bold tracking-[-0.02em] leading-tight">
+              <span className="text-foreground">Stand</span>
+              <span className="text-primary">A</span>
+              <span className="text-primary">I</span>
+              <span className="text-foreground">d</span>
+            </h1>
+          </button>
         </header>
 
         <main className="relative z-10 flex-1 overflow-hidden flex flex-col">

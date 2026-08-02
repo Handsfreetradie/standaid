@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { User, ChevronRight, ChevronDown, Shield, Zap, HelpCircle, LogOut, CreditCard, Bell, Mail, ExternalLink, CheckCircle2, BookOpen, FileText, CalendarDays, Loader2, Users, Gift } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { User, ChevronRight, ChevronDown, Shield, Zap, HelpCircle, LogOut, CreditCard, Bell, Mail, ExternalLink, CheckCircle2, BookOpen, FileText, CalendarDays, Loader2, Users, Gift, UserCog } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -52,6 +53,7 @@ const ADMIN_EMAIL = "kyledixonelectrical@gmail.com";
 
 const Profile = () => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { user, signOut } = useAuth();
   const { data: profile } = useProfile();
   const { data: standards } = useStandards();
@@ -76,6 +78,41 @@ const Profile = () => {
 
   const togglePanel = (panel: string) =>
     setActivePanel((prev) => (prev === panel ? null : panel));
+
+  const [editName, setEditName] = useState("");
+  const [editTrades, setEditTrades] = useState<string[]>([]);
+  const [savingProfile, setSavingProfile] = useState(false);
+
+  // Sync the edit fields whenever the profile loads/changes, not on every
+  // render — otherwise typing would get clobbered by the next refetch.
+  useEffect(() => {
+    if (!profile) return;
+    setEditName(profile.display_name || "");
+    setEditTrades(profile.trade_type ? profile.trade_type.split(",").filter(Boolean) : []);
+  }, [profile]);
+
+  const toggleEditTrade = (id: string) => {
+    setEditTrades((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]));
+  };
+
+  const saveProfileEdits = async () => {
+    if (!user || savingProfile) return;
+    setSavingProfile(true);
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ display_name: editName.trim() || null, trade_type: editTrades.join(",") })
+        .eq("user_id", user.id);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ["profile"] });
+      toast.success("Profile updated");
+    } catch (e) {
+      console.error("[profile] save error:", e);
+      toast.error("Couldn't save — please try again.");
+    } finally {
+      setSavingProfile(false);
+    }
+  };
 
   const [billingBusy, setBillingBusy] = useState(false);
 
@@ -190,7 +227,7 @@ const Profile = () => {
               <div>
                 <h1 className="font-sans text-xl font-bold text-foreground">{displayName}</h1>
                 <p className="text-sm text-muted-foreground">
-                  {tradeLabel || "Set your trade on the Home tab"}
+                  {tradeLabel || "Set your trade below"}
                 </p>
               </div>
             </div>
@@ -328,6 +365,55 @@ const Profile = () => {
             <div>
               <h2 className="hidden md:block font-sans text-lg font-bold text-foreground mb-3">Settings</h2>
               <Card className="p-2 md:p-3 divide-y divide-border">
+
+                {/* Edit Profile */}
+                <div>
+                  <button
+                    onClick={() => togglePanel("edit-profile")}
+                    className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-foreground hover:bg-secondary transition-colors min-h-[44px]"
+                  >
+                    <UserCog className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
+                    <div className="flex-1 text-left">
+                      <span className="block">Edit Profile</span>
+                      <span className="block text-xs text-muted-foreground font-normal mt-0.5">Name & trade</span>
+                    </div>
+                    {activePanel === "edit-profile"
+                      ? <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      : <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    }
+                  </button>
+                  {activePanel === "edit-profile" && (
+                    <div className="px-3 pb-4 pt-1 space-y-3">
+                      <div>
+                        <Label className="text-xs">Name</Label>
+                        <Input
+                          className="h-11 mt-1"
+                          placeholder="Your name"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Trade(s)</Label>
+                        <div className="flex flex-wrap gap-1.5 mt-1.5">
+                          {Object.entries(TRADE_LABELS).map(([id, label]) => (
+                            <Badge
+                              key={id}
+                              variant={editTrades.includes(id) ? "default" : "outline"}
+                              className="cursor-pointer text-[11px] px-2 py-1"
+                              onClick={() => toggleEditTrade(id)}
+                            >
+                              {label}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                      <Button className="w-full h-11 gap-1.5" disabled={savingProfile} onClick={saveProfileEdits}>
+                        {savingProfile ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save changes"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
 
                 {/* Subscription & Billing */}
                 <div>
