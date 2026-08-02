@@ -6,8 +6,15 @@ import { validateResponse } from "./validation.ts";
 import { getAllowedOrigin } from "../_shared/cors.ts";
 import { expandQuery } from "./synonyms.ts";
 
-const SEPARATOR = "---METADATA---";
-const SEP_LEN = SEPARATOR.length;
+// The model is instructed to end its answer with a literal "---METADATA---"
+// line, but occasionally drifts (drops a dash, adds a line break) — an exact
+// string match then fails and the whole raw tail (metadata JSON included)
+// used to leak into the visible answer. Matching a tolerant marker pattern
+// instead absorbs that drift. A generous safe margin (well over the longest
+// realistic marker length) holds back enough of the stream so the marker
+// can't be split across two forwarded chunks.
+const MARKER_RE = /-{0,3}\s*METADATA\s*-{0,3}/i;
+const MARKER_SAFE_MARGIN = 24;
 
 // Haiku reranking. RRF orders candidates by cross-channel agreement, but a
 // chunk can rank high on keyword overlap while being tangential to the actual
@@ -168,7 +175,7 @@ serve(async (req) => {
 
     // Free: 5/day. Pro/business: 200/day fair-use ceiling (stops a runaway
     // client loop or abused account burning unbounded AI spend).
-    const maxQueries = tier === "free" ? 5 : 200;
+    const maxQueries = tier === "free" ? 3 : 200;
 
     // Atomic count-and-record under an advisory lock — concurrent requests
     // cannot race past the cap. Returns the usage count including this request,
@@ -188,8 +195,8 @@ serve(async (req) => {
     const used = typeof usedRaw === "number" ? usedRaw : 0;
     if (used < 0) {
       const msg = tier === "free"
-        ? "You've reached your daily limit of 5 queries. Upgrade to Pro for unlimited queries."
-        : "You've hit today's fair-use limit. Your quota resets in 24 hours — if you're hitting this genuinely, get in touch.";
+        ? "You've reached your daily limit of 3 queries. Upgrade to Pro for unlimited queries."
+        : "StandAId is currently experiencing problems, try again later.";
       return new Response(JSON.stringify({ error: msg }), {
         status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -863,17 +870,17 @@ User's question/context: ${effectiveQuestion}` : "";
               accumulated += token;
 
               if (!pastSeparator) {
-                const sepIdx = accumulated.indexOf(SEPARATOR);
-                if (sepIdx !== -1) {
-                  // Separator found — send any buffered answer text before it
-                  const unsent = accumulated.slice(lastSentIdx, sepIdx);
+                const markerMatch = accumulated.match(MARKER_RE);
+                if (markerMatch && markerMatch.index !== undefined) {
+                  // Marker found — send any buffered answer text before it
+                  const unsent = accumulated.slice(lastSentIdx, markerMatch.index);
                   if (unsent.trim()) {
                     await writer.write(encoder.encode(`data: ${JSON.stringify({ token: unsent })}\n\n`));
                   }
                   pastSeparator = true;
                 } else {
-                  // Send up to (length - SEP_LEN) to avoid splitting the separator across chunks
-                  const safeEnd = Math.max(lastSentIdx, accumulated.length - SEP_LEN);
+                  // Send up to (length - margin) to avoid splitting the marker across chunks
+                  const safeEnd = Math.max(lastSentIdx, accumulated.length - MARKER_SAFE_MARGIN);
                   if (safeEnd > lastSentIdx) {
                     const toSend = accumulated.slice(lastSentIdx, safeEnd);
                     await writer.write(encoder.encode(`data: ${JSON.stringify({ token: toSend })}\n\n`));
@@ -894,27 +901,36 @@ User's question/context: ${effectiveQuestion}` : "";
         }
 
         // Parse full accumulated response
-        const sepIdx = accumulated.indexOf(SEPARATOR);
+        const markerMatch = accumulated.match(MARKER_RE);
         let answerText: string;
         let metadataRaw: string;
 
-        if (sepIdx !== -1) {
-          answerText = accumulated.slice(0, sepIdx).trim();
-          metadataRaw = accumulated.slice(sepIdx + SEP_LEN).trim();
+        if (markerMatch && markerMatch.index !== undefined) {
+          answerText = accumulated.slice(0, markerMatch.index).trim();
+          metadataRaw = accumulated.slice(markerMatch.index + markerMatch[0].length).trim();
         } else {
-          // Fallback: try old JSON format
+          // Marker genuinely missing — look for a trailing JSON object instead
+          // of assuming any particular shape. Never fall back to dumping the
+          // raw (possibly JSON-containing) text as the answer.
           const cleaned = accumulated.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-          const jsonStart = cleaned.indexOf("{");
-          if (jsonStart !== -1) {
-            try {
-              const old = JSON.parse(cleaned.slice(jsonStart));
-              answerText = old.answer || accumulated;
-              metadataRaw = JSON.stringify(old);
-            } catch {
-              answerText = accumulated;
-              metadataRaw = "{}";
+          const lastBrace = cleaned.lastIndexOf("{");
+          let parsedTail: any = null;
+          if (lastBrace !== -1) {
+            try { parsedTail = JSON.parse(cleaned.slice(lastBrace)); } catch { parsedTail = null; }
+          }
+          if (parsedTail && typeof parsedTail === "object") {
+            if ("answer" in parsedTail) {
+              // Old single-blob format: the whole response was one JSON object.
+              answerText = parsedTail.answer || "";
+              metadataRaw = JSON.stringify(parsedTail);
+            } else {
+              // Current metadata-only format, just missing its marker line.
+              answerText = cleaned.slice(0, lastBrace).trim();
+              metadataRaw = cleaned.slice(lastBrace);
             }
           } else {
+            // No parseable metadata found at all — show the plain text rather
+            // than risk leaking an unparsed JSON tail into the answer.
             answerText = accumulated;
             metadataRaw = "{}";
           }
