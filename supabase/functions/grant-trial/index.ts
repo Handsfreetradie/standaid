@@ -60,6 +60,13 @@ function buildHtmlEmail(days: number, expiresLabel: string, isNewAccount: boolea
             </td>
           </tr>
           <tr>
+            <td style="padding:0 40px 28px;">
+              <p style="margin:0;font-size:12px;color:#777;background:#f8f8fc;border-radius:8px;padding:14px 16px;line-height:1.5;">
+                Found something broken? Rate any chat answer 👍/👎 to flag it — every bug report helps make StandAId better.
+              </p>
+            </td>
+          </tr>
+          <tr>
             <td style="padding:20px 40px;border-top:1px solid #f0f0f0;text-align:center;">
               <p style="margin:0;font-size:11px;color:#bbb;">StandAId · Australian Standards AI Assistant · Perth, WA</p>
             </td>
@@ -76,7 +83,7 @@ function buildPlainTextEmail(days: number, expiresLabel: string, isNewAccount: b
   const body = isNewAccount
     ? `You've been given ${days} days of free Pro access to StandAId. Create your account with this email address and Pro access is already waiting for you.`
     : `You've been given ${days} days of free Pro access to StandAId. Just log back in with this email address — no card required.`;
-  return `You've got ${days} days free on StandAId\n\n${body}\n\nOpen the app: ${APP_URL}\n\nYour free access ends ${expiresLabel}.\n\n---\nStandAId · Australian Standards AI Assistant · Perth, WA\n`;
+  return `You've got ${days} days free on StandAId\n\n${body}\n\nOpen the app: ${APP_URL}\n\nYour free access ends ${expiresLabel}.\n\nFound something broken? Rate any chat answer 👍/👎 to flag it — every bug report helps make StandAId better.\n\n---\nStandAId · Australian Standards AI Assistant · Perth, WA\n`;
 }
 
 serve(async (req) => {
