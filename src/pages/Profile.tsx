@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { User, ChevronRight, ChevronDown, Shield, Zap, HelpCircle, LogOut, CreditCard, Bell, Mail, ExternalLink, CheckCircle2, BookOpen, FileText, CalendarDays, Loader2, Users, Gift, UserCog } from "lucide-react";
+import { User, ChevronRight, ChevronDown, Shield, Zap, HelpCircle, LogOut, CreditCard, Bell, Mail, ExternalLink, CheckCircle2, BookOpen, FileText, CalendarDays, Loader2, Users, Gift, UserCog, Image as ImageIcon, X } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
 import { useProfile, useStandards, useOrganization } from "@/hooks/useData";
 import { supabase } from "@/integrations/supabase/client";
+import { compressImageToBlob } from "@/lib/image";
 
 const TRADE_LABELS: Record<string, string> = {
   electrical: "Electrical",
@@ -81,27 +82,73 @@ const Profile = () => {
 
   const [editName, setEditName] = useState("");
   const [editTrades, setEditTrades] = useState<string[]>([]);
+  const [editBusinessName, setEditBusinessName] = useState("");
+  const [editLicenceNumber, setEditLicenceNumber] = useState("");
+  const [logoPath, setLogoPath] = useState<string | null>(null);
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
+  const sbAny = supabase as any; // profiles' new business/logo columns aren't in the generated types yet
 
   // Sync the edit fields whenever the profile loads/changes, not on every
   // render — otherwise typing would get clobbered by the next refetch.
   useEffect(() => {
     if (!profile) return;
-    setEditName(profile.display_name || "");
-    setEditTrades(profile.trade_type ? profile.trade_type.split(",").filter(Boolean) : []);
+    const p = profile as any;
+    setEditName(p.display_name || "");
+    setEditTrades(p.trade_type ? p.trade_type.split(",").filter(Boolean) : []);
+    setEditBusinessName(p.business_name || "");
+    setEditLicenceNumber(p.licence_number || "");
+    setLogoPath(p.logo_storage_path || null);
   }, [profile]);
+
+  // Resolve the logo's signed URL for preview whenever the stored path changes.
+  useEffect(() => {
+    if (!logoPath) { setLogoUrl(null); return; }
+    let cancelled = false;
+    supabase.storage.from("business-logos").createSignedUrl(logoPath, 3600).then(({ data }) => {
+      if (!cancelled && data?.signedUrl) setLogoUrl(data.signedUrl);
+    });
+    return () => { cancelled = true; };
+  }, [logoPath]);
 
   const toggleEditTrade = (id: string) => {
     setEditTrades((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]));
+  };
+
+  const onLogoPicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !user) return;
+    setUploadingLogo(true);
+    try {
+      const blob = await compressImageToBlob(file, 512, 0.85);
+      const path = `${user.id}/logo.jpg`;
+      const { error } = await supabase.storage.from("business-logos").upload(path, blob, { contentType: "image/jpeg", upsert: true });
+      if (error) throw error;
+      setLogoPath(path);
+      toast.success("Logo uploaded — tap Save changes to keep it.");
+    } catch (e) {
+      console.error("[profile] logo upload error:", e);
+      toast.error("Couldn't upload that logo.");
+    } finally {
+      setUploadingLogo(false);
+    }
   };
 
   const saveProfileEdits = async () => {
     if (!user || savingProfile) return;
     setSavingProfile(true);
     try {
-      const { error } = await supabase
+      const { error } = await sbAny
         .from("profiles")
-        .update({ display_name: editName.trim() || null, trade_type: editTrades.join(",") })
+        .update({
+          display_name: editName.trim() || null,
+          trade_type: editTrades.join(","),
+          business_name: editBusinessName.trim() || null,
+          licence_number: editLicenceNumber.trim() || null,
+          logo_storage_path: logoPath,
+        })
         .eq("user_id", user.id);
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ["profile"] });
@@ -406,6 +453,56 @@ const Profile = () => {
                               {label}
                             </Badge>
                           ))}
+                        </div>
+                      </div>
+                      <Separator />
+                      <p className="text-xs font-semibold text-foreground -mb-1">Used on Site Audit reports</p>
+                      <div>
+                        <Label className="text-xs">Business name</Label>
+                        <Input
+                          className="h-11 mt-1"
+                          placeholder="Falls back to your name if left blank"
+                          value={editBusinessName}
+                          onChange={(e) => setEditBusinessName(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Licence number</Label>
+                        <Input
+                          className="h-11 mt-1"
+                          placeholder="e.g. EC 123456"
+                          value={editLicenceNumber}
+                          onChange={(e) => setEditLicenceNumber(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Business logo</Label>
+                        <div className="flex items-center gap-3 mt-1.5">
+                          <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-lg border border-border bg-muted/30 overflow-hidden">
+                            {logoUrl ? (
+                              <img src={logoUrl} alt="Business logo" className="h-full w-full object-contain" />
+                            ) : (
+                              <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                            )}
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <label>
+                              <input type="file" accept="image/*" className="hidden" onChange={onLogoPicked} disabled={uploadingLogo} />
+                              <span className="inline-flex h-8 cursor-pointer items-center rounded-md border border-input bg-background px-3 text-xs font-medium hover:bg-secondary">
+                                {uploadingLogo ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : null}
+                                {logoPath ? "Replace logo" : "Upload logo"}
+                              </span>
+                            </label>
+                            {logoPath && (
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive"
+                                onClick={() => { setLogoPath(null); setLogoUrl(null); }}
+                              >
+                                <X className="h-3 w-3" /> Remove
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                       <Button className="w-full h-11 gap-1.5" disabled={savingProfile} onClick={saveProfileEdits}>

@@ -1,16 +1,20 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Camera, Loader2, Send, ClipboardCheck, Trash2 } from "lucide-react";
+import { ArrowLeft, Camera, Loader2, Send, ClipboardCheck, Trash2, FileDown, CheckSquare, Square } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
+import { useProfile } from "@/hooks/useData";
 import { supabase } from "@/integrations/supabase/client";
 import { compressImageToBlob } from "@/lib/image";
 import {
   summariseAudit, sortForReport, SEVERITY_META, getPhotoLabels, type AuditPhoto, type Severity,
 } from "@/lib/audit";
+import { generateAuditReportPdf, urlToBase64, type ReportPhoto } from "@/lib/auditReport";
 
 const sb = supabase as any;
 
@@ -25,6 +29,7 @@ const AuditDetail = () => {
   const { id: auditId } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { data: profile } = useProfile();
   const [audit, setAudit] = useState<any>(null);
   const [photos, setPhotos] = useState<AuditPhoto[]>([]);
   const [urls, setUrls] = useState<Record<string, string>>({});
@@ -35,6 +40,18 @@ const AuditDetail = () => {
   const [busy, setBusy] = useState(false);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Sign-off + report
+  const [signName, setSignName] = useState("");
+  const [signLicence, setSignLicence] = useState("");
+  const [signConfirmed, setSignConfirmed] = useState(false);
+  const [generatingReport, setGeneratingReport] = useState(false);
+  useEffect(() => {
+    if (!profile) return;
+    const p = profile as any;
+    setSignName((prev) => prev || p.display_name || "");
+    setSignLicence((prev) => prev || p.licence_number || "");
+  }, [profile]);
 
   const load = useCallback(async () => {
     const [{ data: a }, { data: p }] = await Promise.all([
@@ -93,6 +110,13 @@ const AuditDetail = () => {
       if (signed?.signedUrl) setUrls((u) => ({ ...u, [row.id]: signed.signedUrl }));
       setPhotos((prev) => [...prev, row as AuditPhoto]);
       analyse(row.id); // kick analysis immediately
+
+      // New content invalidates any existing sign-off — it no longer covers
+      // everything in the report.
+      if (audit?.signed_off_at) {
+        await sb.from("audits").update({ signed_off_by: null, signed_off_licence: null, signed_off_at: null }).eq("id", auditId);
+        setAudit((a: any) => a ? { ...a, signed_off_by: null, signed_off_licence: null, signed_off_at: null } : a);
+      }
     } catch (e) {
       console.error(e);
       toast.error("Couldn't add that photo.");
@@ -108,6 +132,61 @@ const AuditDetail = () => {
     setPhotos((prev) => prev.map((p) => p.id === photoId ? { ...p, user_notes: notes } : p));
     setAnswers((a) => ({ ...a, [photoId]: "" }));
     analyse(photoId); // re-run with the answers folded in
+  };
+
+  const buildAndDownloadReport = async (auditForReport: any) => {
+    setGeneratingReport(true);
+    try {
+      const p = (profile as any) || {};
+      let logoBase64: string | null = null;
+      if (p.logo_storage_path) {
+        const { data: signed } = await supabase.storage.from("business-logos").createSignedUrl(p.logo_storage_path, 3600);
+        if (signed?.signedUrl) logoBase64 = await urlToBase64(signed.signedUrl);
+      }
+
+      const reportPhotos: ReportPhoto[] = await Promise.all(
+        photos.map(async (photo) => ({
+          ...photo,
+          imageBase64: urls[photo.id] ? await urlToBase64(urls[photo.id]) : null,
+        }))
+      );
+
+      const doc = await generateAuditReportPdf({
+        audit: auditForReport,
+        photos: reportPhotos,
+        business: {
+          name: p.business_name || p.display_name || null,
+          licenceNumber: p.licence_number || null,
+          logoBase64,
+        },
+      });
+      const filename = `${(auditForReport.title || "audit-report").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.pdf`;
+      doc.save(filename);
+    } catch (e) {
+      console.error("[audit] report generation failed:", e);
+      toast.error("Couldn't generate the report — please try again.");
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
+  const signOffAndDownload = async () => {
+    if (!signName.trim() || !signConfirmed || generatingReport) return;
+    setGeneratingReport(true);
+    try {
+      const signed_off_at = new Date().toISOString();
+      const patch = { signed_off_by: signName.trim(), signed_off_licence: signLicence.trim() || null, signed_off_at };
+      const { error } = await sb.from("audits").update(patch).eq("id", auditId);
+      if (error) throw error;
+      const updatedAudit = { ...audit, ...patch };
+      setAudit(updatedAudit);
+      await buildAndDownloadReport(updatedAudit);
+      toast.success("Signed off and downloaded");
+    } catch (e) {
+      console.error("[audit] sign-off failed:", e);
+      toast.error("Couldn't sign off — please try again.");
+      setGeneratingReport(false);
+    }
   };
 
   const deleteAudit = async () => {
@@ -263,10 +342,66 @@ const AuditDetail = () => {
         </div>
 
         {photos.length > 0 && (
-          <p className="text-[11px] text-muted-foreground text-center mt-6 flex items-center justify-center gap-1">
-            <ClipboardCheck className="h-3 w-3" />
-            AI-assisted reference only — a licensed person must verify and sign off on site.
-          </p>
+          <>
+            <p className="text-[11px] text-muted-foreground text-center mt-6 flex items-center justify-center gap-1">
+              <ClipboardCheck className="h-3 w-3" />
+              AI-assisted reference only — a licensed person must verify and sign off on site.
+            </p>
+
+            <Card className="p-4 mt-4">
+              {audit?.signed_off_at ? (
+                <>
+                  <p className="text-xs font-semibold text-foreground">
+                    Signed off by {audit.signed_off_by} on{" "}
+                    {new Date(audit.signed_off_at).toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" })}
+                  </p>
+                  <Button
+                    className="w-full gap-1.5 mt-3"
+                    variant="outline"
+                    disabled={generatingReport}
+                    onClick={() => buildAndDownloadReport(audit)}
+                  >
+                    {generatingReport ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
+                    Re-download report
+                  </Button>
+                  <p className="text-[11px] text-muted-foreground mt-2">Adding another photo will require signing off again.</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-bold text-foreground mb-1">Sign off & download report</p>
+                  <p className="text-xs text-muted-foreground mb-3">
+                    Confirm you've personally verified this on site before generating the PDF.
+                  </p>
+                  <div className="space-y-2.5">
+                    <div>
+                      <Label className="text-xs">Your name</Label>
+                      <Input className="h-11 mt-1" value={signName} onChange={(e) => setSignName(e.target.value)} />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Licence number</Label>
+                      <Input className="h-11 mt-1" value={signLicence} onChange={(e) => setSignLicence(e.target.value)} />
+                    </div>
+                    <button
+                      type="button"
+                      className="flex items-center gap-2 text-xs text-foreground"
+                      onClick={() => setSignConfirmed((v) => !v)}
+                    >
+                      {signConfirmed ? <CheckSquare className="h-4 w-4 text-primary flex-shrink-0" /> : <Square className="h-4 w-4 text-muted-foreground flex-shrink-0" />}
+                      <span className="text-left">I confirm I have personally verified this installation on site</span>
+                    </button>
+                    <Button
+                      className="w-full gap-1.5"
+                      disabled={!signName.trim() || !signConfirmed || generatingReport}
+                      onClick={signOffAndDownload}
+                    >
+                      {generatingReport ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
+                      Sign off & download report
+                    </Button>
+                  </div>
+                </>
+              )}
+            </Card>
+          </>
         )}
       </div>
     </div>

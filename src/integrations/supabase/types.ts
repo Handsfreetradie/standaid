@@ -12,8 +12,155 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.4"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
+      ai_usage: {
+        Row: {
+          created_at: string
+          id: string
+          kind: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          kind: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          kind?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      audit_photos: {
+        Row: {
+          assessments: Json
+          audit_id: string
+          citations: Json
+          created_at: string
+          id: string
+          label: string | null
+          needs_to_know: Json
+          severity: string | null
+          status: string
+          storage_path: string
+          updated_at: string
+          user_id: string
+          user_notes: string | null
+          what_i_see: string | null
+        }
+        Insert: {
+          assessments?: Json
+          audit_id: string
+          citations?: Json
+          created_at?: string
+          id?: string
+          label?: string | null
+          needs_to_know?: Json
+          severity?: string | null
+          status?: string
+          storage_path: string
+          updated_at?: string
+          user_id: string
+          user_notes?: string | null
+          what_i_see?: string | null
+        }
+        Update: {
+          assessments?: Json
+          audit_id?: string
+          citations?: Json
+          created_at?: string
+          id?: string
+          label?: string | null
+          needs_to_know?: Json
+          severity?: string | null
+          status?: string
+          storage_path?: string
+          updated_at?: string
+          user_id?: string
+          user_notes?: string | null
+          what_i_see?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "audit_photos_audit_id_fkey"
+            columns: ["audit_id"]
+            isOneToOne: false
+            referencedRelation: "audits"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      audits: {
+        Row: {
+          created_at: string
+          id: string
+          signed_off_at: string | null
+          signed_off_by: string | null
+          signed_off_licence: string | null
+          site_address: string | null
+          status: string
+          title: string
+          trade: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          signed_off_at?: string | null
+          signed_off_by?: string | null
+          signed_off_licence?: string | null
+          site_address?: string | null
+          status?: string
+          title: string
+          trade?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          signed_off_at?: string | null
+          signed_off_by?: string | null
+          signed_off_licence?: string | null
+          site_address?: string | null
+          status?: string
+          title?: string
+          trade?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       capstone_exam_answers: {
         Row: {
           answered_at: string
@@ -97,6 +244,41 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      capstone_practice_questions: {
+        Row: {
+          created_at: string
+          id: string
+          kind: string
+          payload: Json
+          standard_id: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          kind: string
+          payload: Json
+          standard_id?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          kind?: string
+          payload?: Json
+          standard_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "capstone_practice_questions_standard_id_fkey"
+            columns: ["standard_id"]
+            isOneToOne: false
+            referencedRelation: "standards"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       capstone_questions: {
         Row: {
@@ -186,6 +368,24 @@ export type Database = {
           },
         ]
       }
+      capstone_usage: {
+        Row: {
+          created_at: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       citations: {
         Row: {
           chunk_content: string | null
@@ -237,38 +437,174 @@ export type Database = {
           },
         ]
       }
+      organization_members: {
+        Row: {
+          created_at: string
+          id: string
+          invited_email: string
+          joined_at: string | null
+          organization_id: string
+          role: string
+          status: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          invited_email: string
+          joined_at?: string | null
+          organization_id: string
+          role?: string
+          status?: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          invited_email?: string
+          joined_at?: string | null
+          organization_id?: string
+          role?: string
+          status?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_members_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      organizations: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          owner_user_id: string
+          seat_limit: number
+          stripe_subscription_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          owner_user_id: string
+          seat_limit?: number
+          stripe_subscription_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          owner_user_id?: string
+          seat_limit?: number
+          stripe_subscription_id?: string | null
+        }
+        Relationships: []
+      }
+      processing_jobs: {
+        Row: {
+          attempts: number
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          heartbeat_at: string | null
+          id: string
+          ocr_next_page: number | null
+          ocr_text: string | null
+          standard_id: string
+          started_at: string | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          attempts?: number
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          heartbeat_at?: string | null
+          id?: string
+          ocr_next_page?: number | null
+          ocr_text?: string | null
+          standard_id: string
+          started_at?: string | null
+          status?: string
+          user_id: string
+        }
+        Update: {
+          attempts?: number
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          heartbeat_at?: string | null
+          id?: string
+          ocr_next_page?: number | null
+          ocr_text?: string | null
+          standard_id?: string
+          started_at?: string | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "processing_jobs_standard_id_fkey"
+            columns: ["standard_id"]
+            isOneToOne: false
+            referencedRelation: "standards"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
+          business_name: string | null
           created_at: string
           daily_query_count: number
           daily_query_reset_at: string
           display_name: string | null
           email: string | null
           id: string
+          licence_number: string | null
+          logo_storage_path: string | null
+          pro_expires_at: string | null
+          stripe_customer_id: string | null
           subscription_tier: Database["public"]["Enums"]["subscription_tier"]
           trade_type: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
+          business_name?: string | null
           created_at?: string
           daily_query_count?: number
           daily_query_reset_at?: string
           display_name?: string | null
           email?: string | null
           id?: string
+          licence_number?: string | null
+          logo_storage_path?: string | null
+          pro_expires_at?: string | null
+          stripe_customer_id?: string | null
           subscription_tier?: Database["public"]["Enums"]["subscription_tier"]
           trade_type?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
+          business_name?: string | null
           created_at?: string
           daily_query_count?: number
           daily_query_reset_at?: string
           display_name?: string | null
           email?: string | null
           id?: string
+          licence_number?: string | null
+          logo_storage_path?: string | null
+          pro_expires_at?: string | null
+          stripe_customer_id?: string | null
           subscription_tier?: Database["public"]["Enums"]["subscription_tier"]
           trade_type?: string | null
           updated_at?: string
@@ -321,16 +657,182 @@ export type Database = {
         }
         Relationships: []
       }
+      query_feedback: {
+        Row: {
+          approved_for_training: boolean | null
+          created_at: string | null
+          id: string
+          query_id: string
+          question_embedding: string | null
+          question_text: string | null
+          rating: string
+          reviewed: boolean | null
+          reviewed_at: string | null
+          reviewer_notes: string | null
+          user_comment: string | null
+          user_id: string | null
+        }
+        Insert: {
+          approved_for_training?: boolean | null
+          created_at?: string | null
+          id?: string
+          query_id: string
+          question_embedding?: string | null
+          question_text?: string | null
+          rating: string
+          reviewed?: boolean | null
+          reviewed_at?: string | null
+          reviewer_notes?: string | null
+          user_comment?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          approved_for_training?: boolean | null
+          created_at?: string | null
+          id?: string
+          query_id?: string
+          question_embedding?: string | null
+          question_text?: string | null
+          rating?: string
+          reviewed?: boolean | null
+          reviewed_at?: string | null
+          reviewer_notes?: string | null
+          user_comment?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "query_feedback_query_id_fkey"
+            columns: ["query_id"]
+            isOneToOne: false
+            referencedRelation: "bad_responses_for_review"
+            referencedColumns: ["query_id"]
+          },
+          {
+            foreignKeyName: "query_feedback_query_id_fkey"
+            columns: ["query_id"]
+            isOneToOne: false
+            referencedRelation: "query_log"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      query_log: {
+        Row: {
+          confidence_score: number | null
+          created_at: string | null
+          id: string
+          model_used: string | null
+          needs_review: boolean | null
+          query_text: string
+          response_text: string | null
+          response_time_ms: number | null
+          retrieved_chunk_count: number | null
+          retrieved_chunk_ids: string[] | null
+          standard_id: string | null
+          trade: string | null
+          user_id: string | null
+          validation_issues: Json | null
+        }
+        Insert: {
+          confidence_score?: number | null
+          created_at?: string | null
+          id?: string
+          model_used?: string | null
+          needs_review?: boolean | null
+          query_text: string
+          response_text?: string | null
+          response_time_ms?: number | null
+          retrieved_chunk_count?: number | null
+          retrieved_chunk_ids?: string[] | null
+          standard_id?: string | null
+          trade?: string | null
+          user_id?: string | null
+          validation_issues?: Json | null
+        }
+        Update: {
+          confidence_score?: number | null
+          created_at?: string | null
+          id?: string
+          model_used?: string | null
+          needs_review?: boolean | null
+          query_text?: string
+          response_text?: string | null
+          response_time_ms?: number | null
+          retrieved_chunk_count?: number | null
+          retrieved_chunk_ids?: string[] | null
+          standard_id?: string | null
+          trade?: string | null
+          user_id?: string | null
+          validation_issues?: Json | null
+        }
+        Relationships: []
+      }
+      question_cache: {
+        Row: {
+          created_at: string
+          hit_count: number
+          id: string
+          last_used_at: string
+          organization_id: string
+          question: string
+          question_embedding: string
+          response: Json
+          standard_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          hit_count?: number
+          id?: string
+          last_used_at?: string
+          organization_id: string
+          question: string
+          question_embedding: string
+          response: Json
+          standard_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          hit_count?: number
+          id?: string
+          last_used_at?: string
+          organization_id?: string
+          question?: string
+          question_embedding?: string
+          response?: Json
+          standard_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "question_cache_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "question_cache_standard_id_fkey"
+            columns: ["standard_id"]
+            isOneToOne: false
+            referencedRelation: "standards"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       standard_chunks: {
         Row: {
           chunk_index: number
           clause_number: string | null
           clause_title: string | null
           content: string
+          context_generated: boolean
           created_at: string
           embedding: string | null
+          fts: unknown
           id: string
+          index_attempts: number
           is_indexed: boolean
+          organization_id: string | null
           page_number: number | null
           standard_id: string
           user_id: string
@@ -340,10 +842,14 @@ export type Database = {
           clause_number?: string | null
           clause_title?: string | null
           content: string
+          context_generated?: boolean
           created_at?: string
           embedding?: string | null
+          fts?: unknown
           id?: string
+          index_attempts?: number
           is_indexed?: boolean
+          organization_id?: string | null
           page_number?: number | null
           standard_id: string
           user_id: string
@@ -353,17 +859,130 @@ export type Database = {
           clause_number?: string | null
           clause_title?: string | null
           content?: string
+          context_generated?: boolean
           created_at?: string
           embedding?: string | null
+          fts?: unknown
           id?: string
+          index_attempts?: number
           is_indexed?: boolean
+          organization_id?: string | null
           page_number?: number | null
           standard_id?: string
           user_id?: string
         }
         Relationships: [
           {
+            foreignKeyName: "standard_chunks_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "standard_chunks_standard_id_fkey"
+            columns: ["standard_id"]
+            isOneToOne: false
+            referencedRelation: "standards"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      standard_figures: {
+        Row: {
+          caption: string | null
+          created_at: string | null
+          figure_number: string
+          id: string
+          image_url: string
+          organization_id: string | null
+          page_number: number | null
+          standard_id: string
+          user_id: string
+        }
+        Insert: {
+          caption?: string | null
+          created_at?: string | null
+          figure_number: string
+          id?: string
+          image_url: string
+          organization_id?: string | null
+          page_number?: number | null
+          standard_id: string
+          user_id: string
+        }
+        Update: {
+          caption?: string | null
+          created_at?: string | null
+          figure_number?: string
+          id?: string
+          image_url?: string
+          organization_id?: string | null
+          page_number?: number | null
+          standard_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "standard_figures_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "standard_figures_standard_id_fkey"
+            columns: ["standard_id"]
+            isOneToOne: false
+            referencedRelation: "standards"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      standard_tables: {
+        Row: {
+          caption: string | null
+          created_at: string | null
+          id: string
+          image_url: string
+          organization_id: string | null
+          page_number: number | null
+          standard_id: string
+          table_number: string
+          user_id: string
+        }
+        Insert: {
+          caption?: string | null
+          created_at?: string | null
+          id?: string
+          image_url: string
+          organization_id?: string | null
+          page_number?: number | null
+          standard_id: string
+          table_number: string
+          user_id: string
+        }
+        Update: {
+          caption?: string | null
+          created_at?: string | null
+          id?: string
+          image_url?: string
+          organization_id?: string | null
+          page_number?: number | null
+          standard_id?: string
+          table_number?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "standard_tables_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "standard_tables_standard_id_fkey"
             columns: ["standard_id"]
             isOneToOne: false
             referencedRelation: "standards"
@@ -376,11 +995,13 @@ export type Database = {
           created_at: string
           extraction_quality_score: number | null
           extraction_status: Database["public"]["Enums"]["extraction_status"]
+          failed_chunks_count: number
           file_path: string | null
           file_url: string | null
           id: string
           indexed_chunks: number | null
           is_partial: boolean
+          organization_id: string | null
           standard_code: string | null
           title: string
           total_chunks: number | null
@@ -393,11 +1014,13 @@ export type Database = {
           created_at?: string
           extraction_quality_score?: number | null
           extraction_status?: Database["public"]["Enums"]["extraction_status"]
+          failed_chunks_count?: number
           file_path?: string | null
           file_url?: string | null
           id?: string
           indexed_chunks?: number | null
           is_partial?: boolean
+          organization_id?: string | null
           standard_code?: string | null
           title: string
           total_chunks?: number | null
@@ -410,11 +1033,13 @@ export type Database = {
           created_at?: string
           extraction_quality_score?: number | null
           extraction_status?: Database["public"]["Enums"]["extraction_status"]
+          failed_chunks_count?: number
           file_path?: string | null
           file_url?: string | null
           id?: string
           indexed_chunks?: number | null
           is_partial?: boolean
+          organization_id?: string | null
           standard_code?: string | null
           title?: string
           total_chunks?: number | null
@@ -423,13 +1048,197 @@ export type Database = {
           user_id?: string
           version?: string | null
         }
+        Relationships: [
+          {
+            foreignKeyName: "standards_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      subscriptions: {
+        Row: {
+          cancel_at_period_end: boolean
+          created_at: string
+          current_period_end: string | null
+          id: string
+          quantity: number
+          status: string
+          stripe_customer_id: string
+          stripe_subscription_id: string
+          tier: Database["public"]["Enums"]["subscription_tier"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          cancel_at_period_end?: boolean
+          created_at?: string
+          current_period_end?: string | null
+          id?: string
+          quantity?: number
+          status: string
+          stripe_customer_id: string
+          stripe_subscription_id: string
+          tier: Database["public"]["Enums"]["subscription_tier"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          cancel_at_period_end?: boolean
+          created_at?: string
+          current_period_end?: string | null
+          id?: string
+          quantity?: number
+          status?: string
+          stripe_customer_id?: string
+          stripe_subscription_id?: string
+          tier?: Database["public"]["Enums"]["subscription_tier"]
+          updated_at?: string
+          user_id?: string
+        }
         Relationships: []
+      }
+      trial_grants: {
+        Row: {
+          created_at: string
+          days: number
+          email: string
+          granted_by: string
+          id: string
+          redeemed_at: string | null
+          tier: Database["public"]["Enums"]["subscription_tier"]
+        }
+        Insert: {
+          created_at?: string
+          days: number
+          email: string
+          granted_by: string
+          id?: string
+          redeemed_at?: string | null
+          tier?: Database["public"]["Enums"]["subscription_tier"]
+        }
+        Update: {
+          created_at?: string
+          days?: number
+          email?: string
+          granted_by?: string
+          id?: string
+          redeemed_at?: string | null
+          tier?: Database["public"]["Enums"]["subscription_tier"]
+        }
+        Relationships: []
+      }
+      vision_batch_jobs: {
+        Row: {
+          batch_id: string
+          created_at: string
+          id: string
+          items: Json
+          standard_id: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          batch_id: string
+          created_at?: string
+          id?: string
+          items: Json
+          standard_id: string
+          status?: string
+          user_id: string
+        }
+        Update: {
+          batch_id?: string
+          created_at?: string
+          id?: string
+          items?: Json
+          standard_id?: string
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vision_batch_jobs_standard_id_fkey"
+            columns: ["standard_id"]
+            isOneToOne: false
+            referencedRelation: "standards"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
-      [_ in never]: never
+      bad_responses_for_review: {
+        Row: {
+          confidence_score: number | null
+          feedback_at: string | null
+          query_id: string | null
+          query_text: string | null
+          rating: string | null
+          response_text: string | null
+          reviewed: boolean | null
+          trade: string | null
+          user_comment: string | null
+          validation_issues: Json | null
+        }
+        Relationships: []
+      }
+      weekly_accuracy_summary: {
+        Row: {
+          accuracy_percentage: number | null
+          helpful_count: number | null
+          total_queries: number | null
+          trade: string | null
+          unclear_count: number | null
+          wrong_count: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
+      add_org_member: {
+        Args: { p_email: string; p_organization_id: string }
+        Returns: string
+      }
+      bump_question_cache_hit: { Args: { p_id: string }; Returns: undefined }
+      check_and_record_ai_usage: {
+        Args: {
+          p_kind: string
+          p_max: number
+          p_user_id: string
+          p_window_seconds: number
+        }
+        Returns: number
+      }
+      expire_promo_pro: { Args: never; Returns: undefined }
+      is_active_org_member: {
+        Args: { check_org_id: string; check_user_id: string }
+        Returns: boolean
+      }
+      is_any_active_org_member: {
+        Args: { check_user_id: string }
+        Returns: boolean
+      }
+      is_org_owner: {
+        Args: { check_org_id: string; check_user_id: string }
+        Returns: boolean
+      }
+      link_pending_org_membership: { Args: never; Returns: undefined }
+      match_cached_question: {
+        Args: {
+          match_organization_id: string
+          match_threshold?: number
+          max_age_days?: number
+          query_embedding: string
+        }
+        Returns: {
+          id: string
+          response: Json
+          similarity: number
+        }[]
+      }
       match_chunks: {
         Args: {
           match_count?: number
@@ -448,6 +1257,39 @@ export type Database = {
           standard_id: string
         }[]
       }
+      match_chunks_fts: {
+        Args: {
+          match_count?: number
+          match_user_id: string
+          query_text: string
+        }
+        Returns: {
+          chunk_index: number
+          clause_number: string
+          clause_title: string
+          content: string
+          id: string
+          page_number: number
+          rank: number
+          standard_id: string
+        }[]
+      }
+      match_feedback_corrections: {
+        Args: {
+          match_count?: number
+          match_threshold?: number
+          match_user_id: string
+          query_embedding: string
+        }
+        Returns: {
+          question_text: string
+          user_comment: string
+        }[]
+      }
+      poll_vision_batches: { Args: never; Returns: undefined }
+      remove_org_member: { Args: { p_member_id: string }; Returns: undefined }
+      resume_stalled_indexing: { Args: never; Returns: undefined }
+      sweep_stale_processing_jobs: { Args: never; Returns: undefined }
     }
     Enums: {
       extraction_status: "pending" | "processing" | "complete" | "failed"
@@ -577,6 +1419,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       extraction_status: ["pending", "processing", "complete", "failed"],
