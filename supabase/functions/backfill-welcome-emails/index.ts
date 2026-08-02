@@ -20,9 +20,9 @@ function buildWelcomeEmail(name: string): string {
       <td align="center">
         <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
           <tr>
-            <td style="background:#1a1a2e;padding:32px 40px;text-align:center;">
-              <p style="margin:0;font-size:28px;font-weight:800;color:#ffffff;letter-spacing:-0.5px;">StandAId</p>
-              <p style="margin:6px 0 0;font-size:13px;color:#a0a0c0;letter-spacing:0.5px;">AUSTRALIAN STANDARDS AI ASSISTANT</p>
+            <td style="background:#ffffff;padding:32px 40px;text-align:center;border-bottom:1px solid #f0f0f0;">
+              <p style="margin:0;font-size:28px;font-weight:800;color:#1a1a2e;letter-spacing:-0.5px;">StandAId</p>
+              <p style="margin:6px 0 0;font-size:13px;color:#888;letter-spacing:0.5px;">AUSTRALIAN STANDARDS AI ASSISTANT</p>
             </td>
           </tr>
           <tr>
