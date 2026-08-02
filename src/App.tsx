@@ -14,6 +14,7 @@ import Learn from "./pages/Learn";
 import Profile from "./pages/Profile";
 import Team from "./pages/Team";
 import Auth from "./pages/Auth";
+import AuthConfirm from "./pages/AuthConfirm";
 import StandardsUpload from "./pages/StandardsUpload";
 import Audits from "./pages/Audits";
 import AuditDetail from "./pages/AuditDetail";
@@ -89,6 +90,8 @@ const AppRoutes = () => (
     {/* Public legal pages — must be readable before signing up */}
     <Route path="/terms" element={<Legal kind="terms" />} />
     <Route path="/privacy" element={<Legal kind="privacy" />} />
+    {/* Public — reached from the confirmation email before the user is signed in */}
+    <Route path="/auth/confirm" element={<AuthConfirm />} />
     <Route
       path="/auth"
       element={
