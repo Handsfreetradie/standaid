@@ -104,7 +104,7 @@ function buildHtmlEmail(name: string): string {
           <!-- Footer -->
           <tr>
             <td style="padding:20px 40px;border-top:1px solid #f0f0f0;text-align:center;">
-              <p style="margin:0;font-size:11px;color:#bbb;">StandAId · Australian Standards AI Assistant · Perth, WA</p>
+              <p style="margin:0;font-size:11px;color:#bbb;">StandAId · Australian Standards AI Assistant</p>
               <p style="margin:4px 0 0;font-size:11px;color:#bbb;">Always verify AI answers against the original standard before relying on them on the job.</p>
             </td>
           </tr>
@@ -142,7 +142,7 @@ You're on the Pro plan during our beta — full access, no limits.
 Got feedback? Just reply to this email.
 
 ---
-StandAId · Australian Standards AI Assistant · Perth, WA
+StandAId · Australian Standards AI Assistant
 Always verify AI answers against the original standard before relying on them on the job.
 `;
 }
