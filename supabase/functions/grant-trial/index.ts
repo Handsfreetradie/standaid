@@ -68,7 +68,7 @@ function buildHtmlEmail(days: number, expiresLabel: string, isNewAccount: boolea
           </tr>
           <tr>
             <td style="padding:20px 40px;border-top:1px solid #f0f0f0;text-align:center;">
-              <p style="margin:0;font-size:11px;color:#bbb;">StandAId · Australian Standards AI Assistant · Perth, WA</p>
+              <p style="margin:0;font-size:11px;color:#bbb;">StandAId · Australian Standards AI Assistant</p>
             </td>
           </tr>
         </table>
@@ -83,7 +83,7 @@ function buildPlainTextEmail(days: number, expiresLabel: string, isNewAccount: b
   const body = isNewAccount
     ? `You've been given ${days} days of free Pro access to StandAId. Create your account with this email address and Pro access is already waiting for you.`
     : `You've been given ${days} days of free Pro access to StandAId. Just log back in with this email address — no card required.`;
-  return `You've got ${days} days free on StandAId\n\n${body}\n\nOpen the app: ${APP_URL}\n\nYour free access ends ${expiresLabel}.\n\nFound something broken? Rate any chat answer 👍/👎 to flag it — every bug report helps make StandAId better.\n\n---\nStandAId · Australian Standards AI Assistant · Perth, WA\n`;
+  return `You've got ${days} days free on StandAId\n\n${body}\n\nOpen the app: ${APP_URL}\n\nYour free access ends ${expiresLabel}.\n\nFound something broken? Rate any chat answer 👍/👎 to flag it — every bug report helps make StandAId better.\n\n---\nStandAId · Australian Standards AI Assistant\n`;
 }
 
 serve(async (req) => {
