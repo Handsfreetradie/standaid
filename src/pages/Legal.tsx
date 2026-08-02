@@ -20,7 +20,7 @@ const Legal = ({ kind }: LegalProps) => {
   const navigate = useNavigate();
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="h-full overflow-y-auto bg-background">
       <div className="mx-auto max-w-lg px-4 py-6 pb-16">
         <Button
           variant="ghost"
