@@ -2,6 +2,8 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getAllowedOrigin } from "../_shared/cors.ts";
 import { parseExtractedText } from "../process-standard/extraction.ts";
+import { detectTrade } from "../query/trade-detection.ts";
+import type { TradeType } from "../query/system-prompt.ts";
 
 type StandardChunk = {
   content: string;
@@ -255,6 +257,56 @@ async function callAI(
   return res;
 }
 
+// Appended to every system prompt whose output an apprentice reads directly.
+const APPRENTICE_STYLE = `
+Writing style (all output is read by Australian apprentices on a phone):
+- Plain English, short sentences, Australian spelling (colour, earthing, metre)
+- Explain any technical term the first time you use it
+- Use markdown: short headings, then real "- " bullet list items underneath each one for each fact/rule — do NOT write flowing paragraph sentences, one fact per bullet
+- Bold sparingly: at most one key term or value per line, never multiple bolded phrases in the same sentence — bold that loses its emphasis is as bad as no bold
+- Never use "---" horizontal-rule dividers between sections — heading spacing alone separates them; a divider after every section reads as a wall of clutter
+- Never use wide tables — use bullet lists instead
+- Put every formula and calculation step on its own line, always with units`;
+
+// Used by generate_calculation to phrase "Section C ... capstone exams" per trade.
+const TRADE_LABEL: Record<TradeType, string> = {
+  electrical: "electrical",
+  plumbing: "plumbing",
+  mechanical: "mechanical/HVAC",
+  structural: "structural",
+  building: "building",
+  general: "trade",
+};
+
+// Electrical keeps its own dedicated formula cheat-sheet (proven, unchanged).
+// Every other trade is steered towards topics that are genuinely calculation-
+// shaped in these standards, but the actual formulas/values must always come
+// from the retrieved standard content — never hand-authored here, since
+// getting a pipe-sizing or span-table figure wrong is worse than not asking.
+const CALC_TRADE_CONFIG: Record<TradeType, { topic: string; hint: string }> = {
+  electrical: { topic: "maximum demand voltage drop cable", hint: "" },
+  plumbing: {
+    topic: "pipe sizing flow rate loading units discharge pressure loss hot water gas consumption",
+    hint: "pipe or fixture sizing by loading units, discharge/vent sizing, hot water delivery time, pressure or head loss along a run, or gas pipe sizing by MJ/h consumption",
+  },
+  mechanical: {
+    topic: "duct sizing airflow ventilation rate fan pump",
+    hint: "duct or pipe sizing from airflow/velocity, fan or pump selection, or required ventilation rate for a room volume",
+  },
+  structural: {
+    topic: "span load beam footing bracing reinforcement",
+    hint: "span tables for beams or joists, footing sizing from load, or bracing unit calculations",
+  },
+  building: {
+    topic: "concrete volume slab reinforcement footing soil classification",
+    hint: "concrete volume or quantity takeoff, slab reinforcement spacing, or footing depth for a soil classification",
+  },
+  general: {
+    topic: "",
+    hint: "a realistic sizing, capacity or compliance calculation directly grounded in the standard content provided",
+  },
+};
+
 serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
   const corsHeaders = {
@@ -264,8 +316,11 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
+    const unauthorised = () => new Response(JSON.stringify({ error: "Session expired. Please sign in again." }), {
+      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) throw new Error("Missing auth");
+    if (!authHeader) return unauthorised();
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -274,9 +329,9 @@ serve(async (req) => {
     );
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) throw new Error("Unauthorized");
+    if (authError || !user) return unauthorised();
 
-    const { action, standardId, topic, difficulty, questionCount, examId, questionId, userAnswer, imageBase64, chunkId, examTopics, examPdfText, sectionFilter: rawSectionFilter, userClauseRef, practiceQuestionId } = await req.json();
+    const { action, standardId, topic, difficulty, questionCount, examId, questionId, questionIds, userAnswer, imageBase64, chunkId, examTopics, examPdfText, sectionFilter: rawSectionFilter, userClauseRef, practiceQuestionId } = await req.json();
     const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
     if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
 
@@ -301,6 +356,17 @@ serve(async (req) => {
     // Atomic: the RPC records usage under an advisory lock, so concurrent
     // requests can't race past the cap. Recorded at the gate (not post-call),
     // so this replaces the old scattered capstone_usage inserts.
+    // Validate photo input before the rate-limit gate so a rejected upload
+    // doesn't burn one of the user's hourly AI credits.
+    if (action === "analyze_photo") {
+      if (!imageBase64) throw new Error("No image provided");
+      if (imageBase64.length > 5_000_000) {
+        return new Response(JSON.stringify({ error: "That photo is too large even after compression. Try a lower-resolution photo or crop it to just your working." }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     // start_exam is not in AI_ACTIONS: it only calls Claude when the question
     // pool is short, so it invokes enforceAiRateLimit() itself at that point
     // rather than charging a slot for every exam start.
@@ -338,15 +404,18 @@ serve(async (req) => {
 
     // ── GENERATE QUIZ QUESTIONS ──
     if (action === "generate_questions") {
-      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 30, topic, sectionFilter);
+      // These three are independent — run them concurrently instead of
+      // serially so their round trips overlap instead of stacking up.
+      const [chunks, figureChunks, standardRes] = await Promise.all([
+        getChunksWithRecovery(supabase, standardId, authHeader, 30, topic, sectionFilter),
+        fetchDescribedFigures(supabase, standardId, 5, sectionFilter),
+        supabase.from("standards").select("title, standard_code").eq("id", standardId).single(),
+      ]);
 
       if (!chunks?.length) throw new Error("No content found for this standard");
 
-      // Append any described figure chunks so AI can reference diagrams in explanations
-      const figureChunks = await fetchDescribedFigures(supabase, standardId, 5, sectionFilter);
       const allChunks = [...chunks, ...figureChunks];
-
-      const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
+      const { data: standard } = standardRes;
 
       const count = questionCount || 5;
       const diff = difficulty || "medium";
@@ -355,7 +424,8 @@ serve(async (req) => {
       const aiResponse = await callAI({
           model: "claude-sonnet-4-6",
           messages: [
-            { role: "system", content: `You are an exam question generator for trade apprentices studying ${standard?.title || "industry standards"}. Generate practical, scenario-based multiple-choice questions ONLY from the provided standard content. Never invent facts. Frame questions as real on-site situations — e.g. "You are wiring a bathroom and...", "A customer asks you to install...", "On a job site you find...". Do NOT ask "What does Clause X.X say?" or "According to Clause X.X..." — test understanding and application, not clause memorisation. CRITICAL: Never mention any clause number in the question text. Clause numbers belong only in the explanation field.` },
+            { role: "system", content: `You are an exam question generator for trade apprentices studying ${standard?.title || "industry standards"}. Generate practical, scenario-based multiple-choice questions ONLY from the provided standard content. Never invent facts. Frame questions as real on-site situations — e.g. "You are wiring a bathroom and...", "A customer asks you to install...", "On a job site you find...". Do NOT ask "What does Clause X.X say?" or "According to Clause X.X..." — test understanding and application, not clause memorisation. CRITICAL: Never mention any clause number in the question text. Clause numbers belong only in the explanation field.
+Write questions and explanations in plain Australian English. Each explanation must be 1-3 short sentences that tell the apprentice WHY the right answer is right, quoting the key value or rule with units.` },
             { role: "user", content: `Generate ${count} ${diff}-difficulty multiple-choice questions from this standard content. ${topicFilter}\n\nStandard: ${standard?.standard_code || standard?.title}\n\nContent:\n${allChunks.map((c) => `[${c.clause_number || ""}] ${(c.content || "").slice(0, 700)}`).join("\n\n")}` },
           ],
           tools: [{
@@ -411,14 +481,6 @@ serve(async (req) => {
 
     // ── ANALYZE PHOTO OF HANDWRITTEN WORK ──
     if (action === "analyze_photo") {
-      if (!imageBase64) throw new Error("No image provided");
-
-      if (imageBase64.length > 5_000_000) {
-        return new Response(JSON.stringify({ error: "Image too large. Please use an image under 3.5MB." }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
       const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 20);
 
       if (!chunks?.length) throw new Error("No content found for this standard");
@@ -445,7 +507,8 @@ Transcribe the handwritten text word-for-word. Mark anything uncertain as [uncle
 **Feedback:**
 Only comment on content you clearly transcribed above — never on [unclear] sections.
 Reference specific clause numbers from the standard content provided.
-Max 4 bullet points. Be direct and honest about what is correct vs what needs work.`,
+Max 4 bullet points. Be direct and honest about what is correct vs what needs work.
+${APPRENTICE_STYLE}`,
             },
             {
               role: "user",
@@ -508,7 +571,8 @@ Rules:
 - Use simple, apprentice-friendly language
 - Reference the clause number
 - Do NOT give step-by-step instructions
-- Explain WHAT the clause means and WHY it matters`,
+- Explain WHAT the clause means and WHY it matters
+${APPRENTICE_STYLE}`,
             },
             {
               role: "user",
@@ -556,16 +620,20 @@ Rules:
       if (!existingQuestions || existingQuestions.length < count) {
         const limited = await enforceAiRateLimit();
         if (limited) return limited;
-        const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 30, undefined, sectionFilter);
+        const [chunks, figureChunks, standardRes] = await Promise.all([
+          getChunksWithRecovery(supabase, standardId, authHeader, 30, undefined, sectionFilter),
+          fetchDescribedFigures(supabase, standardId, 5, sectionFilter),
+          supabase.from("standards").select("title, standard_code").eq("id", standardId).single(),
+        ]);
         if (!chunks?.length) throw new Error("No content found for this standard. Please ensure it has been fully processed.");
-        const figureChunks = await fetchDescribedFigures(supabase, standardId, 5, sectionFilter);
         const allChunks = [...chunks, ...figureChunks];
-        const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
+        const { data: standard } = standardRes;
 
         const genResponse = await callAI({
           model: "claude-sonnet-4-6",
           messages: [
-            { role: "system", content: `You are an exam question generator for trade apprentices studying ${standard?.title || "industry standards"}. Generate practical, scenario-based multiple-choice questions ONLY from the provided standard content. Never invent facts. Frame questions as real on-site situations — e.g. "You are wiring a bathroom and...", "A customer asks you to install...", "On a job site you find...". Do NOT ask "What does Clause X.X say?" — test understanding and application, not clause memorisation. CRITICAL: Never mention any clause number in the question text. Clause numbers belong only in the explanation field.` },
+            { role: "system", content: `You are an exam question generator for trade apprentices studying ${standard?.title || "industry standards"}. Generate practical, scenario-based multiple-choice questions ONLY from the provided standard content. Never invent facts. Frame questions as real on-site situations — e.g. "You are wiring a bathroom and...", "A customer asks you to install...", "On a job site you find...". Do NOT ask "What does Clause X.X say?" — test understanding and application, not clause memorisation. CRITICAL: Never mention any clause number in the question text. Clause numbers belong only in the explanation field.
+Write questions and explanations in plain Australian English. Each explanation must be 1-3 short sentences that tell the apprentice WHY the right answer is right, quoting the key value or rule with units.` },
             { role: "user", content: `Generate ${count} medium-difficulty multiple-choice questions from this standard content.\n\nStandard: ${standard?.standard_code || standard?.title}\n\nContent:\n${allChunks.map((c) => `[${c.clause_number || ""}] ${(c.content || "").slice(0, 700)}`).join("\n\n")}` },
           ],
           tools: [{
@@ -624,6 +692,35 @@ Rules:
       const { data: exam, error: examErr } = await supabase.from("capstone_exams").insert({
         user_id: user.id, title: "Mock Exam", total_questions: shuffled.length,
         time_limit_seconds: timeLimit, status: "in_progress",
+      }).select().single();
+      if (examErr) throw examErr;
+
+      return new Response(JSON.stringify({ exam, questions: shuffled }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // ── START A TIMED MOCK EXAM FROM A SPECIFIC SET OF QUESTIONS ──
+    // Used by Exam Prep's "Take as a Timed Mock Exam" — reuses the exact same
+    // capstone_exams/timer/resume machinery as start_exam, just seeded from
+    // the questions already generated (and already saved to capstone_questions)
+    // for that uploaded past paper, instead of a fresh standard-wide pool.
+    // No AI call here, so this isn't in AI_ACTIONS / rate-limited.
+    if (action === "start_exam_from_questions") {
+      const ids: string[] = Array.isArray(questionIds) ? questionIds : [];
+      if (!ids.length) throw new Error("No questions provided");
+
+      const { data: ownQuestions, error: qErr } = await supabase
+        .from("capstone_questions")
+        .select("*")
+        .eq("user_id", user.id)
+        .in("id", ids);
+      if (qErr) throw qErr;
+      if (!ownQuestions?.length) throw new Error("Questions not found. Please generate exam prep again.");
+
+      const shuffled = shuffle([...ownQuestions]);
+
+      const { data: exam, error: examErr } = await supabase.from("capstone_exams").insert({
+        user_id: user.id, title: "Mock Exam — from your uploaded paper", total_questions: shuffled.length,
+        time_limit_seconds: 30 * 60, status: "in_progress",
       }).select().single();
       if (examErr) throw examErr;
 
@@ -703,7 +800,9 @@ Rules:
       const aiResponse = await callAI({
           model: "claude-sonnet-4-6",
           messages: [
-            { role: "system", content: `You are an expert trade educator. Create concise, apprentice-friendly study guides from standard content. Use clear headings, bullet points, and highlight key clause numbers. Only use information from the provided content.${figureNote}` },
+            { role: "system", content: `You are an expert trade educator. Create concise, apprentice-friendly study guides from standard content. Only use information from the provided content.${figureNote}
+Structure the guide so it's easy to revise from: start with a 2-3 sentence "What this covers" intro, then short sections with a heading each, then finish with a "Key things to remember" bullet list of the must-know values and rules.
+${APPRENTICE_STYLE}` },
             { role: "user", content: `Create a comprehensive study guide for apprentices from this standard. ${focusNote}\n\nStandard: ${standard?.standard_code || standard?.title}${sectionLabel}\n\nContent:\n${allChunks.map((c) => `[${c.clause_number || ""}${c.clause_title ? " - " + c.clause_title : ""}] ${(c.content || "").slice(0, 700)}`).join("\n\n")}` },
           ],
       }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 3000 });
@@ -769,14 +868,19 @@ Rules:
       let standardContext = "";
       let standardTitle = "General Trade Knowledge";
       if (standardId) {
-        const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 40);
+        // Independent lookups — run concurrently rather than stacking two
+        // sequential round trips before the (already slow) AI call starts.
+        const [chunks, standardRes] = await Promise.all([
+          getChunksWithRecovery(supabase, standardId, authHeader, 40),
+          supabase.from("standards").select("title, standard_code").eq("id", standardId).single(),
+        ]);
         if (chunks.length > 0) {
           // FIX 7 — cap standard context to prevent prompt overflow
           const rawContext = chunks.map((c) => `[${c.clause_number || ""}${c.clause_title ? " - " + c.clause_title : ""}] ${c.content}`).join("\n\n");
           const cappedContext = rawContext.slice(0, 10000);
           standardContext = `\n\nRELEVANT STANDARD CONTENT:\n${cappedContext}`;
         }
-        const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
+        const { data: standard } = standardRes;
         if (standard) standardTitle = standard.standard_code || standard.title;
       }
 
@@ -791,14 +895,16 @@ Rules:
 The student has provided either a previous exam paper, a list of expected exam topics, or both.
 Your job:
 1. Analyze the exam content/topics to identify the key areas being tested
-2. Generate a focused study guide covering those areas
+2. Generate a focused study guide covering those areas — one short heading per topic, then bullet points underneath it for the facts/rules/formulas of that topic, finishing each topic with a one-line clause reference. Do NOT write the topic as a paragraph of flowing sentences.
 3. Generate 10 practice questions in the style of the exam
 
 Rules:
 - If a previous exam is provided, match the question style and difficulty
 - Ground all content in the standard where possible, referencing clause numbers
 - Be apprentice-friendly: clear language, practical examples
-- Focus ONLY on the topics/areas identified`,
+- Focus ONLY on the topics/areas identified
+- Keep each question explanation to 1-3 short sentences an apprentice can follow
+${APPRENTICE_STYLE}`,
             },
             {
               role: "user",
@@ -867,20 +973,35 @@ Rules:
     // ── GENERATE CALCULATION QUESTION (Section C style) ──
     if (action === "generate_calculation") {
       const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
+      const trade: TradeType = detectTrade("", standard?.standard_code || standard?.title || null);
+      const isElectrical = trade === "electrical";
+      const tradeConfig = CALC_TRADE_CONFIG[trade];
 
-      // Fetch demand/installation chunks from primary standard (AS/NZS 3000)
-      const primaryChunks = await getChunksWithRecovery(supabase, standardId, authHeader, 25, "maximum demand voltage drop cable", sectionFilter);
-
-      // Auto-detect AS/NZS 3008 in user's library
-      const { data: as3008 } = await supabase
-        .from("standards")
-        .select("id")
-        .or("standard_code.ilike.%3008%,title.ilike.%3008%")
-        .limit(1)
-        .single();
+      // Independent lookups — run concurrently instead of stacking sequential
+      // round trips before the AI call even starts.
+      const [primaryChunks, candidates3008Res] = await Promise.all([
+        // Fetch calculation-relevant chunks from the selected standard, biased
+        // towards this trade's typical calculation topics.
+        getChunksWithRecovery(supabase, standardId, authHeader, 25, tradeConfig.topic, sectionFilter),
+        // Electrical only: auto-detect AS/NZS 3008 in the user's library for
+        // cable data — prefer the user's own most recent 3008 over org-shared
+        // copies so the source is deterministic when several are visible.
+        // Other trades' sizing tables live in their own selected standard
+        // (already covered by primaryChunks above), so skip this lookup.
+        isElectrical
+          ? supabase
+              .from("standards")
+              .select("id, user_id")
+              .or("standard_code.ilike.%3008%,title.ilike.%3008%")
+              .order("created_at", { ascending: false })
+              .limit(10)
+          : Promise.resolve({ data: null } as { data: { id: string; user_id: string }[] | null }),
+      ]);
+      const candidates3008 = candidates3008Res.data;
+      const as3008 = candidates3008?.find((s) => s.user_id === user.id) || candidates3008?.[0] || null;
 
       let cableChunks: StandardChunk[] = [];
-      if (as3008?.id) {
+      if (isElectrical && as3008?.id) {
         cableChunks = await fetchStandardChunks(supabase, as3008.id, 25);
       }
 
@@ -890,19 +1011,19 @@ Rules:
 70mm²: 0.571, 143A | 95mm²: 0.422, 174A | 120mm²: 0.336, 200A
 Voltage drop limit: 5% of supply voltage (AS/NZS 3000 Clause 3.6)`;
 
-      const context = [
-        primaryChunks.length > 0 ? `AS/NZS 3000 CONTENT:\n${primaryChunks.map((c) => `[${c.clause_number || ""}] ${(c.content || "").slice(0, 600)}`).join("\n\n")}` : "",
-        cableChunks.length > 0 ? `AS/NZS 3008 CABLE DATA:\n${cableChunks.map((c) => `[${c.clause_number || ""}] ${(c.content || "").slice(0, 600)}`).join("\n\n")}` : fallbackCableData,
-      ].filter(Boolean).join("\n\n---\n\n");
+      const primaryLabel = isElectrical ? "AS/NZS 3000 CONTENT" : `${standard?.standard_code || standard?.title || "STANDARD"} CONTENT`;
+      const contextParts = [
+        primaryChunks.length > 0 ? `${primaryLabel}:\n${primaryChunks.map((c) => `[${c.clause_number || ""}] ${(c.content || "").slice(0, 600)}`).join("\n\n")}` : "",
+      ];
+      // Only electrical gets the AS/NZS 3008 cable-data block (or its fallback)
+      // — other trades must never be handed electrical cable figures.
+      if (isElectrical) {
+        contextParts.push(cableChunks.length > 0 ? `AS/NZS 3008 CABLE DATA:\n${cableChunks.map((c) => `[${c.clause_number || ""}] ${(c.content || "").slice(0, 600)}`).join("\n\n")}` : fallbackCableData);
+      }
+      const context = contextParts.filter(Boolean).join("\n\n---\n\n");
 
-      const aiResponse = await callAI({
-        model: "claude-sonnet-4-6",
-        messages: [
-          {
-            role: "system",
-            content: `You generate Section C calculation questions for Australian TAFE electrical capstone exams. Create one realistic, practical calculation scenario.
-
-Key formulas:
+      const formulaOrGroundingBlock = isElectrical
+        ? `Key formulas:
 - Voltage drop: VD(V) = I × mV/A·m × L / 1000; VD% = (VD / V_supply) × 100
 - Single-phase V_supply = 230V; three-phase V_supply = 230V phase (use 400V only for line voltage)
 - Maximum demand: total load groups × demand factors from AS/NZS 3000
@@ -913,9 +1034,32 @@ Question types (pick one):
 1. voltage_drop — given cable, current, length → calculate VD% and state compliance
 2. maximum_demand — given load schedule → calculate maximum demand per phase
 3. cable_sizing — given load, installation conditions → select minimum cable size
-4. fault_current — given supply impedance, cable data → calculate fault level
+4. fault_current — given supply impedance, cable data → calculate fault level`
+        : `Do not use any formula, table value, or standard reference from your own general knowledge — never guess a value. Every formula, lookup value, and clause/table reference in given_data, model_solution and key_answers must come directly from the STANDARD CONTENT provided below, quoting the real clause/table numbers exactly as they appear in it. If the provided content doesn't contain enough information to build a genuine, correctly-sourced calculation, pick a simpler calculation that the content does support rather than guessing.
 
-Use realistic Australian values. Show clear step-by-step working in the model solution.`,
+Typical calculation topics for this trade: ${tradeConfig.hint}.
+Pick a calculation_type slug that matches what this specific question actually tests (short, snake_case, e.g. pipe_sizing, duct_sizing, load_calculation) — don't force it into an electrical category.`;
+
+      const aiResponse = await callAI({
+        model: "claude-sonnet-4-6",
+        messages: [
+          {
+            role: "system",
+            content: `You generate Section C calculation questions for Australian TAFE ${TRADE_LABEL[trade]} capstone exams. Create one realistic, practical calculation scenario.
+
+${formulaOrGroundingBlock}
+
+Use realistic Australian values.
+
+scenario field: 1-2 short, natural sentences setting the job-site scene — who's doing the job, where, and what they're installing. Write it like you're telling a mate what the job is, not a spec sheet. Do NOT list exact figures (currents, lengths, temperatures, cable types, table/column references) in the scenario — every number and technical detail belongs in given_data instead, so nothing is repeated between the two.
+
+given_data field — split into two kinds of line, and never blur them together:
+1. Job parameters (give the actual value): the inputs that describe the job — e.g. supply voltage, load/design current, breaker rating, cable/pipe/duct type, installation method, ambient temperature, grouping, route length. State them plainly, e.g. "Design current: 28 A".
+2. Standard table values (current-carrying capacity, derating factors, mV/A·m voltage-drop figures, or this trade's equivalent sizing/capacity figures) — this is a lookup exercise, so NEVER state the actual number. Instead point the apprentice at exactly where to find it, using the real table/column numbers from the standard content provided (never invent one), e.g. "Current-carrying capacity: look up AS/NZS 3008.1.1 Table 13, Column 4". Do not add the resulting value in brackets afterwards.
+
+model_solution and key_answers must still use the real table values from the standard content, worked through step by step, so grading is accurate — the apprentice just isn't handed those values up front, they have to look them up like in a real exam.
+The model_solution must be numbered steps an apprentice can follow along with on paper: state the formula first, then substitute the numbers, then the result — one line each, always with units — and end with a plain-English sentence stating the final answer and whether it complies.
+${APPRENTICE_STYLE}`,
           },
           {
             role: "user",
@@ -930,7 +1074,7 @@ Use realistic Australian values. Show clear step-by-step working in the model so
             parameters: {
               type: "object",
               properties: {
-                calculation_type: { type: "string", enum: ["voltage_drop", "maximum_demand", "cable_sizing", "fault_current"] },
+                calculation_type: { type: "string", description: "Short snake_case label for what this calculation tests, matched to this specific question, e.g. voltage_drop, pipe_sizing, duct_sizing, load_calculation." },
                 scenario: { type: "string" },
                 given_data: { type: "array", items: { type: "string" } },
                 question_parts: { type: "array", items: { type: "string" } },
@@ -950,14 +1094,34 @@ Use realistic Australian values. Show clear step-by-step working in the model so
       const aiData = await aiResponse.json();
       const question = getToolInput(aiData);
       if (!question) throw new Error("No calculation generated");
+
+      // The question often tells the apprentice to "use Table 42" etc, but
+      // that table only exists inside the AS/NZS 3008 PDF — with no link,
+      // the apprentice has no way to actually look it up. Pull page numbers
+      // for any table mentioned so the client can open the PDF straight to it.
+      let tableReferences: { table_number: string; standard_id: string; page_number: number; caption: string | null }[] = [];
+      const tableSearchStandardIds = [standardId, as3008?.id].filter(Boolean) as string[];
+      if (tableSearchStandardIds.length > 0) {
+        const mentionedText = [question.scenario, ...(question.given_data || []), ...(question.question_parts || [])].join("\n");
+        const tableNumbers = [...new Set([...mentionedText.matchAll(/\bTable\s+([A-Z]?\d+(?:\.\d+)*)\b/gi)].map((m) => m[1]))];
+        if (tableNumbers.length > 0) {
+          const { data: tableRows } = await supabase
+            .from("standard_tables")
+            .select("table_number, standard_id, page_number, caption")
+            .in("standard_id", tableSearchStandardIds)
+            .in("table_number", tableNumbers);
+          if (tableRows) tableReferences = tableRows;
+        }
+      }
+
       // Persist so grade_calculation marks against the server's copy of the
       // question and model solution, not client-supplied grading data.
       const { data: saved, error: saveErr } = await supabase
         .from("capstone_practice_questions")
-        .insert({ user_id: user.id, standard_id: standardId, kind: "calculation", payload: question })
+        .insert({ user_id: user.id, standard_id: standardId, kind: "calculation", payload: { ...question, table_references: tableReferences } })
         .select("id").single();
       if (saveErr) throw saveErr;
-      return new Response(JSON.stringify({ question: { ...question, id: saved.id } }), {
+      return new Response(JSON.stringify({ question: { ...question, table_references: tableReferences, id: saved.id } }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -979,10 +1143,10 @@ Use realistic Australian values. Show clear step-by-step working in the model so
         messages: [
           {
             role: "system",
-            content: `You are marking a Section C calculation from an Australian electrical capstone exam.
+            content: `You are marking a Section C calculation from an Australian trade capstone exam.
 Award method marks if the correct formula and approach is used, even with minor arithmetic errors.
 Award answer marks only for the correct final value(s).
-Give specific, helpful feedback.`,
+Feedback rules: 2-4 short sentences in plain Australian English, written directly to the apprentice ("you"). Say specifically what they got right, then exactly where their working went wrong (name the step and the correct value with units). Encouraging but honest — never vague praise.`,
           },
           {
             role: "user",
@@ -1021,13 +1185,15 @@ Give specific, helpful feedback.`,
 
     // ── GENERATE SHORT ANSWER QUESTIONS (Section B style) ──
     if (action === "generate_short_answer") {
-      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 40, topic, sectionFilter);
+      const [chunks, figureChunks, standardRes] = await Promise.all([
+        getChunksWithRecovery(supabase, standardId, authHeader, 40, topic, sectionFilter),
+        fetchDescribedFigures(supabase, standardId, 5, sectionFilter),
+        supabase.from("standards").select("title, standard_code").eq("id", standardId).single(),
+      ]);
       if (!chunks?.length) throw new Error("No content found for this standard");
 
-      const figureChunks = await fetchDescribedFigures(supabase, standardId, 5, sectionFilter);
       const allChunks = [...chunks, ...figureChunks];
-
-      const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
+      const { data: standard } = standardRes;
       const count = questionCount || 5;
 
       const aiResponse = await callAI({
@@ -1116,7 +1282,8 @@ CRITICAL: Never mention any clause number in the question text itself. Clause nu
 - Award 2 marks: answer is substantially correct AND clause reference matches the correct clause
 - Award 1 mark: answer is correct but clause reference is wrong or missing
 - Award 0 marks: answer is wrong or insufficient
-Be strict but fair. Accept minor wording differences if the meaning is correct. Always give specific feedback on what was right or wrong.`,
+Be strict but fair. Accept minor wording differences if the meaning is correct.
+Feedback rules: 1-3 short sentences in plain Australian English, written directly to the apprentice ("you"). State what was right, what was missing or wrong, and the correct clause number. No jargon without a quick explanation.`,
           },
           {
             role: "user",

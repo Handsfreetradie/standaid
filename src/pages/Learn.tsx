@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { GraduationCap, BookOpen, ClipboardList, FileText, ChevronRight, Loader2, CheckCircle2, XCircle, ArrowLeft, Trophy, Clock, Camera, Target, Upload, Calculator, ExternalLink } from "lucide-react";
+import { GraduationCap, BookOpen, ClipboardList, FileText, ChevronRight, Loader2, CheckCircle2, XCircle, ArrowLeft, Trophy, Clock, Camera, Target, Upload, Calculator, ExternalLink, HelpCircle } from "lucide-react";
 import { PDFViewerModal } from "@/components/PDFViewerModal";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -18,13 +18,14 @@ type Mode = "menu" | "quiz" | "exam" | "exam-active" | "exam-result" | "study-gu
 
 interface CalculationQuestion {
   id: string;
-  calculation_type: "voltage_drop" | "maximum_demand" | "cable_sizing" | "fault_current";
+  calculation_type: string;
   scenario: string;
   given_data: string[];
   question_parts: string[];
   model_solution: string;
   total_marks: number;
   key_answers: string[];
+  table_references?: { table_number: string; standard_id: string; page_number: number; caption: string | null }[];
 }
 
 interface ShortAnswerQuestion {
@@ -43,6 +44,47 @@ interface ShortAnswerResult {
   model_answer: string;
   clause_reference: string;
 }
+
+// Minimal in-progress mock exam snapshot, kept in sessionStorage so iOS Safari
+// killing the tab mid-exam doesn't lose the apprentice's progress.
+interface SavedExam {
+  examId: string;
+  standardId: string;
+  questions: Question[];
+  currentQ: number;
+  score: { correct: number; total: number };
+  endsAt: number;
+  startedAt: number;
+}
+
+const EXAM_STORAGE_KEY = "standaid-active-exam";
+
+const readSavedExam = (): SavedExam | null => {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(EXAM_STORAGE_KEY) || "null");
+    if (saved?.examId && saved.questions?.length && saved.endsAt > Date.now()) return saved;
+  } catch { /* corrupted entry — fall through and clear */ }
+  sessionStorage.removeItem(EXAM_STORAGE_KEY);
+  return null;
+};
+
+const updateSavedExam = (patch: Partial<SavedExam>) => {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(EXAM_STORAGE_KEY) || "null");
+    if (saved?.examId) sessionStorage.setItem(EXAM_STORAGE_KEY, JSON.stringify({ ...saved, ...patch }));
+  } catch { /* storage unavailable — resume just won't be offered */ }
+};
+
+const formatTimeLeft = (seconds: number) => {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+};
+
+// Fallback label for calculation_type slugs not covered by CALC_TYPE_LABELS
+// (any trade other than electrical) — "pipe_sizing" -> "Pipe Sizing".
+const humanizeCalcType = (type: string) =>
+  type.split("_").filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
 
 interface Question {
   id: string;
@@ -117,7 +159,7 @@ const Learn = () => {
   const [loading, setLoading] = useState(false);
   const [sections, setSections] = useState<{ prefix: string; title: string }[]>([]);
   const [selectedSection, setSelectedSection] = useState("");
-  const [pdfViewer, setPdfViewer] = useState<{ clauseNumber: string; standardId: string } | null>(null);
+  const [pdfViewer, setPdfViewer] = useState<{ clauseNumber: string; standardId: string; pageNumber?: number } | null>(null);
 
   // Quiz state
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -130,12 +172,17 @@ const Learn = () => {
   const [examId, setExamId] = useState<string | null>(null);
   const [examStartTime, setExamStartTime] = useState<number>(0);
   const [examResult, setExamResult] = useState<any>(null);
+  const [examEndsAt, setExamEndsAt] = useState<number | null>(null);
+  const [examTimeLeft, setExamTimeLeft] = useState<number | null>(null);
+  const [resumableExam, setResumableExam] = useState<SavedExam | null>(null);
 
   // Study guide state
   const [guides, setGuides] = useState<any[]>([]);
   const [activeGuide, setActiveGuide] = useState<any>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [photoAnalysis, setPhotoAnalysis] = useState<string | null>(null);
+  const [photoBase64, setPhotoBase64] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState(false);
 
   // Calculation state
   const [calcQuestion, setCalcQuestion] = useState<CalculationQuestion | null>(null);
@@ -155,12 +202,36 @@ const Learn = () => {
   // Exam prep state
   const [examPrepTopics, setExamPrepTopics] = useState("");
   const [examPrepPdfText, setExamPrepPdfText] = useState<string | null>(null);
+  const [extractingPdf, setExtractingPdf] = useState(false);
   const [examPrepPdfName, setExamPrepPdfName] = useState<string | null>(null);
   const [examPrepResult, setExamPrepResult] = useState<any>(null);
 
   useEffect(() => {
     if (user) loadStandards();
   }, [user]);
+
+  useEffect(() => {
+    setResumableExam(readSavedExam());
+  }, []);
+
+  // Countdown for the mock exam — auto-submits when time runs out.
+  useEffect(() => {
+    if (mode !== "exam-active" || !examEndsAt) return;
+    let fired = false;
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((examEndsAt - Date.now()) / 1000));
+      setExamTimeLeft(left);
+      if (left <= 0 && !fired) {
+        fired = true;
+        toast("Time's up — submitting your exam.");
+        completeExam();
+      }
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, examEndsAt]);
 
   const loadStandards = async () => {
     const { data } = await supabase
@@ -350,22 +421,31 @@ const Learn = () => {
     }
   };
 
-  const handleAnswer = (answer: string) => {
+  const handleAnswer = async (answer: string) => {
     if (answered) return;
     setSelectedAnswer(answer);
     setAnswered(true);
     const isCorrect = answer === questions[currentQ].correct_answer;
-    setScore((s) => ({ correct: s.correct + (isCorrect ? 1 : 0), total: s.total + 1 }));
+    const newScore = { correct: score.correct + (isCorrect ? 1 : 0), total: score.total + 1 };
+    setScore(newScore);
 
     if (examId) {
-      supabase.functions.invoke("capstone", {
-        body: { action: "submit_answer", examId, questionId: questions[currentQ].id, userAnswer: answer },
-      });
+      updateSavedExam({ currentQ, score: newScore });
+      // Await the save (with one retry) so a dropped answer is surfaced
+      // instead of silently shrinking the final score.
+      const body = { action: "submit_answer", examId, questionId: questions[currentQ].id, userAnswer: answer };
+      const submit = () => supabase.functions.invoke("capstone", { body }).catch(() => ({ error: true, data: null }));
+      let res = await submit();
+      if (res.error || res.data?.error) res = await submit();
+      if (res.error || res.data?.error) {
+        toast.error("Couldn't save that answer — check your internet connection. It may not count in your final score.");
+      }
     }
   };
 
   const nextQuestion = () => {
     if (currentQ < questions.length - 1) {
+      if (examId) updateSavedExam({ currentQ: currentQ + 1 });
       setCurrentQ((c) => c + 1);
       setSelectedAnswer(null);
       setAnswered(false);
@@ -385,13 +465,24 @@ const Learn = () => {
       });
       if (error) throw await extractFnError(error);
       if (data?.error) throw new Error(data.error);
+      const startedAt = Date.now();
+      const endsAt = startedAt + (data.exam.time_limit_seconds || 30 * 60) * 1000;
       setExamId(data.exam.id);
       setQuestions(data.questions);
       setCurrentQ(0);
       setScore({ correct: 0, total: 0 });
       setSelectedAnswer(null);
       setAnswered(false);
-      setExamStartTime(Date.now());
+      setExamStartTime(startedAt);
+      setExamEndsAt(endsAt);
+      setExamTimeLeft(data.exam.time_limit_seconds || 30 * 60);
+      setResumableExam(null);
+      try {
+        sessionStorage.setItem(EXAM_STORAGE_KEY, JSON.stringify({
+          examId: data.exam.id, standardId: selectedStandard, questions: data.questions,
+          currentQ: 0, score: { correct: 0, total: 0 }, endsAt, startedAt,
+        } satisfies SavedExam));
+      } catch { /* storage unavailable — resume just won't be offered */ }
       setMode("exam-active");
     } catch (e: any) {
       toast.error(e.message || "Failed to start exam");
@@ -400,7 +491,63 @@ const Learn = () => {
     }
   };
 
+  // Same as startExam(), but seeded from a specific set of already-generated
+  // questions (e.g. Exam Prep's questions from an uploaded past paper) rather
+  // than a fresh pull from the standard-wide pool.
+  const startExamFromExamPrep = async (questionIds: string[]) => {
+    if (!questionIds.length) { toast.error("No questions to start an exam from"); return; }
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("capstone", {
+        body: { action: "start_exam_from_questions", questionIds },
+      });
+      if (error) throw await extractFnError(error);
+      if (data?.error) throw new Error(data.error);
+      const startedAt = Date.now();
+      const endsAt = startedAt + (data.exam.time_limit_seconds || 30 * 60) * 1000;
+      setExamId(data.exam.id);
+      setQuestions(data.questions);
+      setCurrentQ(0);
+      setScore({ correct: 0, total: 0 });
+      setSelectedAnswer(null);
+      setAnswered(false);
+      setExamStartTime(startedAt);
+      setExamEndsAt(endsAt);
+      setExamTimeLeft(data.exam.time_limit_seconds || 30 * 60);
+      setResumableExam(null);
+      try {
+        sessionStorage.setItem(EXAM_STORAGE_KEY, JSON.stringify({
+          examId: data.exam.id, standardId: selectedStandard || "", questions: data.questions,
+          currentQ: 0, score: { correct: 0, total: 0 }, endsAt, startedAt,
+        } satisfies SavedExam));
+      } catch { /* storage unavailable — resume just won't be offered */ }
+      setMode("exam-active");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to start exam");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resumeExam = () => {
+    const saved = readSavedExam();
+    if (!saved) { setResumableExam(null); toast.error("That exam has expired — start a fresh one."); return; }
+    setExamId(saved.examId);
+    setSelectedStandard(saved.standardId);
+    setQuestions(saved.questions);
+    setCurrentQ(saved.currentQ);
+    setScore(saved.score);
+    setSelectedAnswer(null);
+    setAnswered(false);
+    setExamStartTime(saved.startedAt);
+    setExamEndsAt(saved.endsAt);
+    setExamTimeLeft(Math.max(0, Math.ceil((saved.endsAt - Date.now()) / 1000)));
+    setResumableExam(null);
+    setMode("exam-active");
+  };
+
   const completeExam = async () => {
+    if (loading || !examId) return;
     setLoading(true);
     try {
       const { data } = await supabase.functions.invoke("capstone", {
@@ -409,6 +556,9 @@ const Learn = () => {
       setExamResult({ ...data, timeTaken: Math.round((Date.now() - examStartTime) / 1000) });
       setMode("exam-result");
       setExamId(null);
+      setExamEndsAt(null);
+      setExamTimeLeft(null);
+      sessionStorage.removeItem(EXAM_STORAGE_KEY);
     } catch {
       toast.error("Failed to complete exam");
     } finally {
@@ -543,7 +693,13 @@ const Learn = () => {
     new Promise((resolve, reject) => {
       const img = new Image();
       const url = URL.createObjectURL(file);
+      // A corrupt file can leave onload/onerror never firing — don't hang forever.
+      const timer = setTimeout(() => {
+        URL.revokeObjectURL(url);
+        reject(new Error("Photo took too long to load"));
+      }, 10000);
       img.onload = () => {
+        clearTimeout(timer);
         URL.revokeObjectURL(url);
         const MAX = 1280;
         let { width, height } = img;
@@ -557,7 +713,7 @@ const Learn = () => {
         canvas.getContext("2d")!.drawImage(img, 0, 0, width, height);
         resolve(canvas.toDataURL("image/jpeg", 0.8).split(",")[1]);
       };
-      img.onerror = reject;
+      img.onerror = (e) => { clearTimeout(timer); URL.revokeObjectURL(url); reject(e); };
       img.src = url;
     });
 
@@ -574,12 +730,22 @@ const Learn = () => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
       if (file.size > 30 * 1024 * 1024) { toast.error("Image must be under 30MB"); return; }
+      // Show the analysis screen with a spinner immediately — compression of a
+      // big photo can take a few seconds and used to give no feedback at all.
+      setPhotoPreview(null);
+      setPhotoAnalysis(null);
+      setPhotoError(false);
+      setLoading(true);
+      setMode("photo-analysis");
       try {
         const base64 = await compressImage(file);
+        setPhotoBase64(base64);
         setPhotoPreview(`data:image/jpeg;base64,${base64}`);
         analyzePhoto(base64);
       } catch {
-        toast.error("Failed to process image. Please try another photo.");
+        setLoading(false);
+        setMode("menu");
+        toast.error("Couldn't read that photo. Please try another one.");
       }
     };
     input.click();
@@ -589,6 +755,7 @@ const Learn = () => {
     if (!selectedStandard) { toast.error("Select a standard first"); return; }
     setLoading(true);
     setPhotoAnalysis(null);
+    setPhotoError(false);
     setMode("photo-analysis");
     try {
       const { data, error } = await supabase.functions.invoke("capstone", {
@@ -599,16 +766,24 @@ const Learn = () => {
       setPhotoAnalysis(data.analysis);
     } catch (e: any) {
       toast.error(e.message || "Failed to analyze photo");
-      setMode("menu");
+      // Keep the photo and stay on this screen so the apprentice can retry
+      // without re-taking it (a retake burns another hourly AI credit).
+      setPhotoError(true);
     } finally {
       setLoading(false);
     }
   };
 
   const goBack = () => {
+    if (examId) sessionStorage.removeItem(EXAM_STORAGE_KEY);
     setMode("menu");
     setExamId(null);
+    setExamEndsAt(null);
+    setExamTimeLeft(null);
+    setResumableExam(readSavedExam());
     setExamResult(null);
+    setPhotoBase64(null);
+    setPhotoError(false);
     setActiveGuide(null);
     setPhotoPreview(null);
     setPhotoAnalysis(null);
@@ -634,6 +809,9 @@ const Learn = () => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
       if (file.size > 20 * 1024 * 1024) { toast.error("PDF must be under 20MB"); return; }
+      if (extractingPdf) return; // guard against a second pick racing this one
+      setExtractingPdf(true);
+      setExamPrepPdfText(null);
       setExamPrepPdfName(file.name);
 
       try {
@@ -652,6 +830,8 @@ const Learn = () => {
       } catch (err: any) {
         toast.error(err.message || "Failed to read this PDF");
         setExamPrepPdfName(null);
+      } finally {
+        setExtractingPdf(false);
       }
     };
     input.click();
@@ -696,6 +876,27 @@ const Learn = () => {
             <p className="text-sm text-muted-foreground">Study, practice, and ace your exams</p>
           </div>
         </div>
+
+        {resumableExam && (
+          <Card className="p-4 mb-4 border-primary/40 bg-primary/5">
+            <div className="flex items-center gap-2 mb-1">
+              <Clock className="h-4 w-4 text-primary" />
+              <p className="text-sm font-bold text-foreground">Mock exam in progress</p>
+            </div>
+            <p className="text-xs text-muted-foreground mb-3">
+              You're on question {resumableExam.currentQ + 1} of {resumableExam.questions.length}, with {formatTimeLeft(Math.max(0, Math.ceil((resumableExam.endsAt - Date.now()) / 1000)))} left on the clock.
+            </p>
+            <div className="flex gap-2">
+              <Button onClick={resumeExam} size="sm" className="h-9 font-bold">Resume Exam</Button>
+              <Button
+                onClick={() => { sessionStorage.removeItem(EXAM_STORAGE_KEY); setResumableExam(null); }}
+                size="sm" variant="outline" className="h-9"
+              >
+                Discard
+              </Button>
+            </div>
+          </Card>
+        )}
 
         <div className="mb-4">
           <label className="text-sm font-medium text-foreground mb-2 block">Select a standard</label>
@@ -778,7 +979,7 @@ const Learn = () => {
               </div>
               <div className="flex-1">
                 <p className="font-bold text-foreground text-sm">Calculation Practice</p>
-                <p className="text-xs text-muted-foreground">Section C style — voltage drop, cable sizing, max demand</p>
+                <p className="text-xs text-muted-foreground">Section C style — work through a real on-site calculation, show your working</p>
               </div>
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </div>
@@ -902,8 +1103,10 @@ const Learn = () => {
 
         {mode === "exam-active" && (
           <div className="flex items-center gap-2 mb-4">
-            <Clock className="h-4 w-4 text-muted-foreground" />
-            <p className="text-xs text-muted-foreground font-medium">Mock Exam</p>
+            <Clock className={`h-4 w-4 ${examTimeLeft !== null && examTimeLeft <= 60 ? "text-destructive" : "text-muted-foreground"}`} />
+            <p className={`text-xs font-medium ${examTimeLeft !== null && examTimeLeft <= 60 ? "text-destructive" : "text-muted-foreground"}`}>
+              Mock Exam{examTimeLeft !== null ? ` — ${formatTimeLeft(examTimeLeft)} left` : ""}
+            </p>
           </div>
         )}
 
@@ -965,6 +1168,20 @@ const Learn = () => {
             <p className="text-xs font-bold text-foreground mb-1">Explanation</p>
             <p className="text-xs text-muted-foreground leading-relaxed">{q.explanation}</p>
           </Card>
+        )}
+
+        {answered && (
+          <Button
+            variant="outline"
+            className="w-full h-11 mb-3 gap-2"
+            onClick={() => {
+              const gotItRight = selectedAnswer === q.correct_answer;
+              const seedMessage = `I ${gotItRight ? "got this exam question right but want to understand it better" : "got this exam question wrong and want to understand it better"}:\n\n"${q.question}"\n\nOptions: ${(q.options as string[]).join(" / ")}\n${gotItRight ? "" : `I answered: ${selectedAnswer}\n`}Correct answer: ${q.correct_answer}\nExplanation given: ${q.explanation}${q.clause_reference ? `\nClause reference: ${q.clause_reference}` : ""}\n\nCan you help me understand this properly?`;
+              navigate("/chat", { state: { seedMessage } });
+            }}
+          >
+            <HelpCircle className="h-4 w-4" /> Ask AI Tutor
+          </Button>
         )}
 
         {answered && (
@@ -1098,7 +1315,7 @@ const Learn = () => {
           <div className="flex items-center justify-center py-8">
             <div className="flex flex-col items-center gap-3">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              <p className="text-sm text-muted-foreground">Analyzing against standard...</p>
+              <p className="text-sm text-muted-foreground">{photoBase64 ? "Reading your handwriting..." : "Preparing your photo..."}</p>
             </div>
           </div>
         )}
@@ -1112,7 +1329,16 @@ const Learn = () => {
           </Card>
         )}
 
-        {!loading && photoAnalysis && (
+        {!loading && photoError && (
+          <Card className="p-5 border-destructive/40 bg-destructive/5">
+            <p className="text-sm text-foreground mb-3">That didn't go through — your photo is still here, ready to try again.</p>
+            <Button onClick={() => photoBase64 && analyzePhoto(photoBase64)} className="w-full h-11 font-bold">
+              Try Again
+            </Button>
+          </Card>
+        )}
+
+        {!loading && (photoAnalysis || photoError) && (
           <Button onClick={handlePhotoUpload} variant="outline" className="w-full mt-4 h-11">
             Upload Another Photo
           </Button>
@@ -1160,11 +1386,14 @@ const Learn = () => {
         <Card className="p-4 mb-4">
           <p className="text-sm font-bold text-foreground mb-2">Upload a Previous Exam</p>
           <p className="text-xs text-muted-foreground mb-3">Upload a PDF of a past exam paper and the AI will generate study materials matching its style</p>
-          <Button variant="outline" className="w-full h-11" onClick={handleExamPdfUpload}>
-            <Upload className="h-4 w-4 mr-2" />
-            {examPrepPdfName ? examPrepPdfName : "Choose PDF..."}
+          <Button variant="outline" className="w-full h-11" onClick={handleExamPdfUpload} disabled={extractingPdf}>
+            {extractingPdf ? (
+              <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Reading {examPrepPdfName}...</>
+            ) : (
+              <><Upload className="h-4 w-4 mr-2" /> {examPrepPdfName ? examPrepPdfName : "Choose PDF..."}</>
+            )}
           </Button>
-          {examPrepPdfText && (
+          {!extractingPdf && examPrepPdfText && (
             <div className="flex items-center gap-2 mt-2">
               <CheckCircle2 className="h-4 w-4 text-primary" />
               <p className="text-xs text-primary font-medium">Text extracted successfully</p>
@@ -1239,21 +1468,30 @@ const Learn = () => {
           </Card>
         )}
 
-        {/* Practice with generated questions */}
+        {/* Take the generated questions as a real timed mock exam, or just practice untimed */}
         {examPrepResult.questions?.length > 0 && (
-          <Button
-            className="w-full h-12 font-bold rounded-xl mb-3"
-            onClick={() => {
-              setQuestions(examPrepResult.questions);
-              setCurrentQ(0);
-              setScore({ correct: 0, total: 0 });
-              setSelectedAnswer(null);
-              setAnswered(false);
-              setMode("quiz");
-            }}
-          >
-            Practice {examPrepResult.questions.length} Mock Questions
-          </Button>
+          <>
+            <Button
+              className="w-full h-12 font-bold rounded-xl mb-3"
+              onClick={() => startExamFromExamPrep(examPrepResult.questions.map((q: any) => q.id))}
+            >
+              Take as a Timed Mock Exam
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full h-11 mb-3"
+              onClick={() => {
+                setQuestions(examPrepResult.questions);
+                setCurrentQ(0);
+                setScore({ correct: 0, total: 0 });
+                setSelectedAnswer(null);
+                setAnswered(false);
+                setMode("quiz");
+              }}
+            >
+              Just Practice, No Timer
+            </Button>
+          </>
         )}
 
         <Button variant="outline" onClick={() => setMode("exam-prep")} className="w-full h-11">
@@ -1265,7 +1503,7 @@ const Learn = () => {
 
   // ── CALCULATION ──
   if (mode === "calculation" && calcQuestion) {
-    const typeLabel = CALC_TYPE_LABELS[calcQuestion.calculation_type] || "Calculation";
+    const typeLabel = CALC_TYPE_LABELS[calcQuestion.calculation_type] || humanizeCalcType(calcQuestion.calculation_type) || "Calculation";
 
     return (
       <ScrollPage>
@@ -1290,6 +1528,22 @@ const Learn = () => {
               <li key={i} className="text-sm text-foreground font-mono">{item}</li>
             ))}
           </ul>
+
+          {calcQuestion.table_references && calcQuestion.table_references.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-border/60 space-y-2">
+              {calcQuestion.table_references.map((tbl, i) => (
+                <button
+                  key={i}
+                  onClick={() => setPdfViewer({ clauseNumber: `Table ${tbl.table_number}`, standardId: tbl.standard_id, pageNumber: tbl.page_number })}
+                  className="flex items-center gap-2 w-full text-left rounded-lg border border-border px-3 py-2.5 text-xs text-primary hover:bg-primary/5 active:scale-[0.99] transition-all"
+                >
+                  <FileText className="h-4 w-4 flex-shrink-0" />
+                  <span className="flex-1 font-medium">Open Table {tbl.table_number}{tbl.caption ? ` — ${tbl.caption}` : ""}</span>
+                  <span className="text-muted-foreground text-[10px]">p.{tbl.page_number}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </Card>
 
         {/* Questions */}
@@ -1361,6 +1615,14 @@ const Learn = () => {
             </div>
           </>
         )}
+
+        <PDFViewerModal
+          isOpen={!!pdfViewer}
+          onClose={() => setPdfViewer(null)}
+          clauseNumber={pdfViewer?.clauseNumber ?? ""}
+          standardId={pdfViewer?.standardId ?? ""}
+          pageNumber={pdfViewer?.pageNumber}
+        />
       </ScrollPage>
     );
   }

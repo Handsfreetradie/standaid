@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Mic, ThumbsUp, ThumbsDown, HelpCircle, Check, FileText, History, X, ExternalLink, ShoppingCart } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -214,19 +215,29 @@ const Chat = () => {
   const [pdfViewer, setPdfViewer] = useState<{ clauseNumber: string; standardCode?: string; standardId?: string; pageNumber?: number } | null>(null);
   const { session } = useAuth();
   const { data: profile } = useProfile();
+  const location = useLocation();
+  const navigate = useNavigate();
   // Hooks must run during render — calling useProgress() inside runQuery
   // threw on every send and killed the chat before the request went out.
   const { start, update, done } = useProgress();
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Prefill from ?q= (the tools' "Verify with AI" button). Prefill ONLY —
-  // nothing sends until the user hits send, so no query is spent silently.
+  // Prefill from ?q= (the tools' "Verify with AI" button) or from route state
+  // (Learn's "Ask AI Tutor" button, seeded with a missed exam question).
+  // Prefill ONLY — nothing sends until the user hits send, so no query is
+  // spent silently.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const q = params.get("q");
     if (q) {
       setInput(q);
       window.history.replaceState({}, "", window.location.pathname);
+      return;
+    }
+    const seedMessage = (location.state as { seedMessage?: string } | null)?.seedMessage;
+    if (seedMessage) {
+      setInput(seedMessage);
+      navigate(location.pathname, { replace: true, state: {} });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -472,7 +483,7 @@ const Chat = () => {
         <div className="px-5 py-1.5 border-b border-border bg-muted/30">
           <p className="text-xs text-muted-foreground text-center">
             {queriesRemaining > 0
-              ? `${queriesRemaining} of 5 free queries remaining today`
+              ? `${queriesRemaining} of 3 free queries remaining today`
               : "Daily limit reached — upgrade to Pro"}
           </p>
         </div>
