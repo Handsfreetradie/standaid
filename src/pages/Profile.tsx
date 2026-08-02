@@ -1,12 +1,14 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { User, ChevronRight, ChevronDown, Shield, Zap, HelpCircle, LogOut, CreditCard, Bell, Mail, ExternalLink, CheckCircle2, BookOpen, FileText, CalendarDays, Loader2, Users } from "lucide-react";
+import { User, ChevronRight, ChevronDown, Shield, Zap, HelpCircle, LogOut, CreditCard, Bell, Mail, ExternalLink, CheckCircle2, BookOpen, FileText, CalendarDays, Loader2, Users, Gift } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
 import { useProfile, useStandards, useOrganization } from "@/hooks/useData";
 import { supabase } from "@/integrations/supabase/client";
@@ -42,6 +44,11 @@ const FAQS = [
     a: "Yes — upload as many as you need. The AI searches across all your standards to find the most relevant clause for each question.",
   },
 ];
+
+// Only Kyle sees the "Grant Free Trial" tool — no app-wide admin/roles
+// concept exists yet, so this is a single hardcoded check, same style as
+// other small inline constants in this codebase.
+const ADMIN_EMAIL = "kyledixonelectrical@gmail.com";
 
 const Profile = () => {
   const navigate = useNavigate();
@@ -114,6 +121,40 @@ const Profile = () => {
   const setNotif = (key: string, value: boolean, setter: (v: boolean) => void) => {
     setter(value);
     localStorage.setItem(key, String(value));
+  };
+
+  const isAdmin = user?.email === ADMIN_EMAIL;
+  const [grantEmail, setGrantEmail] = useState("");
+  const [grantDays, setGrantDays] = useState("14");
+  const [granting, setGranting] = useState(false);
+
+  const grantTrial = async () => {
+    const email = grantEmail.trim().toLowerCase();
+    if (!email || !email.includes("@")) {
+      toast.error("Enter a valid email address.");
+      return;
+    }
+    const days = Number(grantDays);
+    if (!Number.isInteger(days) || days < 1 || days > 90) {
+      toast.error("Days must be a whole number between 1 and 90.");
+      return;
+    }
+    setGranting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("grant-trial", { body: { email, days } });
+      if (error) throw error;
+      toast.success(
+        data?.isNewAccount
+          ? `Invite sent to ${email} — ${days} days free Pro waiting for them.`
+          : `${email} now has ${days} days free Pro — they'll get an email too.`
+      );
+      setGrantEmail("");
+    } catch (e: any) {
+      console.error("[grant trial] error:", e);
+      toast.error(e?.message || "Couldn't grant that trial — please try again.");
+    } finally {
+      setGranting(false);
+    }
   };
 
   const displayName = profile?.display_name || user?.email?.split("@")[0] || "Tradie";
@@ -237,7 +278,7 @@ const Profile = () => {
                 <h2 className="font-sans text-lg font-bold text-foreground mb-3">Compare Plans</h2>
                 <div className="grid grid-cols-3 gap-2">
                   {[
-                    { name: "Free", price: "$0", features: ["1 standard", "5 queries/day", "Partial clauses"] },
+                    { name: "Free", price: "$0", features: ["1 standard", "3 queries/day", "Partial clauses"] },
                     { name: "Pro", price: "$19.99", features: ["Unlimited", "Unlimited", "Full clauses", "Voice & Photo"], highlight: true, tier: "pro" as const },
                     { name: "Business", price: "per seat", features: ["Unlimited", "Unlimited", "Full clauses", "Team libraries"], goToTeam: true },
                   ].map((plan) => (
@@ -489,6 +530,59 @@ const Profile = () => {
                     </div>
                   )}
                 </div>
+
+                {/* Grant Free Trial — Kyle only */}
+                {isAdmin && (
+                  <div>
+                    <button
+                      onClick={() => togglePanel("grant-trial")}
+                      className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-foreground hover:bg-secondary transition-colors min-h-[44px]"
+                    >
+                      <Gift className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
+                      <div className="flex-1 text-left">
+                        <span className="block">Grant Free Trial</span>
+                        <span className="block text-xs text-muted-foreground font-normal mt-0.5">Admin only</span>
+                      </div>
+                      {activePanel === "grant-trial"
+                        ? <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        : <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      }
+                    </button>
+                    {activePanel === "grant-trial" && (
+                      <div className="px-3 pb-4 pt-1 space-y-3">
+                        <p className="text-xs text-muted-foreground">
+                          Gives free Pro access to any email, new or existing account. Sends a branded invite —
+                          access expires automatically, no card involved.
+                        </p>
+                        <div>
+                          <Label className="text-xs">Email</Label>
+                          <Input
+                            className="h-11 mt-1"
+                            type="email"
+                            placeholder="someone@example.com"
+                            value={grantEmail}
+                            onChange={(e) => setGrantEmail(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">Days free</Label>
+                          <Input
+                            className="h-11 mt-1"
+                            type="number"
+                            min={1}
+                            max={90}
+                            value={grantDays}
+                            onChange={(e) => setGrantDays(e.target.value)}
+                          />
+                        </div>
+                        <Button className="w-full h-11 gap-1.5" disabled={granting} onClick={grantTrial}>
+                          {granting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Gift className="h-4 w-4" />}
+                          Send Invite
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Sign Out */}
                 <button
