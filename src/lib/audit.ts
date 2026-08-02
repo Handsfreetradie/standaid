@@ -29,10 +29,48 @@ export const SEVERITY_META: Record<Severity, { label: string; tone: "danger" | "
 };
 
 // Photo tag options — a tag sharpens the AI's retrieval for that photo.
-export const PHOTO_LABELS = [
-  "Switchboard", "Main switch", "RCD / safety switch", "Earthing / MEN",
-  "Socket outlet", "Wet area", "Lighting", "Smoke alarm", "Cabling", "Other",
-];
+// Keyed by trade id (src/lib/trades.ts) so the tags shown match the job.
+export const PHOTO_LABELS_BY_TRADE: Record<string, string[]> = {
+  electrical: [
+    "Switchboard", "Main switch", "RCD / safety switch", "Earthing / MEN",
+    "Socket outlet", "Wet area", "Lighting", "Smoke alarm", "Cabling", "Other",
+  ],
+  plumbing: [
+    "Water supply", "Drainage", "Hot water system", "Backflow device",
+    "Fixture install", "Pipe support / fall", "Other",
+  ],
+  gas: [
+    "Gas meter", "Appliance connection", "Flue / ventilation",
+    "Pipe sizing / support", "Isolation valve", "Other",
+  ],
+  hvac: [
+    "Indoor unit", "Outdoor unit", "Ductwork", "Refrigerant line",
+    "Condensate drain", "Electrical isolation", "Other",
+  ],
+  building: [
+    "Framing", "Structural connection", "Waterproofing",
+    "Stair / balustrade", "Roof / wall cladding", "Fire / acoustic rating", "Other",
+  ],
+  carpentry: [
+    "Framing", "Structural connection", "Stair / balustrade",
+    "Fixing / fastening", "Finish carpentry", "Other",
+  ],
+  health_safety: [
+    "Signage", "PPE / controls", "Egress / exit", "Hazard / risk item", "Other",
+  ],
+  engineering: [
+    "Structural member", "Weld / connection", "Mechanical fixing", "Other",
+  ],
+  food_safety: [
+    "Food prep surface", "Storage / temperature", "Handwash station",
+    "Waste / pest control", "Other",
+  ],
+  other: ["General item", "Other"],
+};
+
+export function getPhotoLabels(trade?: string | null): string[] {
+  return PHOTO_LABELS_BY_TRADE[trade ?? ""] ?? PHOTO_LABELS_BY_TRADE.other;
+}
 
 export interface AuditSummary {
   total: number;

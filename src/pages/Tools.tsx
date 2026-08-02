@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Calculator, ChevronRight, ClipboardCheck, Sparkles } from "lucide-react";
+import { Calculator, ChevronRight, ClipboardCheck, Loader2, Sparkles } from "lucide-react";
+import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
+import { useProfile } from "@/hooks/useData";
+import { supabase } from "@/integrations/supabase/client";
 import VoltageDropTool from "@/components/tools/VoltageDropTool";
 import ConcreteVolumeTool from "@/components/tools/ConcreteVolumeTool";
 import PipeSizingTool from "@/components/tools/PipeSizingTool";
@@ -88,12 +91,36 @@ const TOOL_COMPONENTS: Record<string, React.FC<{ onBack: () => void }>> = {
 
 const Tools = () => {
   const [mode, setMode] = useState<ToolMode>("menu");
+  const [checkingId, setCheckingId] = useState<ToolMode | null>(null);
   const navigate = useNavigate();
+  const { data: profile } = useProfile();
+  const isFree = (profile?.subscription_tier || "free") === "free";
 
   if (mode !== "menu") {
     const ToolComponent = TOOL_COMPONENTS[mode];
     if (ToolComponent) return <ToolComponent onBack={() => setMode("menu")} />;
   }
+
+  const openTool = async (toolId: ToolMode) => {
+    if (!isFree) { setMode(toolId); return; }
+    setCheckingId(toolId);
+    try {
+      const { data, error } = await supabase.functions.invoke("check-tool-access", { body: { tool_id: toolId } });
+      if (error || data?.allowed === false) {
+        toast.error("You've used today's free access to this tool.", {
+          description: "Upgrade to Pro for unlimited tool access.",
+          action: { label: "Upgrade", onClick: () => navigate("/profile") },
+        });
+        return;
+      }
+      setMode(toolId);
+    } catch {
+      // Fail open — a network hiccup shouldn't lock a user out of a tool.
+      setMode(toolId);
+    } finally {
+      setCheckingId(null);
+    }
+  };
 
   const categories = [...new Set(TOOLS.map(t => t.category))];
 
@@ -136,13 +163,15 @@ const Tools = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
             {TOOLS.filter(t => t.category === cat).map(tool => (
               <Card key={tool.id} className="p-4 cursor-pointer hover:border-primary/50 transition-colors active:scale-[0.99]"
-                onClick={() => setMode(tool.id)}>
+                onClick={() => openTool(tool.id)}>
                 <div className="flex items-center gap-3">
                   <div className="flex-1 min-w-0">
                     <p className="font-bold text-foreground text-sm">{tool.title}</p>
                     <p className="text-xs text-muted-foreground truncate">{tool.desc}</p>
                   </div>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                  {checkingId === tool.id
+                    ? <Loader2 className="h-4 w-4 text-muted-foreground flex-shrink-0 animate-spin" />
+                    : <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />}
                 </div>
               </Card>
             ))}

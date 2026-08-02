@@ -8,6 +8,34 @@ import { getAllowedOrigin } from "../_shared/cors.ts";
 // (the measurements a photo can't show). User answers (user_notes) are fed back
 // in on re-analysis — the Q&A loop.
 
+// Duplicated (not imported) from src/lib/trades.ts — Deno edge functions
+// don't share a build with the frontend.
+const TRADE_PERSONA: Record<string, string> = {
+  electrical: "electrician",
+  plumbing: "plumber",
+  building: "builder",
+  carpentry: "carpenter",
+  gas: "gas fitter",
+  hvac: "HVAC technician",
+  health_safety: "health & safety officer",
+  engineering: "engineer",
+  food_safety: "food safety auditor",
+  other: "tradesperson",
+};
+
+const TRADE_KEYWORDS: Record<string, string> = {
+  electrical: "clearance zone RCD earthing socket outlet switchboard wiring rules",
+  plumbing: "backflow prevention pipe fall drainage water supply fixture",
+  gas: "gas pipe sizing appliance connection flue isolation valve",
+  hvac: "refrigerant line ductwork condensate drain clearance electrical isolation",
+  building: "structural connection fixing waterproofing fire acoustic rating",
+  carpentry: "framing structural connection fixing fastening span bracing",
+  health_safety: "signage PPE controls egress exit hazard risk",
+  engineering: "structural member weld connection mechanical fixing",
+  food_safety: "food prep surface storage temperature handwash waste pest control",
+  other: "compliance clearance installation requirements",
+};
+
 serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
   const corsHeaders = {
@@ -61,6 +89,13 @@ serve(async (req) => {
       .eq("id", photo_id).eq("audit_id", audit_id).eq("user_id", userId).single();
     if (!photo) return json({ error: "Photo not found" }, 404);
 
+    const { data: auditRow } = await supabase
+      .from("audits").select("trade")
+      .eq("id", audit_id).eq("user_id", userId).single();
+    const trade: string | null = auditRow?.trade ?? null;
+    const persona = TRADE_PERSONA[trade ?? ""] ?? "tradesperson";
+    const keywords = TRADE_KEYWORDS[trade ?? ""] ?? TRADE_KEYWORDS.other;
+
     await supabase.from("audit_photos").update({ status: "analyzing" }).eq("id", photo_id);
 
     // ── Download the image and base64-encode (chunked to avoid stack overflow) ──
@@ -76,8 +111,8 @@ serve(async (req) => {
     const imageBase64 = btoa(binary);
 
     // ── Retrieve relevant clauses from the user's standards ──
-    const label = photo.label || "electrical installation";
-    const retrievalQuery = `${label} installation compliance clearance zone RCD earthing socket outlet switchboard wiring rules ${photo.user_notes || ""}`.trim();
+    const label = photo.label || "installation";
+    const retrievalQuery = `${label} installation compliance ${keywords} ${photo.user_notes || ""}`.trim();
     let contextChunks = "";
     try {
       const embRes = await fetch("https://api.openai.com/v1/embeddings", {
@@ -99,7 +134,7 @@ serve(async (req) => {
       console.error("[analyze-audit-photo] retrieval failed:", e);
     }
 
-    const systemPrompt = `You are assisting a licensed Australian electrician auditing an installation from a photo${photo.label ? ` labelled "${photo.label}"` : ""}.
+    const systemPrompt = `You are assisting a licensed Australian ${persona} auditing an installation from a photo${photo.label ? ` labelled "${photo.label}"` : ""}.
 
 CRITICAL RULES:
 - Assess ONLY what is clearly visible. NEVER guess measurements, distances, heights, clearances, cable sizes, or whether something is RCD-protected from a photo — a wrong value is dangerous.

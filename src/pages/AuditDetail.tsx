@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Camera, Loader2, Send, ClipboardCheck } from "lucide-react";
+import { ArrowLeft, Camera, Loader2, Send, ClipboardCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { compressImageToBlob } from "@/lib/image";
 import {
-  summariseAudit, sortForReport, SEVERITY_META, PHOTO_LABELS, type AuditPhoto, type Severity,
+  summariseAudit, sortForReport, SEVERITY_META, getPhotoLabels, type AuditPhoto, type Severity,
 } from "@/lib/audit";
 
 const sb = supabase as any;
@@ -29,7 +29,9 @@ const AuditDetail = () => {
   const [photos, setPhotos] = useState<AuditPhoto[]>([]);
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-  const [pendingLabel, setPendingLabel] = useState<string>(PHOTO_LABELS[0]);
+  const [deleting, setDeleting] = useState(false);
+  const photoLabels = getPhotoLabels(audit?.trade);
+  const [pendingLabel, setPendingLabel] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const fileRef = useRef<HTMLInputElement>(null);
@@ -40,6 +42,7 @@ const AuditDetail = () => {
       sb.from("audit_photos").select("*").eq("audit_id", auditId).order("created_at", { ascending: true }),
     ]);
     setAudit(a);
+    setPendingLabel((prev) => prev || getPhotoLabels(a?.trade)[0]);
     const list = (p || []) as AuditPhoto[];
     setPhotos(list);
     // Signed URLs for thumbnails (private bucket)
@@ -107,6 +110,33 @@ const AuditDetail = () => {
     analyse(photoId); // re-run with the answers folded in
   };
 
+  const deleteAudit = async () => {
+    if (!window.confirm("Delete this audit? This cannot be undone.")) return;
+    setDeleting(true);
+    try {
+      // Collect storage paths BEFORE deleting the row — audit_photos cascade-
+      // deletes with the audit and the paths become unrecoverable after that.
+      const { data: photoRows } = await sb.from("audit_photos").select("storage_path").eq("audit_id", auditId);
+
+      const { error } = await sb.from("audits").delete().eq("id", auditId);
+      if (error) throw error;
+
+      try {
+        const paths = (photoRows || []).map((p: any) => p.storage_path).filter(Boolean);
+        if (paths.length > 0) await supabase.storage.from("audit-photos").remove(paths);
+      } catch (e) {
+        console.warn("Storage cleanup after audit delete failed (non-fatal):", e);
+      }
+
+      toast.success("Audit deleted");
+      navigate("/audits");
+    } catch (e) {
+      console.error(e);
+      toast.error("Couldn't delete the audit — please try again.");
+      setDeleting(false);
+    }
+  };
+
   const summary = summariseAudit(photos);
 
   if (loading) {
@@ -116,9 +146,15 @@ const AuditDetail = () => {
   return (
     <div className="h-full overflow-y-auto px-5 py-6 pb-28 md:pb-10">
       <div className="max-w-2xl mx-auto">
-        <Button variant="ghost" size="sm" className="-ml-2 mb-2 text-muted-foreground" onClick={() => navigate("/audits")}>
-          <ArrowLeft className="h-4 w-4 mr-1" /> Audits
-        </Button>
+        <div className="flex items-center justify-between -ml-2 mb-2">
+          <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => navigate("/audits")}>
+            <ArrowLeft className="h-4 w-4 mr-1" /> Audits
+          </Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive"
+            onClick={deleteAudit} disabled={deleting}>
+            {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+          </Button>
+        </div>
         <h1 className="text-xl font-extrabold text-foreground">{audit?.title}</h1>
         {audit?.site_address && <p className="text-xs text-muted-foreground mb-3">{audit.site_address}</p>}
 
@@ -151,7 +187,7 @@ const AuditDetail = () => {
         <Card className="p-3 my-3">
           <p className="text-xs font-semibold text-foreground mb-2">Add a photo</p>
           <div className="flex flex-wrap gap-1.5 mb-2">
-            {PHOTO_LABELS.map((l) => (
+            {photoLabels.map((l) => (
               <Badge key={l} variant={pendingLabel === l ? "default" : "outline"}
                 className="cursor-pointer text-[11px] px-2 py-1" onClick={() => setPendingLabel(l)}>
                 {l}
