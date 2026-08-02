@@ -56,7 +56,7 @@ const Profile = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user, signOut } = useAuth();
-  const { data: profile } = useProfile();
+  const { data: profile, isLoading: profileLoading } = useProfile();
   const { data: standards } = useStandards();
   const { data: org } = useOrganization();
   const [activePanel, setActivePanel] = useState<string | null>(null);
@@ -245,7 +245,11 @@ const Profile = () => {
   const tradeLabel = profile?.trade_type
     ? profile.trade_type.split(",").filter(Boolean).map((id) => TRADE_LABELS[id] || id).join(", ")
     : null;
-  const tier = profile?.subscription_tier || "pro";
+  // No fallback guess here — while the profile is still loading, `tier` is
+  // undefined so isPro is false rather than silently claiming a tier the
+  // user might not actually have (see the loading guard on the summary line).
+  const tier = profile?.subscription_tier;
+  const planLabel = tier ? tier.charAt(0).toUpperCase() + tier.slice(1) : "";
   const queriesUsed = profile?.daily_query_count || 0;
   const isPro = tier === "pro" || tier === "business";
 
@@ -522,7 +526,7 @@ const Profile = () => {
                     <div className="flex-1 text-left">
                       <span className="block">Subscription & Billing</span>
                       <span className="block text-xs text-muted-foreground font-normal mt-0.5">
-                        {isPro ? `${tier.charAt(0).toUpperCase() + tier.slice(1)} plan active` : "Free plan"}
+                        {profileLoading ? "Loading…" : isPro ? `${planLabel} plan active` : "Free plan"}
                       </span>
                     </div>
                     {activePanel === "billing"
@@ -535,7 +539,7 @@ const Profile = () => {
                       <div className="rounded-lg bg-muted/50 p-3 space-y-2.5">
                         <div className="flex justify-between text-xs">
                           <span className="text-muted-foreground">Plan</span>
-                          <span className="font-semibold capitalize text-foreground">{tier}</span>
+                          <span className="font-semibold capitalize text-foreground">{tier || "Free"}</span>
                         </div>
                         <div className="flex justify-between text-xs">
                           <span className="text-muted-foreground">Price</span>

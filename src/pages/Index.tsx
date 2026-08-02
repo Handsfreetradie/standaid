@@ -39,7 +39,7 @@ const Index = () => {
   const [savingTrade, setSavingTrade] = useState(false);
   const [pickingTrade, setPickingTrade] = useState(false);
 
-  const tier = profile?.subscription_tier || "pro";
+  const tier = profile?.subscription_tier; // undefined while loading — never guess
   const queriesUsed = profile?.daily_query_count || 0;
   const firstName = profile?.display_name?.split(" ")[0] || "";
   const selectedTrades = profile?.trade_type
@@ -193,7 +193,7 @@ const Index = () => {
             <Zap className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
             <div className="flex-1">
               <p className="text-sm font-semibold text-foreground">
-                Free Plan — {queriesUsed} of 5 queries used today
+                Free Plan — {queriesUsed} of 3 queries used today
               </p>
               <p className="text-xs text-muted-foreground mt-1">
                 Upgrade to Pro for unlimited queries, full clause references, and voice input.

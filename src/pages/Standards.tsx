@@ -29,7 +29,7 @@ const Standards = () => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
-  const tier = profile?.subscription_tier || "pro";
+  const tier = profile?.subscription_tier; // undefined while loading — never guess
 
   const filteredStandards = standards.filter(
     (s) =>

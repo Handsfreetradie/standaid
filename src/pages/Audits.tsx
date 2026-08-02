@@ -24,8 +24,12 @@ interface AuditRow {
 const Audits = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { data: profile } = useProfile();
-  const tier = profile?.subscription_tier || "free";
+  const { data: profile, isLoading: profileLoading } = useProfile();
+  // No fallback guess — while the profile is still loading, `tier` is
+  // undefined so isPro is false. The render below waits on profileLoading
+  // before showing the "upgrade" paywall, so a slow fetch can't momentarily
+  // lock out a Pro/Business tradie who's actually entitled to this page.
+  const tier = profile?.subscription_tier;
   const isPro = tier === "pro" || tier === "business";
 
   const [audits, setAudits] = useState<AuditRow[]>([]);
@@ -92,6 +96,10 @@ const Audits = () => {
       setDeletingId(null);
     }
   };
+
+  if (profileLoading) {
+    return <div className="flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+  }
 
   if (!isPro) {
     return (

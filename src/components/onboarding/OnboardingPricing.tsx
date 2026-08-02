@@ -14,7 +14,7 @@ const OnboardingPricing = ({ onNext, onBack }: Props) => {
 
   const freeFeatures = [
     { text: "Government & public standards", included: true },
-    { text: "5 AI queries per day", included: true },
+    { text: "3 AI queries per day", included: true },
     { text: "1 basic calculator", included: true },
     { text: "Basic compliance chat", included: true },
     { text: "Upload your own standards", included: false },
