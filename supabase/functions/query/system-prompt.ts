@@ -6,6 +6,14 @@ export type TradeType =
   | "building"
   | "general";
 
+// Raw source of every prompt block, concatenated for hashing into a cache
+// version (see PROMPT_VERSION in index.ts) — any edit to the prompt content
+// here changes this string, which changes the hash, which invalidates every
+// previously cached answer instead of silently serving stale ones.
+export function promptVersionSource(): string {
+  return CORE_SYSTEM_PROMPT + JSON.stringify(TRADE_GUIDANCE) + JSON.stringify(EXAMPLES_BY_TRADE);
+}
+
 // Static per-trade block — identical for every query of the same trade, so
 // the caller marks it with cache_control and Anthropic prompt-caching skips
 // re-processing its ~4k tokens on every call.
@@ -87,6 +95,16 @@ YOUR CORE RULES:
    - NEVER use placeholder text in the answer field like "[citation unavailable]",
      "[check the standard directly]", or any bracketed fallback phrases — if you
      can't cite, simply don't cite and use the "General knowledge" prefix instead
+   - DO NOT stretch a clause's named examples to a different situation by analogy.
+     If a clause lists specific examples (e.g. "bathroom, laundry, or other similar
+     location where the floor is likely to become wet"), only apply it to those
+     examples or situations that genuinely match the description given — don't
+     extend it to an unlisted room or fixture just because it seems similar (a
+     kitchen is not a bathroom or laundry). Before answering with a general clause,
+     check whether a more specific clause exists for the actual situation (e.g. a
+     zone classification around a sink or fixed water container) and cite that one
+     instead. If you're not sure the specific clause is in the extracts, say so
+     rather than confidently applying the general one.
 
 2. ALWAYS CITE THE CLAUSE — EVERY VALUE NEEDS A CLICKABLE SOURCE
    - Format: "AS/NZS XXXX Clause Y.Y.Y"

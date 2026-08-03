@@ -1,10 +1,21 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { buildStaticSystemPrompt, buildContextSystemBlock, type TradeType } from "./system-prompt.ts";
+import { buildStaticSystemPrompt, buildContextSystemBlock, promptVersionSource, type TradeType } from "./system-prompt.ts";
 import { detectTrade } from "./trade-detection.ts";
 import { validateResponse } from "./validation.ts";
 import { getAllowedOrigin } from "../_shared/cors.ts";
-import { expandQuery } from "./synonyms.ts";
+import { expandQuery, TRADIE_SYNONYMS } from "./synonyms.ts";
+
+// Hash of the prompt + synonym logic, computed once per cold start. Cached
+// answers are tagged with this on write and only reused on read if it still
+// matches — so a deploy that changes system-prompt.ts or synonyms.ts (e.g.
+// fixing a wrong answer) invalidates every previously cached answer instead
+// of leaving pre-fix answers in circulation for up to 30 days.
+const PROMPT_VERSION = await (async () => {
+  const source = promptVersionSource() + JSON.stringify(TRADIE_SYNONYMS);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 16);
+})();
 
 // The model is instructed to end its answer with a literal "---METADATA---"
 // line, but occasionally drifts (drops a dash, adds a line break) — an exact
@@ -372,6 +383,7 @@ serve(async (req) => {
         const { data: cacheRows } = await supabase.rpc("match_cached_question", {
           query_embedding: queryEmbedding,
           match_organization_id: orgId,
+          match_prompt_version: PROMPT_VERSION,
         });
         const cacheHit = cacheRows?.[0];
         if (cacheHit) {
@@ -1381,6 +1393,7 @@ User's question/context: ${effectiveQuestion}` : "";
               organization_id: orgId,
               standard_id: standardIds[0] || null,
               question: effectiveQuestion,
+              prompt_version: PROMPT_VERSION,
               // Table INSERT of a vector column needs the JSON-stringified
               // form to be parsed correctly by PostgREST — RPC parameters
               // (e.g. match_chunks/match_cached_question above) accept the

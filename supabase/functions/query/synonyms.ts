@@ -16,6 +16,7 @@ export const TRADIE_SYNONYMS: Record<string, string[]> = {
   "usb power point":          ["socket-outlet", "combination socket-outlet"],
   "surge protector":          ["surge protective device", "spd"],
   "extension lead":           ["flexible cord extension", "extension cord"],
+  "kitchen":                  ["fixed water container", "zone classification", "water container"],
 
   // ── Electrical: protection & safety ─────────────────────────────────────────
   "earth leakage breaker":    ["rcd", "residual current device", "rccb"],

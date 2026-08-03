@@ -112,9 +112,16 @@ function validateResponse(query, apiResponse) {
     issues.push(`FAIL: Expected one of [${correct.join(", ")}] — not found`);
     pass = false;
   }
+
+  // Only check wrong_values against the primary answer statement (the first
+  // sentence — this app always leads with the direct answer, e.g. "...has a
+  // current-carrying capacity of **20 A**."). Checking the whole answer flags
+  // legitimate later mentions (derating results, neighbouring table rows given
+  // as context) as false hallucinations.
+  const primaryStatement = answer.split(/(?<=[.!?])\s/)[0] || answer;
   for (const bad of query.wrong_values || []) {
-    if (answer.includes(bad.toLowerCase())) {
-      issues.push(`FAIL: Hallucination — answer contains "${bad}"`);
+    if (primaryStatement.includes(bad.toLowerCase())) {
+      issues.push(`FAIL: Hallucination — primary answer contains "${bad}"`);
       pass = false;
     }
   }

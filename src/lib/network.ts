@@ -70,7 +70,7 @@ export function getUserMessage(error: unknown): string {
   if (status === 401) return "Your session expired — please sign in again.";
   if (status === 403) return "You don't have permission for that.";
   if (status === 404) return "That resource wasn't found.";
-  if (status === 429) return "You've hit your daily limit — try again tomorrow.";
+  if (status === 429) return "StandAId is currently experiencing problems, try again later.";
   if (status !== undefined && status >= 500) return "Server error — we're looking into it. Try again in a moment.";
 
   const msg = error instanceof Error ? error.message : String(error);
@@ -78,7 +78,7 @@ export function getUserMessage(error: unknown): string {
   if (msg.includes("401")) return "Your session expired — please sign in again.";
   if (msg.includes("403")) return "You don't have permission for that.";
   if (msg.includes("404")) return "That resource wasn't found.";
-  if (msg.includes("429")) return "You've hit your daily limit — try again tomorrow.";
+  if (msg.includes("429")) return "StandAId is currently experiencing problems, try again later.";
   if (msg.includes("500")) return "Server error — we're looking into it. Try again in a moment.";
 
   if (msg.includes("network")) return "Lost connection — check your internet and try again.";
