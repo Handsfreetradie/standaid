@@ -4,17 +4,25 @@ import { getAllowedOrigin } from "../_shared/cors.ts";
 import { PIPELINE_VERSION, computeQualityScore } from "../process-standard/extraction.ts";
 import { extractTextFromPdf } from "../process-standard/ocr.ts";
 import { chunkAndPersist } from "../process-standard/pipeline.ts";
+import { buildOcrResume, isStalledResume } from "../process-standard/resume.ts";
 
 // Admin-only, single-standard reprocess trigger: re-runs the chunking/
 // extraction/tagging pipeline against an already-uploaded standard's stored
 // PDF (no fresh upload required) and stamps pipeline_version so it stops
-// showing up as stale. NOT wired to any cron/sweep — must be invoked
-// explicitly with one standard_id at a time. See scripts/list-stale-standards.mjs
-// to find candidates before calling this.
+// showing up as stale. The initial trigger must still be invoked explicitly
+// with one standard_id at a time (see scripts/list-stale-standards.mjs) — but
+// once started, a scanned standard needing many OCR windows self-retriggers
+// (see `resume: true` below) exactly like process-standard, and a stuck job
+// is picked up by the same generic stale-job sweeper (20260719000000) since
+// that sweep keys off processing_jobs rows regardless of which function
+// created them.
 //
 // Auth pattern copied from grant-trial (the only other owner-only tool in
 // this repo) rather than the internal-service-call pattern used between
 // pipeline functions — this is meant to be triggered by a human, not code.
+// The one exception is the self-retrigger below, which reuses this same
+// service-role-key auth path (trusted the same way process-standard trusts
+// its own self-retrigger) to pass `resume: true`.
 const ADMIN_EMAIL = "kyledixonelectrical@gmail.com";
 
 // Mark the job failed if a single extraction window runs this long — must be
@@ -60,13 +68,22 @@ serve(async (req) => {
     standard_id = body.standard_id;
     if (!standard_id) return json({ error: "standard_id is required" }, 400);
 
+    // Set only by our own self-retrigger below (service-role auth required —
+    // same trust boundary process-standard uses for its internal retrigger),
+    // never by a human/admin caller. Lets a resumed window through the
+    // "already processing" guard below, since window 1 already flipped
+    // extraction_status to 'processing' before this call was made.
+    const isResumeCall = isServiceRoleCall && body.resume === true;
+
     const { data: standard, error: standardError } = await supabaseAdmin
       .from("standards").select("*").eq("id", standard_id).single();
     if (standardError || !standard) return json({ error: "Standard not found" }, 404);
 
     // Don't race an in-flight upload/process — its own chunking will land
-    // with the current PIPELINE_VERSION anyway.
-    if (standard.extraction_status === "pending" || standard.extraction_status === "processing") {
+    // with the current PIPELINE_VERSION anyway. A resume call is expected to
+    // find 'processing' here (it's this same reprocess job's own prior
+    // window), so it skips this check.
+    if (!isResumeCall && (standard.extraction_status === "pending" || standard.extraction_status === "processing")) {
       return json({ error: "Standard is already being processed — try again once it finishes." }, 409);
     }
 
@@ -80,30 +97,68 @@ serve(async (req) => {
     // Old chunks are only deleted once new ones are ready to insert (inside
     // chunkAndPersist) — until then, any failure below just reverts this flag
     // and the standard's existing chunks are completely untouched.
-    const originalStatus = standard.extraction_status as string;
-    await supabaseAdmin.from("standards").update({ extraction_status: "processing" }).eq("id", standard_id);
+    //
+    // Fresh call: create the job row once, stamping the pre-reprocess status
+    // so a later window (which finds extraction_status already 'processing')
+    // still knows what to revert to on failure.
+    // Resume call: reuse that same job row instead of inserting a new one —
+    // it already carries the checkpoint (ocr_text/ocr_next_page) and the
+    // revert status from window 1.
+    let originalStatus: string;
+    let job: { id: string; ocr_text: string | null; ocr_next_page: number | null };
 
-    const { data: job, error: jobError } = await supabaseAdmin
-      .from("processing_jobs")
-      .insert({ standard_id, user_id: standard.user_id, status: "processing", started_at: new Date().toISOString(), heartbeat_at: new Date().toISOString() })
-      .select("id")
-      .single();
-    if (jobError || !job) {
-      await supabaseAdmin.from("standards").update({ extraction_status: originalStatus }).eq("id", standard_id);
-      return json({ error: "Failed to create processing job" }, 500);
+    if (!isResumeCall) {
+      originalStatus = standard.extraction_status as string;
+      await supabaseAdmin.from("standards").update({ extraction_status: "processing" }).eq("id", standard_id);
+
+      const { data: inserted, error: jobError } = await supabaseAdmin
+        .from("processing_jobs")
+        .insert({
+          standard_id, user_id: standard.user_id, status: "processing",
+          started_at: new Date().toISOString(), heartbeat_at: new Date().toISOString(),
+          revert_extraction_status: originalStatus,
+        })
+        .select("id, ocr_text, ocr_next_page")
+        .single();
+      if (jobError || !inserted) {
+        await supabaseAdmin.from("standards").update({ extraction_status: originalStatus }).eq("id", standard_id);
+        return json({ error: "Failed to create processing job" }, 500);
+      }
+      job = inserted;
+    } else {
+      const { data: jobRows } = await supabaseAdmin
+        .from("processing_jobs")
+        .select("id, ocr_text, ocr_next_page, revert_extraction_status")
+        .eq("standard_id", standard_id)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      const found = jobRows?.[0];
+      if (!found) {
+        // Checkpoint row is gone — nothing to resume into. Fail closed
+        // rather than silently starting a fresh OCR pass under someone
+        // else's expectations of what this call would do.
+        await supabaseAdmin.from("standards").update({ extraction_status: "failed" }).eq("id", standard_id);
+        return json({ error: "Resume call found no processing job to continue." }, 500);
+      }
+      job = found;
+      originalStatus = (found.revert_extraction_status as string | null) || "failed";
+      await supabaseAdmin.from("processing_jobs")
+        .update({ status: "processing", heartbeat_at: new Date().toISOString() })
+        .eq("id", job.id);
     }
     jobId = job.id;
 
     const fail = async (message: string, status = 422) => {
       await supabaseAdmin.from("standards").update({ extraction_status: originalStatus }).eq("id", standard_id);
       await supabaseAdmin.from("processing_jobs")
-        .update({ status: "failed", error_message: message, completed_at: new Date().toISOString() })
+        .update({ status: "failed", error_message: message, ocr_text: null, ocr_next_page: null, completed_at: new Date().toISOString() })
         .eq("id", job.id);
       return json({ error: message }, status);
     };
 
-    // Same daily circuit-breaker as process-standard — reprocessing a scanned
-    // standard re-runs OCR and must count against the same spend guard.
+    // Same daily circuit-breaker as process-standard, applied per window —
+    // reprocessing a scanned standard re-runs OCR and must count against the
+    // same spend guard on every self-retriggered window, not just the first.
     const { data: ocrBudget } = await supabaseAdmin.rpc("check_and_record_ai_usage", {
       p_user_id: standard.user_id,
       p_kind: "ocr_run",
@@ -120,19 +175,62 @@ serve(async (req) => {
     const fileBytes = new Uint8Array(await fileData.arrayBuffer());
     console.log(`[reprocess-standard][${standard_id}] Downloaded ${fileBytes.length} bytes, re-extracting text`);
 
+    // Resume state from a previous OCR window of THIS job — undefined for a
+    // fresh job row (ocr_next_page starts null) or a genuinely fresh call.
+    const resume = buildOcrResume(job);
+
     let outcome;
     try {
       const deadline = requestStart + PROCESSING_TIMEOUT_MS - 20_000;
-      outcome = await extractTextFromPdf(fileBytes, ANTHROPIC_API_KEY, deadline);
+      outcome = await extractTextFromPdf(fileBytes, ANTHROPIC_API_KEY, deadline, resume);
     } catch (e) {
       return fail(e instanceof Error ? e.message : "Text extraction failed.");
     }
 
-    // Scanned documents needing more than one OCR window aren't supported by
-    // this single-window admin tool yet — fail cleanly rather than leaving
-    // the standard stuck mid-reprocess. The original chunks are untouched.
     if (!outcome.done) {
-      return fail("This standard needs multiple OCR passes to re-extract (large scanned document) — reprocess-standard doesn't support resuming yet. The standard is unchanged.");
+      // No forward progress since last run (e.g. the same batch keeps
+      // failing) — fail the job rather than retriggering forever.
+      if (isStalledResume(resume, outcome.nextPage)) {
+        return fail("Re-extraction stalled partway through this PDF (no progress between OCR windows). The standard is unchanged.");
+      }
+
+      // Persist progress and retrigger self to continue from nextPage — same
+      // checkpoint mechanism as process-standard (ocr_text/ocr_next_page/
+      // heartbeat_at), targeting this function's own URL instead of
+      // process-standard's.
+      await supabaseAdmin.from("processing_jobs")
+        .update({ ocr_text: outcome.ocrText, ocr_next_page: outcome.nextPage, status: "processing", heartbeat_at: new Date().toISOString() })
+        .eq("id", job.id);
+      const selfUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/reprocess-standard`;
+      const retrigger = fetch(selfUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceRoleKey}` },
+        body: JSON.stringify({ standard_id, resume: true }),
+      }).catch(err => console.error("[reprocess-standard] Failed to retrigger for OCR resume:", err));
+      (globalThis as any).EdgeRuntime?.waitUntil?.(retrigger);
+      console.log(`[reprocess-standard][${standard_id}] OCR paused at page ${outcome.nextPage} (${outcome.ocrText.length} chars so far) — retriggered to resume`);
+      return json({ status: "ocr_resuming", next_page: outcome.nextPage });
+    }
+
+    // OCR done but most of this window is spent — chunking + inserts after a
+    // long OCR run can blow the cleanup timer (the AS 3017 incident: a job
+    // marked failed AFTER all pages were transcribed). Persist the complete
+    // text and retrigger: the next run's startPage is past the last page, so
+    // extractTextFromPdf's resume path returns the carried-forward text
+    // immediately and this gets a fresh window for chunking alone.
+    if (Date.now() - requestStart > 60_000) {
+      await supabaseAdmin.from("processing_jobs")
+        .update({ ocr_text: outcome.rawText, ocr_next_page: outcome.totalPages + 1, status: "processing", heartbeat_at: new Date().toISOString() })
+        .eq("id", job.id);
+      const selfUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/reprocess-standard`;
+      const chunkTrigger = fetch(selfUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceRoleKey}` },
+        body: JSON.stringify({ standard_id, resume: true }),
+      }).catch(err => console.error("[reprocess-standard] Failed to retrigger for chunking pass:", err));
+      (globalThis as any).EdgeRuntime?.waitUntil?.(chunkTrigger);
+      console.log(`[reprocess-standard][${standard_id}] OCR complete (${outcome.rawText.length} chars) — deferred chunking to a fresh window`);
+      return json({ status: "ocr_done_chunking_deferred" });
     }
 
     const qualityScore = computeQualityScore(outcome.text, outcome.totalPages, outcome.pagesWithContent);

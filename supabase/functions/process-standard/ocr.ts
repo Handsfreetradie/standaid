@@ -11,7 +11,14 @@ import {
 } from "./extraction.ts";
 
 const SCANNED_DOC_RATIO = 0.85;
-const AI_EXTRACTION_SIZE_LIMIT = 10 * 1024 * 1024;
+// Memory guard for the >100-page pdf-lib slicing path only (whole-doc mode
+// below is unaffected by byte size — it goes through the Files API). 25MB
+// matches the whole-doc base64 fallback's already-proven-safe threshold a few
+// lines below, which holds a larger in-memory footprint per byte (base64 is
+// ~33% bigger than raw) than this raw-byte pdf-lib load — raising to match it
+// isn't a new risk. The old 10MB value was an arbitrary conservative pick
+// that rejected real standards (AS 3008 Parts 1/2 at 10.2MB) a hair over it.
+const AI_EXTRACTION_SIZE_LIMIT = 25 * 1024 * 1024;
 
 // Pages per OCR call. A dense standards page transcribes to ~600-1000 output
 // tokens; 15 pages blew straight past the 8k max_tokens and later pages of
@@ -306,7 +313,7 @@ export async function extractTextFromPdf(
   // whole-document window go through the Files API regardless of size.
   const ocrWholeDocEligible = pageTexts.length > 0 && pageTexts.length <= 100;
   if (fileBytes.length > AI_EXTRACTION_SIZE_LIMIT && !ocrWholeDocEligible) {
-    throw new Error("This PDF is too big to OCR — scans over 10MB are only supported up to 100 pages. Try a digital copy of the standard.");
+    throw new Error("This PDF is too big to OCR — scans over 25MB are only supported up to 100 pages. Try a digital copy of the standard.");
   }
 
   // Use batched page-by-page AI OCR so long documents aren't truncated.
