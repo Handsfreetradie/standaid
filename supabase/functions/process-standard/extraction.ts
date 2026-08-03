@@ -268,6 +268,16 @@ export function convertPdfToBase64(fileBytes: Uint8Array): string {
 // from legitimately repeated content.
 const FURNITURE_PAGE_FRACTION = 0.3;
 const FURNITURE_MIN_PAGES = 20;
+// Some licences only stamp their boilerplate on a document's front matter
+// (title/licence/copyright/preface pages) rather than every page — AS3017:2007's
+// personal-licence line appears on ~10 of its 57 pages (all in the first dozen)
+// and never reaches the whole-document 30% bar, since the bulk of a real
+// standard is technical content that doesn't repeat it. A second pass checks
+// repetition within just the leading pages so a front-matter-only watermark
+// still gets caught, without lowering the document-wide bar (which would risk
+// stripping legitimately-repeated technical text, e.g. recurring NOTE wording).
+const FRONT_MATTER_WINDOW_PAGES = 20;
+const FRONT_MATTER_PAGE_FRACTION = 0.4;
 
 export function stripRepeatedPageFurniture(markedText: string): string {
   const pageMarker = /^\[PAGE\s+\d+\]/i;
@@ -281,14 +291,20 @@ export function stripRepeatedPageFurniture(markedText: string): string {
 
   const lines = markedText.split("\n");
 
-  // Pass 1: count how many DISTINCT pages each normalised line appears on
+  // Pass 1: count how many DISTINCT pages each normalised line appears on,
+  // both document-wide and within just the front-matter window.
   const pageCounts = new Map<string, number>();
+  const frontMatterCounts = new Map<string, number>();
   let pagesWithContent = 0;
   let currentPageLines: Set<string> | null = null;
   const flushPage = () => {
     if (currentPageLines && currentPageLines.size > 0) {
       pagesWithContent++;
-      for (const key of currentPageLines) pageCounts.set(key, (pageCounts.get(key) || 0) + 1);
+      const inFrontMatter = pagesWithContent <= FRONT_MATTER_WINDOW_PAGES;
+      for (const key of currentPageLines) {
+        pageCounts.set(key, (pageCounts.get(key) || 0) + 1);
+        if (inFrontMatter) frontMatterCounts.set(key, (frontMatterCounts.get(key) || 0) + 1);
+      }
     }
   };
   for (const line of lines) {
@@ -307,10 +323,16 @@ export function stripRepeatedPageFurniture(markedText: string): string {
   // parses as an undotted ALL-CAPS clause heading on the raw line, but with
   // its page number stripped it's plain text and drops like any furniture.
   const threshold = Math.ceil(pagesWithContent * FURNITURE_PAGE_FRACTION);
+  const frontMatterPages = Math.min(pagesWithContent, FRONT_MATTER_WINDOW_PAGES);
+  const frontMatterThreshold = Math.ceil(frontMatterPages * FRONT_MATTER_PAGE_FRACTION);
   return lines.filter((line) => {
     if (pageMarker.test(line)) return true;
     const key = normalise(line);
-    if (!key || (pageCounts.get(key) || 0) < threshold) return true;
+    if (!key) return true;
+    const isFurniture =
+      (pageCounts.get(key) || 0) >= threshold ||
+      (frontMatterCounts.get(key) || 0) >= frontMatterThreshold;
+    if (!isFurniture) return true;
     return isSectionHeading(key) || matchClauseHeading(key, true) !== null || captionLine.test(key);
   }).join("\n");
 }

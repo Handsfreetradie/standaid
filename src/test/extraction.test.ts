@@ -480,6 +480,42 @@ describe("stripRepeatedPageFurniture", () => {
     expect(stripped).toContain("Unique body text for page 7");
   });
 
+  it("catches a watermark confined to front-matter pages only (real AS3017 pattern)", () => {
+    // Real observed pattern from AS/NZS 3017:2007 (personal licence, not a
+    // network licence): the licence line is stamped on pages 2-5 and 7-12
+    // (10 of the first 12 pages) but never appears again in the remaining 45
+    // pages of actual technical content — nowhere near the whole-document 30%
+    // bar (10/57 ≈ 17.5%), which is exactly why it survived the first fix.
+    const frontMatterLicence =
+      "Licensed to Ms Nyree Smart on 28 April 2011. 1 user personal user licence only. Storage, distribution or use on network prohibited (10203309).";
+    const pages: string[] = [];
+    for (let i = 1; i <= 57; i++) {
+      const bodyLines = [`Technical content unique to page ${i} describing a test procedure in detail.`];
+      // Watermark only on pages 2-5 and 7-12 (10 of the first 12) — never after
+      if ((i >= 2 && i <= 5) || (i >= 7 && i <= 12)) bodyLines.push(frontMatterLicence);
+      pages.push([`[PAGE ${i}]`, ...bodyLines].join("\n"));
+    }
+    const doc = pages.join("\n");
+    const stripped = stripRepeatedPageFurniture(doc);
+    expect(stripped).not.toContain(frontMatterLicence);
+    expect(stripped).toContain("Technical content unique to page 40");
+    expect(stripped).toContain("[PAGE 40]");
+  });
+
+  it("does not strip technical text that happens to repeat only within the front-matter window", () => {
+    // A phrase repeated a handful of times only near the start of the document
+    // (below the front-matter threshold) must survive — guards against the
+    // new pass being trigger-happy on short, coincidentally-repeated phrases.
+    const pages: string[] = [];
+    for (let i = 1; i <= 57; i++) {
+      const bodyLines = [`Technical content unique to page ${i}.`];
+      if (i === 3 || i === 9) bodyLines.push("See the referenced installation diagram for details.");
+      pages.push([`[PAGE ${i}]`, ...bodyLines].join("\n"));
+    }
+    const stripped = stripRepeatedPageFurniture(pages.join("\n"));
+    expect(stripped).toContain("See the referenced installation diagram for details.");
+  });
+
   it("leaves short documents untouched", () => {
     const shortDoc = Array.from({ length: 5 }, (_, i) => [
       `[PAGE ${i + 1}]`,
