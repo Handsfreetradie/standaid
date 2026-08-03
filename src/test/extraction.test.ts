@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   convertPdfToBase64,
   matchClauseHeading,
+  isSectionHeading,
   sortIntoSections,
   chunkSections,
   extractTableChunks,
@@ -10,6 +11,7 @@ import {
   computeQualityScore,
   hasGoodTextQuality,
   buildDocumentMapChunk,
+  stripRepeatedPageFurniture,
 } from "../../supabase/functions/process-standard/extraction";
 
 describe("convertPdfToBase64", () => {
@@ -389,5 +391,101 @@ describe("NCC structure detection", () => {
       "Section C of the code covers fire. Part 3 also applies here.",
     ].join("\n"));
     expect(sections.map((s) => s.heading)).not.toContain("Section C of the code covers fire. Part 3 also applies here.");
+  });
+});
+
+describe("amendment asterisk stripping", () => {
+  it("matches clause headings behind a leading amendment mark", () => {
+    // AS/NZS 3000:2018 Amendment 1/2 print a margin "*" beside changed
+    // clauses; extraction puts it at line start and hid ~7% of clauses
+    expect(matchClauseHeading("* 2.9.2 Type")).toEqual({ number: "2.9.2", title: "Type" });
+    expect(matchClauseHeading("* 2.5.3.2 Position of overload protective device—General arrangement")).toEqual({
+      number: "2.5.3.2",
+      title: "Position of overload protective device—General arrangement",
+    });
+    expect(matchClauseHeading("*7.2.1 General")).toEqual({ number: "7.2.1", title: "General" });
+    expect(matchClauseHeading("* B5.2.3 Fault protection", true)).toEqual({ number: "B5.2.3", title: "Fault protection" });
+  });
+
+  it("matches section headings behind a leading amendment mark", () => {
+    expect(isSectionHeading("* SECTION 7 SPECIAL INSTALLATIONS")).toBe(true);
+    expect(isSectionHeading("* APPENDIX B")).toBe(true);
+  });
+
+  it("still rejects non-headings and markdown bold captions", () => {
+    expect(matchClauseHeading("* 1.5 Times the rated current")).toBeNull();
+    expect(matchClauseHeading("* bullet point prose, not a clause")).toBeNull();
+    // "**TABLE 8.1" is caption territory (tolerated by the caption patterns),
+    // never a clause heading — the single-mark strip must not consume it
+    expect(matchClauseHeading("**TABLE 8.1 — LIMITS**")).toBeNull();
+  });
+
+  it("opens a section for an asterisk-marked clause instead of merging it", () => {
+    const sections = sortIntoSections([
+      "[PAGE 90]",
+      "2.9.1 General",
+      "Switchboard requirements apply generally to the installation as described.",
+      "* 2.9.2 Type",
+      "Every switchboard shall be of a type suitable for the installation conditions.",
+    ].join("\n"));
+    expect(sections.map((s) => s.clauseNumber)).toContain("2.9.2");
+  });
+});
+
+describe("stripRepeatedPageFurniture", () => {
+  // Synthetic 25-page doc: every page carries licence boilerplate, COPYRIGHT
+  // and a running header (leading page number form), plus unique body text
+  const licence = "Licensed to Williams Electrical Service Pty Ltd on 27-Jun-2018. 3 concurrent user network licenses.";
+  const permission = "Get permission to copy from or network this publication www.saiglobal.com/licensing";
+  const doc = Array.from({ length: 25 }, (_, i) => [
+    `[PAGE ${i + 1}]`,
+    `${i + 1} AS/NZS 3000:2018`,
+    `2.${i + 1} Clause heading for page ${i + 1}`,
+    `Unique body text for page ${i + 1} describing installation requirements in detail.`,
+    licence,
+    permission,
+    "COPYRIGHT",
+  ].join("\n")).join("\n");
+
+  it("drops licence, copyright and running-header lines", () => {
+    const stripped = stripRepeatedPageFurniture(doc);
+    expect(stripped).not.toContain(licence);
+    expect(stripped).not.toContain(permission);
+    expect(stripped).not.toContain("COPYRIGHT");
+    expect(stripped).not.toContain("3 AS/NZS 3000:2018");
+  });
+
+  it("keeps body text, headings, captions and [PAGE N] markers", () => {
+    // Repeat a clause heading and a table caption on every page — structure
+    // must survive the frequency threshold
+    const withStructure = doc.replace(/COPYRIGHT/g, "COPYRIGHT\n8.3 TESTING\nTABLE 8.1 — LIMITS");
+    const stripped = stripRepeatedPageFurniture(withStructure);
+    expect(stripped).toContain("Unique body text for page 12");
+    expect(stripped).toContain("2.12 Clause heading for page 12");
+    expect(stripped).toContain("[PAGE 12]");
+    expect(stripped).toContain("8.3 TESTING");
+    expect(stripped).toContain("TABLE 8.1 — LIMITS");
+  });
+
+  it("pools trailing-dot variants of the same line", () => {
+    // Real PDFs stamp the licence line with a trailing full stop on most pages
+    // but not all; each variant alone can sit under the page threshold
+    const variantDoc = Array.from({ length: 25 }, (_, i) => [
+      `[PAGE ${i + 1}]`,
+      i % 3 === 0 ? `${licence}.` : licence,
+      `Unique body text for page ${i + 1}.`,
+    ].join("\n")).join("\n");
+    const stripped = stripRepeatedPageFurniture(variantDoc);
+    expect(stripped).not.toContain(licence);
+    expect(stripped).toContain("Unique body text for page 7");
+  });
+
+  it("leaves short documents untouched", () => {
+    const shortDoc = Array.from({ length: 5 }, (_, i) => [
+      `[PAGE ${i + 1}]`,
+      licence,
+      `Body text for page ${i + 1}.`,
+    ].join("\n")).join("\n");
+    expect(stripRepeatedPageFurniture(shortDoc)).toBe(shortDoc);
   });
 });

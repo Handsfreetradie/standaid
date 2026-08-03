@@ -343,7 +343,7 @@ serve(async (req) => {
       clauseNumberMatches.length > 0
         ? supabase
             .from("standard_chunks")
-            .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
+            .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index, chunk_type, is_normative")
             .or(ownershipFilter)
             .in("clause_number", clauseNumberMatches)
             .limit(20)
@@ -564,7 +564,7 @@ serve(async (req) => {
       refKeys.size > 0
         ? supabase
             .from("standard_chunks")
-            .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
+            .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index, chunk_type, is_normative")
             .or(ownershipFilter)
             .in("clause_number", [...refKeys].slice(0, 12))
             .limit(8)
@@ -572,7 +572,7 @@ serve(async (req) => {
       wantClauses.length > 0
         ? supabase
             .from("standard_chunks")
-            .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
+            .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index, chunk_type, is_normative")
             .or(ownershipFilter)
             .in("clause_number", wantClauses)
             .limit(8)
@@ -619,7 +619,7 @@ serve(async (req) => {
         if (targetIds.length > 0) {
           const { data: xRows } = await supabase
             .from("standard_chunks")
-            .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
+            .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index, chunk_type, is_normative")
             .or(ownershipFilter)
             .in("standard_id", targetIds)
             .textSearch("fts", xFtsQuery, { type: "websearch" })
@@ -654,7 +654,7 @@ serve(async (req) => {
         const orTerms = terms.map((t) => `content.ilike.%${t}%`).join(",");
         const { data: defRows } = await supabase
           .from("standard_chunks")
-          .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index")
+          .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index, chunk_type, is_normative")
           .or(ownershipFilter)
           .in("standard_id", standardIds)
           .or("clause_title.ilike.%definition%,clause_title.ilike.%terms and definitions%,clause_number.ilike.1.4%")
@@ -713,12 +713,23 @@ serve(async (req) => {
         ).join("\n")
       : "";
 
+    // Normative/informative tag stamped at processing time. Chunks written
+    // before tagging existed carry NULL — those get no annotation rather
+    // than a guess the model would treat as authoritative.
+    const chunkTag = (c: any): string => {
+      if (c.chunk_type === "note") return " [NOTE]";
+      if (c.chunk_type === "definition") return " [DEFINITION]";
+      if (c.is_normative === true) return " [MANDATORY — normative]";
+      if (c.is_normative === false) return " [GUIDANCE — informative]";
+      return "";
+    };
+
     // Build context string
     const tableRowContext = extractTableRows(effectiveQuestion, matchedChunks);
     const contextChunks = matchedChunks.length > 0
       ? matchedChunks.map((chunk: any, i: number) => {
           const std = standardMap.get(chunk.standard_id);
-          return `[Source ${i + 1} — ${std?.standard_code || "Unknown"} ${std?.version || ""} Clause ${chunk.clause_number || "N/A"} (Page ${chunk.page_number || "N/A"})]
+          return `[Source ${i + 1} — ${std?.standard_code || "Unknown"} ${std?.version || ""} Clause ${chunk.clause_number || "N/A"} (Page ${chunk.page_number || "N/A"})${chunkTag(chunk)}]
 ${chunk.content}`;
         }).join("\n\n") + tableRowContext + figCaptionContext + correctionsContext
       : null;

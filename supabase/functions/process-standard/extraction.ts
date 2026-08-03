@@ -2,12 +2,27 @@
 // No Deno or network dependencies — imported by index.ts (Deno edge function)
 // and by the vitest unit tests in src/test/extraction.test.ts.
 
+// Bump this whenever chunking/extraction/tagging logic changes in a way that
+// would meaningfully change existing chunks (e.g. sectioning rules, table/
+// figure detection, normativity tagging). standards.pipeline_version is
+// stamped with this value when chunks are (re)built, so stale standards
+// (pipeline_version < PIPELINE_VERSION) can be found and reprocessed via
+// reprocess-standard without requiring users to re-upload.
+export const PIPELINE_VERSION = 1;
+
 export interface Section {
   heading: string | null;
   clauseNumber: string | null;
   lines: string[];
   pageNumber: number;
+  // Appendix context from the sectioner: appendices are tagged normative or
+  // informative by their "(Normative)"/"(Informative)" marker, which changes
+  // whether their content is a requirement or guidance.
+  inAppendix: boolean;
+  appendixNormative: boolean | null;
 }
+
+export type ChunkType = "clause" | "table" | "figure" | "note" | "definition" | "appendix" | "map";
 
 export interface Chunk {
   clause_number: string | null;
@@ -15,6 +30,19 @@ export interface Chunk {
   content: string;
   page_number: number;
   chunk_index: number;
+  chunk_type: ChunkType;
+  // true = mandatory ("shall"), false = guidance (should/NOTE/informative),
+  // null = neither signal present
+  is_normative: boolean | null;
+}
+
+// Normativity of ordinary clause text: "shall" is mandatory language anywhere
+// in the clause; "should" or an uppercase NOTE with no "shall" is guidance
+// only. Lowercase "note" is excluded — prose like "note that" isn't a NOTE.
+export function tagClauseNormativity(text: string): boolean | null {
+  if (/\bshall\b/i.test(text)) return true;
+  if (/\bshould\b/i.test(text) || /\bNOTES?\b/.test(text)) return false;
+  return null;
 }
 
 // Heading patterns for AU/NZ standards AND the NCC (National Construction
@@ -30,8 +58,17 @@ export const SECTION_HEADING = /^(SECTION\s+\d+|PART\s+[A-J]?\d+(?:\.\d+)*|APPEN
 // the guard matched lowercase words and was useless.
 export const NCC_SECTION_HEADING = /^SECTION\s+[A-J]\s+[A-Z]{2,}/;
 
+// Amendment 1/2 print a margin "*" beside every changed clause, and extraction
+// places it at line start ("* 2.9.2 Type") — the ^-anchored heading patterns
+// never fired on those lines, so ~7% of AS/NZS 3000:2018's clauses silently
+// merged into the previous clause's chunk. Stripped once here, before
+// matching, rather than reworked into every pattern. A single mark only:
+// "**TABLE"-style markdown bold is caption territory, not an amendment mark.
+const AMENDMENT_MARK = /^\*(?!\*)\s*/;
+
 export function isSectionHeading(line: string): boolean {
-  return SECTION_HEADING.test(line) || NCC_SECTION_HEADING.test(line);
+  const l = line.replace(AMENDMENT_MARK, "");
+  return SECTION_HEADING.test(l) || NCC_SECTION_HEADING.test(l);
 }
 
 // Require: clause number + whitespace + capital letter + alpha char
@@ -104,6 +141,7 @@ function validateHeading(number: string, title: string, allowMixedCase = false):
 }
 
 export function matchClauseHeading(line: string, inAppendix = false): ClauseHeading | null {
+  line = line.replace(AMENDMENT_MARK, "");
   const m = line.match(CLAUSE_PATTERN);
   if (m) {
     // Groups: [1]=number (tab variant), [2]=title (tab variant), [3]=number (space variant), [4]=title (space variant)
@@ -218,6 +256,65 @@ export function convertPdfToBase64(fileBytes: Uint8Array): string {
   return btoa(binary);
 }
 
+// ── Page-furniture stripping ─────────────────────────────────────────────────
+
+// Licensed PDFs stamp near-identical boilerplate on every page — SAI Global
+// licence lines, "COPYRIGHT", the running "AS/NZS 3000:2018" header with a
+// page number. Without stripping, those lines land inside every chunk
+// (~150KB of noise across a full standard, baked into the embeddings).
+// Detection is generic, not hardcoded: any line whose normalised form appears
+// on a large fraction of content pages is furniture, whatever the standard or
+// licensee. Short documents are left alone — too few pages to tell furniture
+// from legitimately repeated content.
+const FURNITURE_PAGE_FRACTION = 0.3;
+const FURNITURE_MIN_PAGES = 20;
+
+export function stripRepeatedPageFurniture(markedText: string): string {
+  const pageMarker = /^\[PAGE\s+\d+\]/i;
+  const captionLine = /^\*{0,2}(?:TABLE|FIGURE)S?\s+[A-Z]?\d/i;
+  // Collapse whitespace, drop a leading/trailing bare page number so
+  // "3 AS/NZS 3000:2018" and "AS/NZS 3000:2018 417" count as the same header,
+  // and drop trailing full stops — licence stamps appear with and without one,
+  // and counted separately each variant can fall under the page threshold.
+  const normalise = (line: string) =>
+    line.trim().replace(/\s+/g, " ").replace(/^\d{1,4} /, "").replace(/ \d{1,4}$/, "").replace(/\.+$/, "");
+
+  const lines = markedText.split("\n");
+
+  // Pass 1: count how many DISTINCT pages each normalised line appears on
+  const pageCounts = new Map<string, number>();
+  let pagesWithContent = 0;
+  let currentPageLines: Set<string> | null = null;
+  const flushPage = () => {
+    if (currentPageLines && currentPageLines.size > 0) {
+      pagesWithContent++;
+      for (const key of currentPageLines) pageCounts.set(key, (pageCounts.get(key) || 0) + 1);
+    }
+  };
+  for (const line of lines) {
+    if (pageMarker.test(line)) { flushPage(); currentPageLines = new Set(); continue; }
+    const key = normalise(line);
+    if (key && currentPageLines) currentPageLines.add(key);
+  }
+  flushPage();
+
+  if (pagesWithContent < FURNITURE_MIN_PAGES) return markedText;
+
+  // Pass 2: drop furniture lines, keeping markers and anything structural —
+  // headings and captions are what sectioning and table/figure extraction
+  // anchor on, so they survive no matter how often they repeat. Structure is
+  // judged on the NORMALISED form: the running header "3 AS/NZS 3000:2018"
+  // parses as an undotted ALL-CAPS clause heading on the raw line, but with
+  // its page number stripped it's plain text and drops like any furniture.
+  const threshold = Math.ceil(pagesWithContent * FURNITURE_PAGE_FRACTION);
+  return lines.filter((line) => {
+    if (pageMarker.test(line)) return true;
+    const key = normalise(line);
+    if (!key || (pageCounts.get(key) || 0) < threshold) return true;
+    return isSectionHeading(key) || matchClauseHeading(key, true) !== null || captionLine.test(key);
+  }).join("\n");
+}
+
 // ── Sectioning ───────────────────────────────────────────────────────────────
 
 // Splits text into sections, tracking the real page from inline [PAGE N] markers.
@@ -227,10 +324,15 @@ export function convertPdfToBase64(fileBytes: Uint8Array): string {
 export function sortIntoSections(markedText: string): Section[] {
   const lines = markedText.split("\n");
   const sections: Section[] = [];
-  let current: Section = { heading: null, clauseNumber: null, lines: [], pageNumber: 1 };
+  let current: Section = { heading: null, clauseNumber: null, lines: [], pageNumber: 1, inAppendix: false, appendixNormative: null };
   let currentPage = 1;
   let inAppendix = false;
+  // Whether the current appendix is "(Normative)" or "(Informative)" — the
+  // marker sits on or just under the APPENDIX heading, before any lettered
+  // clause, so clause sections created later inherit the resolved value.
+  let appendixNormative: boolean | null = null;
   const pageMarker = /^\[PAGE\s+(\d+)\]/i;
+  const appendixStatusMarker = /^\(?\s*(INFORMATIVE|NORMATIVE)\s*\)?$/i;
 
   for (const line of lines) {
     // Update the running page from the marker, but never treat it as content
@@ -242,12 +344,18 @@ export function sortIntoSections(markedText: string): Section[] {
     const clauseMatch = matchClauseHeading(line, inAppendix);
 
     if (sectionMatch !== null) {
+      if (current.lines.length > 0) sections.push({ ...current });
       // Track appendix context so letter-prefixed clauses (B1, C2.1) are
       // detected there — appendices used to collapse into one giant
       // unlabelled section, hiding e.g. maximum-demand rules from retrieval.
-      inAppendix = /^APPENDIX/i.test(line.trim());
-      if (current.lines.length > 0) sections.push({ ...current });
-      current = { heading: line.trim(), clauseNumber: null, lines: [line], pageNumber: currentPage };
+      inAppendix = /^APPENDIX/i.test(line.trim().replace(AMENDMENT_MARK, ""));
+      // "(Informative)" sometimes rides on the heading line itself. Checked
+      // informative-first: \b keeps "normative" from matching inside it, but
+      // the order makes the intent explicit.
+      appendixNormative = inAppendix
+        ? (/\bINFORMATIVE\b/i.test(line) ? false : /\bNORMATIVE\b/i.test(line) ? true : null)
+        : null;
+      current = { heading: line.trim(), clauseNumber: null, lines: [line], pageNumber: currentPage, inAppendix, appendixNormative };
     } else if (clauseMatch) {
       if (current.lines.length > 0) sections.push({ ...current });
       current = {
@@ -255,8 +363,17 @@ export function sortIntoSections(markedText: string): Section[] {
         clauseNumber: clauseMatch.number,
         lines: [line],
         pageNumber: currentPage,
+        inAppendix,
+        appendixNormative,
       };
     } else {
+      // Standalone "(Normative)"/"(Informative)" line under the APPENDIX
+      // heading — only honoured while still inside the heading section, so
+      // body text deeper in the appendix can't flip the status.
+      if (inAppendix && appendixNormative === null && current.clauseNumber === null && appendixStatusMarker.test(line.trim())) {
+        appendixNormative = !/\bINFORMATIVE\b/i.test(line);
+        current.appendixNormative = appendixNormative;
+      }
       current.lines.push(line);
     }
   }
@@ -326,6 +443,26 @@ export function chunkSections(sections: Section[], standardCode: string, version
     const isHeading = section.clauseNumber !== null || isSectionHeading(section.heading || "");
     if (sectionText.length < 20 && !isHeading) continue;
 
+    // Normative/informative tag, decided once per section so split chunks of
+    // one clause all carry the same tag. Definitions and NOTE-only content
+    // are guidance by nature; appendix chunks take the appendix's own
+    // (Normative)/(Informative) marker; everything else reads its wording.
+    const isDefinition = /definition/i.test(section.heading || "") || (section.clauseNumber || "").startsWith("1.4");
+    let chunkType: ChunkType = "clause";
+    let isNormative: boolean | null;
+    if (isDefinition) {
+      chunkType = "definition";
+      isNormative = false;
+    } else if (section.inAppendix) {
+      chunkType = "appendix";
+      isNormative = section.appendixNormative;
+    } else if (/^NOTES?\b/.test(sectionText)) {
+      chunkType = "note";
+      isNormative = false;
+    } else {
+      isNormative = tagClauseNormativity(sectionText);
+    }
+
     const breadcrumb = buildBreadcrumb(standardCode, version, section.clauseNumber, section.heading);
 
     if (sectionText.length <= MAX_CHUNK_CHARS) {
@@ -335,6 +472,8 @@ export function chunkSections(sections: Section[], standardCode: string, version
         content: breadcrumb + sectionText,
         page_number: section.pageNumber,
         chunk_index: chunkIndex++,
+        chunk_type: chunkType,
+        is_normative: isNormative,
       });
     } else {
       // Split on paragraph boundaries with overlap carry-forward. Oversized
@@ -353,6 +492,8 @@ export function chunkSections(sections: Section[], standardCode: string, version
             content: breadcrumb + buffer.trim(),
             page_number: section.pageNumber,
             chunk_index: chunkIndex++,
+            chunk_type: chunkType,
+            is_normative: isNormative,
           });
           // Start next chunk with overlap from previous
           buffer = prevTail ? `[...continued from above]\n${prevTail}\n\n${para}` : para;
@@ -368,6 +509,8 @@ export function chunkSections(sections: Section[], standardCode: string, version
           content: breadcrumb + buffer.trim(),
           page_number: section.pageNumber,
           chunk_index: chunkIndex++,
+          chunk_type: chunkType,
+          is_normative: isNormative,
         });
       }
     }
@@ -387,12 +530,14 @@ export function chunkSections(sections: Section[], standardCode: string, version
           content: buffer.trim(),
           page_number: 1,
           chunk_index: chunkIndex++,
+          chunk_type: "clause",
+          is_normative: tagClauseNormativity(buffer),
         });
         buffer = "";
       }
     }
     if (buffer.trim().length > 20) {
-      chunks.push({ clause_number: null, clause_title: null, content: buffer.trim(), page_number: 1, chunk_index: chunkIndex++ });
+      chunks.push({ clause_number: null, clause_title: null, content: buffer.trim(), page_number: 1, chunk_index: chunkIndex++, chunk_type: "clause", is_normative: tagClauseNormativity(buffer) });
     }
   }
 
@@ -465,6 +610,8 @@ export function buildDocumentMapChunk(
     content: `${label} Document map — sections, appendices and contents of this standard\n\n${body}`,
     page_number: 1,
     chunk_index: 0, // placed first so even the free tier's 25% cutoff includes it
+    chunk_type: "map",
+    is_normative: false,
   };
 }
 
@@ -589,6 +736,8 @@ export function extractTableChunks(text: string, standardCode: string, version: 
       content: `${label} Table ${tableNum}${title ? `: ${title}` : ""}\n\n${surrounding.trim()}${placeholder}`,
       page_number: linePages[lineIdx] ?? 1,
       chunk_index: 0, // reassigned after merge
+      chunk_type: "table",
+      is_normative: null, // a table's force comes from the clause invoking it
     });
   }
 
@@ -687,6 +836,8 @@ export function extractFigureChunks(text: string, standardCode: string, version:
       content: `${label} Figure ${figNum}${caption ? ` — ${caption}` : ""}\n\nThis figure appears on page ${page} of the standard. A visual description will be generated shortly.\n\nContext: ${surrounding}`,
       page_number: page,
       chunk_index: 0,
+      chunk_type: "figure",
+      is_normative: null, // a figure's force comes from the clause invoking it
     });
     seenFigures.add(figNum);
   }
