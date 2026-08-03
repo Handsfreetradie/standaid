@@ -1068,32 +1068,49 @@ User's question/context: ${effectiveQuestion}` : "";
         const figNums = aiFigures.map((f: any) => f.figure_number).filter(Boolean);
         const tblNums = aiTables.map((t: any) => t.table_number).filter(Boolean);
 
-        // Build standard code → UUID map once; used by figures, tables, and citations below
+        // Build standard code → UUID map once; used by figures, tables, and
+        // citations below. Built from EVERY standard the user/org owns
+        // (ownedStandardsResult, already fetched earlier for trade-scoping)
+        // — not just standardMap, which only contains standards that
+        // happened to have a chunk survive retrieval this round. Scoping
+        // this to retrieval was the actual bug behind a plumbing table
+        // opening for an electrical citation even after both the standard-
+        // scoping and title-fallback fixes: the AI can correctly name
+        // "AS/NZS 3000" for a table while retrieval, on a given round,
+        // includes no chunk from it at all — in which case standardMap
+        // never contained it, so no amount of code/title matching against
+        // standardMap could ever have found it.
         const normCode = (s: string) => (s || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
         const codeToStdId = new Map<string, string>();
-        for (const [id, s] of standardMap.entries()) {
+        for (const s of ownedStandardsResult.data || []) {
+          const id = (s as any).id;
           const n = normCode((s as any).standard_code);
           if (n) codeToStdId.set(n, id);
           // Some standards have no standard_code set at all (confirmed in
           // production, 2026-08-03 — a real user's own AS/NZS 3000 upload).
           // Without this, resolveStdId can never find that standard no
-          // matter how correctly the AI cites it, so every table/figure/
-          // clause lookup below falls back to "any standard with the same
-          // number" — how a plumbing table opened for an electrical
-          // citation even after standard_id-based cross-trade scoping.
+          // matter how correctly the AI cites it.
           const titleKey = normCode((s as any).title);
           if (titleKey && !codeToStdId.has(titleKey)) codeToStdId.set(titleKey, id);
         }
 
         if (figNums.length > 0 || tblNums.length > 0) {
+          // Scoped by ownershipFilter (security) and the specific numbers
+          // cited, NOT by standardIds (retrieval-scoped) — the AI can
+          // correctly name a standard for a table/figure even when no chunk
+          // from that standard survived retrieval this round, in which case
+          // standardIds wouldn't include it and the real row would never be
+          // found even though hintStdId (below) resolves it correctly.
+          // Safe to broaden: which row wins is still gated by the exact
+          // hintStdId::number match below, never on this query's scope.
           const [figRows, tblRows] = await Promise.all([
             figNums.length > 0
               ? supabase.from("standard_figures").select("figure_number, image_url, caption, page_number, standard_id")
-                  .or(ownershipFilter).in("figure_number", figNums).in("standard_id", standardIds)
+                  .or(ownershipFilter).in("figure_number", figNums)
               : Promise.resolve({ data: [] }),
             tblNums.length > 0
               ? supabase.from("standard_tables").select("table_number, image_url, caption, page_number, standard_id")
-                  .or(ownershipFilter).in("table_number", tblNums).in("standard_id", standardIds)
+                  .or(ownershipFilter).in("table_number", tblNums)
               : Promise.resolve({ data: [] }),
           ]);
 
