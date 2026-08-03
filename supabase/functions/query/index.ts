@@ -1007,8 +1007,24 @@ User's question/context: ${effectiveQuestion}` : "";
           if (j !== -1) { try { parsedMetadata = JSON.parse(metadataRaw.slice(j)); } catch {} }
         }
 
+        // Defensive: the model occasionally leaks a fragment of its own
+        // citations/tables JSON into the answer VALUE itself, even when the
+        // overall JSON is well-formed enough to parse (confirmed in
+        // production 2026-08-03 — an answer ending "...too much imped":
+        // [{"standard_code":"AS/NZS 3000",...}]..." mid-sentence). These
+        // key names never appear legitimately in prose, so treat the first
+        // one as the point everything already-parsed (citations/
+        // tables_referenced below) makes redundant, and cut there rather
+        // than show broken JSON to the user.
+        const LEAKED_JSON_MARKER = /"(?:standard_code|clause_number|table_number|figure_number|relevant_text)"\s*:/;
+        function sanitizeAnswerText(text: string): string {
+          const m = text.match(LEAKED_JSON_MARKER);
+          if (!m || m.index === undefined) return text;
+          return text.slice(0, m.index).replace(/[\s":,[{]+$/, "").trim();
+        }
+
         const parsedResponse: any = {
-          answer: answerText,
+          answer: sanitizeAnswerText(answerText),
           citations: parsedMetadata.citations || [],
           figures_referenced: parsedMetadata.figures_referenced || [],
           tables_referenced: parsedMetadata.tables_referenced || [],
