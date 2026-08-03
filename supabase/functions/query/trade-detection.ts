@@ -66,18 +66,27 @@ const TRADE_KEYWORDS: Record<TradeType, string[]> = {
   general: [],
 };
 
+// Looks up a standard's trade purely from its code/title prefix (e.g.
+// "AS/NZS 3500.1:2021" -> "plumbing"). Returns null when the standard isn't
+// in the map — callers must treat null as "unknown", not "general", so
+// untagged/unrecognised standards are never wrongly excluded from a search.
+export function standardTradeFromCode(standardName?: string | null): TradeType | null {
+  if (!standardName) return null;
+  const normalized = standardName.trim().toUpperCase();
+  for (const [prefix, trade] of Object.entries(STANDARD_TO_TRADE)) {
+    if (normalized.startsWith(prefix.toUpperCase())) {
+      return trade;
+    }
+  }
+  return null;
+}
+
 export function detectTrade(
   query: string,
   standardName?: string | null
 ): TradeType {
-  if (standardName) {
-    const normalized = standardName.trim().toUpperCase();
-    for (const [prefix, trade] of Object.entries(STANDARD_TO_TRADE)) {
-      if (normalized.startsWith(prefix.toUpperCase())) {
-        return trade;
-      }
-    }
-  }
+  const fromCode = standardTradeFromCode(standardName);
+  if (fromCode) return fromCode;
 
   const lowerQuery = query.toLowerCase();
   const tradeScores: Record<TradeType, number> = {

@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildStaticSystemPrompt, buildContextSystemBlock, promptVersionSource, type TradeType } from "./system-prompt.ts";
-import { detectTrade } from "./trade-detection.ts";
+import { detectTrade, standardTradeFromCode } from "./trade-detection.ts";
 import { validateResponse } from "./validation.ts";
 import { getAllowedOrigin } from "../_shared/cors.ts";
 import { expandQuery, TRADIE_SYNONYMS } from "./synonyms.ts";
@@ -314,6 +314,13 @@ serve(async (req) => {
       .filter(Boolean)
       .join(" ");
 
+    // Trade guess from the question text alone (no standard bias yet — that
+    // would be circular, since we haven't retrieved anything). Used below to
+    // drop confidently wrong-trade chunks (e.g. a plumbing stormwater clause
+    // surfacing for an electrical question) before they can reach the AI or
+    // be cited. "general" means no confident signal, so nothing is filtered.
+    const queryTrade = detectTrade(retrievalQuery);
+
     // Expand tradie terms to standards terminology
     const { keywords, expandedText, matchedPhrases } = expandQuery(retrievalQuery);
     const hasExpansion = expandedText !== effectiveQuestion;
@@ -331,7 +338,7 @@ serve(async (req) => {
     )].join(" or ");
 
     // Phase 2: all expensive operations in parallel
-    const [embResponse, expandedEmbResponse, keywordChunksResult, clauseResult] = await Promise.all([
+    const [embResponse, expandedEmbResponse, keywordChunksResult, clauseResult, ownedStandardsResult] = await Promise.all([
       fetch("https://api.openai.com/v1/embeddings", {
         method: "POST",
         headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
@@ -359,7 +366,32 @@ serve(async (req) => {
             .in("clause_number", clauseNumberMatches)
             .limit(20)
         : Promise.resolve({ data: [] }),
+      supabase.from("standards").select("id, standard_code, title").or(ownershipFilter),
     ]);
+
+    // Map every standard the user/org can see to its trade (by code/title
+    // prefix — see STANDARD_TO_TRADE). Unrecognised standards map to null
+    // ("unknown"), not "general" — they must never be excluded below, since
+    // we can't actually tell what trade they belong to.
+    const standardTradeMap = new Map<string, TradeType | null>(
+      (ownedStandardsResult.data || []).map((s: any) => [
+        s.id,
+        standardTradeFromCode(s.standard_code) ?? standardTradeFromCode(s.title),
+      ])
+    );
+    // Drops chunks from a standard we're confident belongs to a different
+    // trade than the question. Never filters on an unconfident query guess
+    // ("general") or an unrecognised standard (null), and never empties a
+    // channel entirely on a shaky guess — better to risk one wrong-trade
+    // result slipping through than to silently return nothing.
+    const filterCrossTrade = (chunks: any[]) => {
+      if (queryTrade === "general" || chunks.length === 0) return chunks;
+      const filtered = chunks.filter((c: any) => {
+        const t = standardTradeMap.get(c.standard_id);
+        return !t || t === queryTrade;
+      });
+      return filtered.length > 0 ? filtered : chunks;
+    };
 
     // Vector search 1 — original query; also search for past feedback corrections in parallel
     let vectorChunks1: any[] = [];
@@ -503,6 +535,15 @@ serve(async (req) => {
     const keywordChunks: any[] = keywordChunksResult.data || [];
     const clauseChunks: any[] = (clauseResult.data || []).map((c: any) => ({ ...c, similarity: 1.0 }));
 
+    // Drop confidently wrong-trade chunks from every channel before they can
+    // be fused, ranked, cited, or opened via a source link — this is the
+    // fix for cross-trade contamination (e.g. a plumbing stormwater clause
+    // surfacing and being cited for an electrical question).
+    vectorChunks1 = filterCrossTrade(vectorChunks1);
+    vectorChunks2 = filterCrossTrade(vectorChunks2);
+    const keywordChunksFiltered = filterCrossTrade(keywordChunks);
+    const clauseChunksFiltered = filterCrossTrade(clauseChunks);
+
     // Reciprocal-rank fusion across channels. The old merge appended every
     // expanded-query vector hit after ALL original-query hits and tacked
     // keyword rows (in arbitrary order) on the end — a 0.62-similarity
@@ -523,8 +564,8 @@ serve(async (req) => {
     };
     addRanked(vectorChunks1, 1.0);
     addRanked(vectorChunks2, 1.0);
-    addRanked(keywordChunks, 0.8);
-    const clauseIds = new Set(clauseChunks.map((c: any) => c.id));
+    addRanked(keywordChunksFiltered, 0.8);
+    const clauseIds = new Set(clauseChunksFiltered.map((c: any) => c.id));
     const fused = [...rrf.values()]
       .sort((a, b) => b.score - a.score)
       .map((e) => e.chunk)
@@ -534,7 +575,7 @@ serve(async (req) => {
     // reordered by a Haiku pass that judges which chunks actually answer the
     // question. Falls back to RRF order on any failure.
     const fusedRanked = await rerankChunks(retrievalQuestion, fused, ANTHROPIC_API_KEY);
-    const matchedChunks = [...clauseChunks, ...fusedRanked].slice(0, 15);
+    const matchedChunks = [...clauseChunksFiltered, ...fusedRanked].slice(0, 15);
 
     // Genuine relevance signal: the best REAL cosine similarity from vector
     // search. Clause hits get a fabricated 1.0 and keyword hits a fabricated
@@ -618,8 +659,7 @@ serve(async (req) => {
       const presentStdIds = new Set(matchedChunks.map((c: any) => c.standard_id));
       const xFtsQuery = [...new Set(keywords.slice(0, 8).map(sanitizeKw).filter((k: string) => k.length > 2))].join(" OR ");
       if (refCodes.size > 0 && xFtsQuery) {
-        const { data: ownedStds } = await supabase
-          .from("standards").select("id, standard_code").or(ownershipFilter);
+        const ownedStds = ownedStandardsResult.data;
         const targetIds = (ownedStds || [])
           .filter((s: any) => !presentStdIds.has(s.id))
           .filter((s: any) => {
