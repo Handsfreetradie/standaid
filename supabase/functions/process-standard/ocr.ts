@@ -49,15 +49,36 @@ const PAGES_PER_AI_BATCH = 6;
 // falls back to the base64 flow, so this can only widen what's processable.
 const FILES_API_BETA = "files-api-2025-04-14";
 
-async function uploadPdfToFilesApi(fileBytes: Uint8Array, apiKey: string): Promise<string | null> {
+// A hung fetch() blocks the whole function indefinitely — JS is single-
+// threaded, so our own `Date.now() > deadline` checks elsewhere in this file
+// only run BETWEEN awaits, never during one. Without this, a slow upload or
+// completion call runs past our soft deadline with zero chance to react, and
+// eventually gets killed by the platform's own hard limit instead — losing
+// the checkpoint-and-retrigger step entirely and leaving the job stuck at
+// "processing" with a frozen heartbeat (confirmed live on AS 3008 Part 2's
+// 10.2MB/148-page upload). Every deadline-aware fetch in this file goes
+// through this so a slow call always returns control to us in time to
+// checkpoint, rather than possibly never returning at all.
+async function fetchWithDeadline(url: string, options: RequestInit, deadline: number): Promise<Response> {
+  const budgetMs = Math.max(3000, deadline - Date.now() - 5000); // 5s margin to still checkpoint after abort
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), budgetMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function uploadPdfToFilesApi(fileBytes: Uint8Array, apiKey: string, deadline: number): Promise<string | null> {
   try {
     const form = new FormData();
     form.append("file", new Blob([fileBytes], { type: "application/pdf" }), "document.pdf");
-    const res = await fetch("https://api.anthropic.com/v1/files", {
+    const res = await fetchWithDeadline("https://api.anthropic.com/v1/files", {
       method: "POST",
       headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-beta": FILES_API_BETA },
       body: form,
-    });
+    }, deadline);
     if (!res.ok) {
       console.warn(`Files API upload failed (${res.status}): ${await res.text()} — falling back to base64`);
       return null;
@@ -65,7 +86,7 @@ async function uploadPdfToFilesApi(fileBytes: Uint8Array, apiKey: string): Promi
     const data = await res.json();
     return (data?.id as string) || null;
   } catch (e) {
-    console.warn("Files API upload error — falling back to base64:", e);
+    console.warn("Files API upload error or timeout — falling back to base64:", e);
     return null;
   }
 }
@@ -132,7 +153,7 @@ async function extractTextWithAI(
   // budget keep the call count down since input is the whole doc each time.
   // Files API first (any byte size); base64 fallback keeps the old 25MB cap.
   const wholeDocEligible = totalPages > 0 && totalPages <= WHOLE_DOC_MAX_PAGES;
-  const fileId = wholeDocEligible ? await uploadPdfToFilesApi(fileBytes, anthropicApiKey) : null;
+  const fileId = wholeDocEligible ? await uploadPdfToFilesApi(fileBytes, anthropicApiKey, deadline) : null;
   const useWholeDoc = fileId !== null || (wholeDocEligible && fileBytes.length <= 25 * 1024 * 1024);
   const pagesPerBatch = useWholeDoc ? 12 : PAGES_PER_AI_BATCH;
   const maxTokensPerBatch = useWholeDoc ? 16000 : 8000;
@@ -191,30 +212,45 @@ async function extractTextWithAI(
 
     console.log(`AI OCR batch ${batch + 1}/${batchCount}: pages ${startPage}–${endPage}${sliced ? " (sliced)" : fileId ? " (whole doc via file)" : " (whole doc)"}`);
 
-    const completionResponse = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": anthropicApiKey,
-        "Content-Type": "application/json",
-        "anthropic-version": "2023-06-01",
-        ...(fileId ? { "anthropic-beta": FILES_API_BETA } : {}),
-      },
-      body: JSON.stringify({
-        // Sonnet matches Opus on straight page transcription at ~1/5 the cost
-        model: "claude-sonnet-4-6",
-        max_tokens: maxTokensPerBatch,
-        messages: [{
-          role: "user",
-          content: [
-            // cache_control: batches 2..N send the IDENTICAL document (whole-
-            // doc mode) — caching it cuts input cost ~90% for every batch
-            // after the first. No-op for the sliced path (unique doc per call).
-            { type: "document", source: docSource, cache_control: { type: "ephemeral" } },
-            { type: "text", text: prompt },
-          ],
-        }],
-      }),
-    });
+    let completionResponse: Response;
+    try {
+      completionResponse = await fetchWithDeadline("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": anthropicApiKey,
+          "Content-Type": "application/json",
+          "anthropic-version": "2023-06-01",
+          ...(fileId ? { "anthropic-beta": FILES_API_BETA } : {}),
+        },
+        body: JSON.stringify({
+          // Sonnet matches Opus on straight page transcription at ~1/5 the cost
+          model: "claude-sonnet-4-6",
+          max_tokens: maxTokensPerBatch,
+          messages: [{
+            role: "user",
+            content: [
+              // cache_control: batches 2..N send the IDENTICAL document (whole-
+              // doc mode) — caching it cuts input cost ~90% for every batch
+              // after the first. No-op for the sliced path (unique doc per call).
+              { type: "document", source: docSource, cache_control: { type: "ephemeral" } },
+              { type: "text", text: prompt },
+            ],
+          }],
+        }),
+      }, deadline);
+    } catch (e) {
+      // Timed out (or genuinely errored) before Anthropic responded at all —
+      // same recovery as an HTTP-level failure: pause and let resume retry
+      // this exact batch, rather than let the whole function hang until the
+      // platform kills it with no checkpoint written.
+      console.warn(`AI OCR batch ${batch + 1} fetch failed/timed out:`, e);
+      if (batch === firstBatch && fullText.length === 0) {
+        if (fileId) await deleteFilesApiFile(fileId, anthropicApiKey);
+        throw new Error("AI extraction failed: request timed out before a response was received.");
+      }
+      nextPage = batch * pagesPerBatch + 1;
+      break;
+    }
 
     if (!completionResponse.ok) {
       const errText = await completionResponse.text();
