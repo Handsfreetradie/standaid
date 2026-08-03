@@ -1058,6 +1058,15 @@ User's question/context: ${effectiveQuestion}` : "";
         for (const [id, s] of standardMap.entries()) {
           const n = normCode((s as any).standard_code);
           if (n) codeToStdId.set(n, id);
+          // Some standards have no standard_code set at all (confirmed in
+          // production, 2026-08-03 — a real user's own AS/NZS 3000 upload).
+          // Without this, resolveStdId can never find that standard no
+          // matter how correctly the AI cites it, so every table/figure/
+          // clause lookup below falls back to "any standard with the same
+          // number" — how a plumbing table opened for an electrical
+          // citation even after standard_id-based cross-trade scoping.
+          const titleKey = normCode((s as any).title);
+          if (titleKey && !codeToStdId.has(titleKey)) codeToStdId.set(titleKey, id);
         }
 
         if (figNums.length > 0 || tblNums.length > 0) {
