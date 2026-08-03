@@ -1081,13 +1081,18 @@ User's question/context: ${effectiveQuestion}` : "";
           const tblMapByNum = new Map<string, any>();
           for (const r of tblRows.data || []) { if (!tblMapByNum.has(r.table_number)) tblMapByNum.set(r.table_number, r); }
 
-          // Find page in matched chunks, preferring a specific standard when hintStdId is provided
+          // Find page in matched chunks. When hintStdId is known, only look
+          // within that standard — falling back to matches[0] (any standard)
+          // silently swapped in a different standard's identically-numbered
+          // table/clause, which is how a plumbing table opened for an
+          // electrical citation. Only use the cross-standard best-guess when
+          // we genuinely don't know which standard the AI meant.
           const findPageInChunks = (label: string, num: string, hintStdId?: string) => {
             const pat = new RegExp(`\\b${label}\\s+${num.replace(/\./g, "\\.")}\\b`, "i");
             const matches = matchedChunks.filter((c: any) =>
               pat.test(c.content) || (c.clause_number || "").toUpperCase() === `${label.toUpperCase()} ${num}`
             );
-            const hit = (hintStdId && matches.find((c: any) => c.standard_id === hintStdId)) || matches[0];
+            const hit = hintStdId ? matches.find((c: any) => c.standard_id === hintStdId) : matches[0];
             return hit ? { page_number: hit.page_number, standard_id: hit.standard_id } : null;
           };
 
@@ -1114,7 +1119,7 @@ User's question/context: ${effectiveQuestion}` : "";
 
           parsedResponse.figures_referenced = (await Promise.all(aiFigures.map(async (f: any) => {
             const hintStdId = resolveStdId(f.standard_code);
-            const row = (hintStdId && figMap.get(`${hintStdId}::${f.figure_number}`)) || figMapByNum.get(f.figure_number);
+            const row = hintStdId ? figMap.get(`${hintStdId}::${f.figure_number}`) : figMapByNum.get(f.figure_number);
             if (row?.image_url) {
               const signed = await signImageUrl(row.image_url);
               return { ...f, image_url: signed, caption: f.caption || row.caption, page_number: row.page_number, standard_id: row.standard_id };
@@ -1127,7 +1132,7 @@ User's question/context: ${effectiveQuestion}` : "";
 
           parsedResponse.tables_referenced = aiTables.map((t: any) => {
             const hintStdId = resolveStdId(t.standard_code);
-            const row = (hintStdId && tblMap.get(`${hintStdId}::${t.table_number}`)) || tblMapByNum.get(t.table_number);
+            const row = hintStdId ? tblMap.get(`${hintStdId}::${t.table_number}`) : tblMapByNum.get(t.table_number);
             // standard_tables rows carry the authoritative caption page even
             // when image_url is empty (tables use the PDF page link, not an
             // image) — prefer that over scanning chunks.
@@ -1269,10 +1274,13 @@ User's question/context: ${effectiveQuestion}` : "";
             const hintStdId = findNearbyStdId(parsedResponse.answer || "", ref);
             // Exact clause-number match ONLY. The old startsWith fallbacks
             // attached a parent or sibling chunk (2.5.1.2 for "2.5.1") whose
-            // text may not support the claim — a manufactured citation.
-            const hit =
-              (hintStdId && matchedChunks.find((mc: any) => mc.standard_id === hintStdId && (mc.clause_number || "").toString().trim() === ref)) ||
-              matchedChunks.find((mc: any) => (mc.clause_number || "").toString().trim() === ref);
+            // text may not support the claim — a manufactured citation. When
+            // a nearby standard mention names the standard, only match within
+            // it — a same-numbered clause in a different standard is not the
+            // same clause.
+            const hit = hintStdId
+              ? matchedChunks.find((mc: any) => mc.standard_id === hintStdId && (mc.clause_number || "").toString().trim() === ref)
+              : matchedChunks.find((mc: any) => (mc.clause_number || "").toString().trim() === ref);
             if (hit) {
               const std = standardMap.get(hit.standard_id);
               parsedResponse.citations.push({
