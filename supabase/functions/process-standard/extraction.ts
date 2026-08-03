@@ -646,6 +646,55 @@ export function buildDocumentMapChunk(
 // The old implementation created a chunk for every mention, so "Table 8.1"
 // referenced on pages 42 and 55 produced duplicate chunks pointing at the
 // wrong pages — the cause of table links opening the wrong PDF page.
+// True when most of the next few non-empty lines after a heading are
+// numeric data rows rather than prose — the signal that a plain numbered
+// heading is actually introducing a table, not an ordinary clause. OCR
+// output is column-fused and unreliable, so this only checks character
+// composition (digits/decimal points/whitespace dominate a data row),
+// never exact column structure.
+function looksLikeNumericTableBody(lines: string[], startIdx: number, pageMarker: RegExp): boolean {
+  let checked = 0;
+  let numericLines = 0;
+  for (let j = startIdx; j < lines.length && checked < 8; j++) {
+    const raw = lines[j].trim();
+    // Skip ToC dotted-leader lines outright — they're mostly "." characters
+    // and would otherwise register as "numeric" (a table of contents entry
+    // right after a heading is the exact false positive this guards against).
+    if (!raw || pageMarker.test(raw) || TOC_LEADER.test(raw)) continue;
+    checked++;
+    // Digits only — periods are excluded so decimal points in real data
+    // ("9.6", "0.5 Ω") don't get double-counted, and stray punctuation runs
+    // elsewhere in prose can't inflate the ratio.
+    const digits = (raw.match(/\d/g) || []).length;
+    if (digits / raw.length > 0.3) numericLines++;
+  }
+  return checked >= 3 && numericLines / checked >= 0.5;
+}
+
+// Finds a numbered clause-style heading ("8.1 MAXIMUM VALUES OF EARTH
+// FAULT-LOOP IMPEDANCE...") matching a referenced-but-uncaptioned table
+// number, but only accepts it if what follows looks like a data grid — see
+// looksLikeNumericTableBody. Returns null (never guesses) otherwise, so an
+// ordinary clause heading that happens to share a number with a table
+// mentioned elsewhere (e.g. "8.1 GENERAL") is never mistaken for the table.
+function findNumericHeadingMatch(
+  lines: string[],
+  tableNum: string,
+  pageMarker: RegExp
+): { title: string; lineIdx: number } | null {
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i].replace(/\r$/, "").trim();
+    if (!raw || pageMarker.test(raw)) continue;
+    const heading = matchClauseHeading(raw);
+    if (!heading || heading.number !== tableNum) continue;
+    if (!/^[A-Z0-9]/.test(heading.title) || /^[a-z]/.test(heading.title)) continue;
+    if (looksLikeNumericTableBody(lines, i + 1, pageMarker)) {
+      return { title: heading.title, lineIdx: i };
+    }
+  }
+  return null;
+}
+
 export function extractTableChunks(text: string, standardCode: string, version: string): Chunk[] {
   const lines = text.split("\n");
   const pageMarker = /^\[PAGE\s+(\d+)\]/i;
@@ -706,6 +755,19 @@ export function extractTableChunks(text: string, standardCode: string, version: 
   }
 
   // ── Pass 2: references ("see Table 8.1") only for tables with no caption ──
+  // A table's own printed heading isn't always the literal word "TABLE" —
+  // AS/NZS standards sometimes head a table with just its section number
+  // ("8.1 MAXIMUM VALUES OF EARTH FAULT-LOOP IMPEDANCE"), identical in form
+  // to an ordinary clause heading. Pass 1 can't see those. When a table is
+  // referenced elsewhere ("...Table 8.1") but has no real caption, check
+  // whether a numbered heading with that exact number exists AND is
+  // immediately followed by a dense block of numbers (a data grid, not
+  // prose) — only then promote it to a real caption. Prompted by AS/NZS
+  // 3000's Table 8.1/8.2 going missing in production 2026-08-03 — that
+  // specific case looked more like the OCR pass never transcribing the
+  // table's page at all (no content of any kind landed there), which this
+  // does not fix, but the same silent-miss pattern is real and worth
+  // closing here regardless.
   const refPattern = /\bTABLES?\s+([A-Z]\d{1,2}[DGPVOF]\d{1,2}[a-z]?|[A-Z]?\d+(?:\.\d+)*[a-z]?)/gi;
   for (let i = 0; i < lines.length; i++) {
     let refMatch: RegExpExecArray | null;
@@ -713,7 +775,12 @@ export function extractTableChunks(text: string, standardCode: string, version: 
     while ((refMatch = refPattern.exec(lines[i])) !== null) {
       const tableNum = refMatch[1].trim().toUpperCase();
       if (!tables.has(tableNum)) {
-        tables.set(tableNum, { title: "", lineIdx: i, rank: 0 });
+        const heading = findNumericHeadingMatch(lines, tableNum, pageMarker);
+        if (heading) {
+          tables.set(tableNum, { title: heading.title, lineIdx: heading.lineIdx, rank: 1 });
+        } else {
+          tables.set(tableNum, { title: "", lineIdx: i, rank: 0 });
+        }
       }
     }
   }
