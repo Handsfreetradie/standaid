@@ -409,6 +409,12 @@ export async function extractTextFromPdf(
     };
   } catch (aiError) {
     console.error("Batched AI OCR failed:", aiError);
-    throw new Error("Could not extract text from this PDF.");
+    // This used to discard the real cause behind a generic message, which
+    // masked a genuine bug during live debugging (AS 3008 Part 2 failed with
+    // "Could not extract text from this PDF" and no way to tell why without
+    // adding throwaway diagnostics). Surfacing the underlying reason costs
+    // nothing and saves exactly that debugging cycle next time.
+    const reason = aiError instanceof Error ? aiError.message : String(aiError);
+    throw new Error(`Could not extract text from this PDF: ${reason}`);
   }
 }
