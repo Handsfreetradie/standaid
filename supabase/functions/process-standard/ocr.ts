@@ -11,14 +11,29 @@ import {
 } from "./extraction.ts";
 
 const SCANNED_DOC_RATIO = 0.85;
-// Memory guard for the >100-page pdf-lib slicing path only (whole-doc mode
-// below is unaffected by byte size — it goes through the Files API). 25MB
-// matches the whole-doc base64 fallback's already-proven-safe threshold a few
-// lines below, which holds a larger in-memory footprint per byte (base64 is
-// ~33% bigger than raw) than this raw-byte pdf-lib load — raising to match it
-// isn't a new risk. The old 10MB value was an arbitrary conservative pick
-// that rejected real standards (AS 3008 Parts 1/2 at 10.2MB) a hair over it.
+// Memory guard for the pdf-lib slicing path only (whole-doc mode below is
+// unaffected by byte size — it goes through the Files API). 25MB matches the
+// whole-doc base64 fallback's already-proven-safe threshold a few lines below,
+// which holds a larger in-memory footprint per byte (base64 is ~33% bigger
+// than raw) than this raw-byte pdf-lib load — raising to match it isn't a new
+// risk. The old 10MB value was an arbitrary conservative pick that rejected
+// real standards (AS 3008 Parts 1/2 at 10.2MB) a hair over it.
 const AI_EXTRACTION_SIZE_LIMIT = 25 * 1024 * 1024;
+
+// pdf-lib's page-slicing (used above this page count) drops the embedded
+// page images of scanned documents entirely — the model receives near-blank
+// pages (~220 chars/page came back for AS 3017's scans; AS 3008 Part 2's 148
+// pages came back "blank/unreadable" outright). Whole-document mode doesn't
+// have this problem since it sends the real file via the Files API, but was
+// capped at Claude's 100-page-per-request limit for a <1M-token context
+// window. claude-sonnet-4-6 (the model used below) gets a 1M-token context
+// window BY DEFAULT — no beta header, standard pricing — which raises that
+// limit to 600 pages (docs.claude.com/en/docs/build-with-claude/pdf-support).
+// 600 covers nearly every real standard here (AS 3008 Part 2's 148 pages
+// included) — the rare document over 600 pages (e.g. the 611-page Wiring
+// Rules) still falls back to the slicing path and hits the same bug, which
+// remains a separate, smaller-scope problem.
+const WHOLE_DOC_MAX_PAGES = 600;
 
 // Pages per OCR call. A dense standards page transcribes to ~600-1000 output
 // tokens; 15 pages blew straight past the 8k max_tokens and later pages of
@@ -116,7 +131,7 @@ async function extractTextWithAI(
   // which pages each call transcribes. Bigger page windows + a bigger output
   // budget keep the call count down since input is the whole doc each time.
   // Files API first (any byte size); base64 fallback keeps the old 25MB cap.
-  const wholeDocEligible = totalPages > 0 && totalPages <= 100;
+  const wholeDocEligible = totalPages > 0 && totalPages <= WHOLE_DOC_MAX_PAGES;
   const fileId = wholeDocEligible ? await uploadPdfToFilesApi(fileBytes, anthropicApiKey) : null;
   const useWholeDoc = fileId !== null || (wholeDocEligible && fileBytes.length <= 25 * 1024 * 1024);
   const pagesPerBatch = useWholeDoc ? 12 : PAGES_PER_AI_BATCH;
@@ -311,7 +326,7 @@ export async function extractTextFromPdf(
   // Byte size only matters for documents that need pdf-lib page slicing
   // (>100 pages) — the cap protects that path's memory. Documents within the
   // whole-document window go through the Files API regardless of size.
-  const ocrWholeDocEligible = pageTexts.length > 0 && pageTexts.length <= 100;
+  const ocrWholeDocEligible = pageTexts.length > 0 && pageTexts.length <= WHOLE_DOC_MAX_PAGES;
   if (fileBytes.length > AI_EXTRACTION_SIZE_LIMIT && !ocrWholeDocEligible) {
     throw new Error("This PDF is too big to OCR — scans over 25MB are only supported up to 100 pages. Try a digital copy of the standard.");
   }
