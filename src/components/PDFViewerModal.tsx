@@ -130,10 +130,20 @@ export function PDFViewerModal({ isOpen, onClose: rawOnClose, clauseNumber, stan
     const containerWidth = Math.min(window.innerWidth - 32, 680);
     const viewport = page.getViewport({ scale: 1 });
     const scale = containerWidth / viewport.width;
-    const scaled = page.getViewport({ scale });
+
+    // Render the backing store at device-pixel resolution, not CSS-pixel
+    // resolution — without this, a phone with devicePixelRatio 2-3 (nearly
+    // all of them) stretches the canvas's own pixels across 2-3x as many
+    // physical pixels, blurring the scanned standard's text. The canvas's
+    // CSS size stays at containerWidth (via explicit style, since the
+    // width/height attributes below now hold the higher-res backing size).
+    const dpr = window.devicePixelRatio || 1;
+    const scaled = page.getViewport({ scale: scale * dpr });
 
     canvas.width = scaled.width;
     canvas.height = scaled.height;
+    canvas.style.width = `${containerWidth}px`;
+    canvas.style.height = `${scaled.height / dpr}px`;
 
     const task = page.render({ canvasContext: context, viewport: scaled });
     renderTaskRef.current = task;
