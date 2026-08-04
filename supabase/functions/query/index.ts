@@ -1381,8 +1381,8 @@ User's question/context: ${effectiveQuestion}` : "";
             const answerWords = new Set((parsedResponse.answer || "").toLowerCase().match(/\b[a-z]{5,}\b|\b\d+(?:\.\d+)?[a-zΩ°]{0,3}\b/g) || []);
             if (answerWords.size >= 3) {
               const isRealClause = (cn: string) => cn !== "" && /^[A-Z]?\d+(?:\.\d+)*$/.test(cn);
-              const scored = matchedChunks
-                .filter((c: any) => isRealClause((c.clause_number || "").toString().trim()) && c.chunk_index !== 0)
+              const realClauseChunks = matchedChunks.filter((c: any) => isRealClause((c.clause_number || "").toString().trim()) && c.chunk_index !== 0);
+              let scored = realClauseChunks
                 .map((c: any) => {
                   const chunkLc = (c.content || "").toLowerCase();
                   let hit = 0;
@@ -1392,6 +1392,22 @@ User's question/context: ${effectiveQuestion}` : "";
                 .filter((s: any) => s.overlap >= 0.30)
                 .sort((a: any, b: any) => b.overlap - a.overlap)
                 .slice(0, 2);
+              // Nothing crossed the wording-overlap bar, but the outer gate
+              // already confirmed retrieval itself was confident (exact
+              // clause hit or ≥0.55 similarity) — a heavily paraphrased,
+              // casual-tone answer (the style this product deliberately
+              // asks for) naturally scores low on lexical overlap with
+              // terse standard-speak source text even when it's exactly
+              // right. Confirmed in production 2026-08-04: a correct,
+              // retrieval-grounded fault-loop-impedance answer showed zero
+              // citations for exactly this reason. Fall back to the
+              // top-ranked real-clause chunk (already reranked as the best
+              // evidence for this question) rather than showing no source
+              // at all — retrieval confidence is the safety guard here, not
+              // wording overlap, and that guard already passed.
+              if (scored.length === 0 && realClauseChunks.length > 0) {
+                scored = [{ c: realClauseChunks[0], overlap: 0 }];
+              }
               for (const { c: hit } of scored) {
                 const std = standardMap.get(hit.standard_id);
                 parsedResponse.citations.push({
