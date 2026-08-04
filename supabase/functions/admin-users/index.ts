@@ -1,0 +1,60 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getAllowedOrigin } from "../_shared/cors.ts";
+
+// Owner-only tool: lists every signed-up user with their signup date and
+// current tier, for the admin panel in Profile.tsx. Mirrors grant-trial's
+// auth pattern (single hardcoded ADMIN_EMAIL, no app-wide roles table).
+
+const ADMIN_EMAIL = "kyledixonelectrical@gmail.com";
+
+serve(async (req) => {
+  const origin = req.headers.get("Origin") || "";
+  const corsHeaders = {
+    "Access-Control-Allow-Origin": getAllowedOrigin(origin),
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  };
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+  try {
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) return json({ error: "Unauthorized" }, 401);
+
+    const supabaseAdmin = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
+    if (userError || !user) return json({ error: "Unauthorized" }, 401);
+    if (user.email !== ADMIN_EMAIL) return json({ error: "Forbidden" }, 403);
+
+    const { data: users, error } = await supabaseAdmin
+      .from("profiles")
+      .select("user_id, email, display_name, subscription_tier, created_at, pro_expires_at")
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (error) throw error;
+
+    // Lifetime query count per user, from the `queries` log table (not
+    // profiles.daily_query_count, which resets every day).
+    const { data: counts, error: countsError } = await supabaseAdmin
+      .rpc("admin_query_counts_by_user");
+    if (countsError) throw countsError;
+
+    const countByUser = new Map<string, number>((counts ?? []).map((r: { user_id: string; total: number }) => [r.user_id, r.total]));
+    const usersWithCounts = (users ?? []).map((u) => ({
+      ...u,
+      query_count: countByUser.get(u.user_id) ?? 0,
+    }));
+
+    return json({ users: usersWithCounts });
+  } catch (e) {
+    console.error("[admin-users] Unexpected error:", e);
+    return json({ error: e instanceof Error ? e.message : "Unknown error" }, 500);
+  }
+});

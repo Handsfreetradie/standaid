@@ -29,6 +29,7 @@ the repo — all keys live in Stripe and in Supabase function secrets.
      `customer.subscription.updated`, `customer.subscription.deleted`
    - Copy the **Signing secret** (`whsec_...`)
 5. (Recommended) **Settings → Tax** → enable **Stripe Tax** for Australian GST, and add your ABN under business settings so invoices are compliant.
+6. **Settings → Customer emails** (search "emails" in Settings if you can't find it) → turn ON **"Successful payments"** (and "Refunds" too if you want). This makes Stripe automatically email a receipt/invoice to the customer every time they pay — first payment and every renewal. No code involved; do this in both test mode and live mode.
 
 ## Set these Supabase function secrets
 Dashboard → Edge Functions → Secrets (or `supabase secrets set`):

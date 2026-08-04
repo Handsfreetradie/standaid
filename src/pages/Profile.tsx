@@ -241,6 +241,32 @@ const Profile = () => {
     }
   };
 
+  type AdminUserRow = {
+    user_id: string;
+    email: string | null;
+    display_name: string | null;
+    subscription_tier: string | null;
+    created_at: string;
+    pro_expires_at: string | null;
+    query_count: number;
+  };
+  const [adminUsers, setAdminUsers] = useState<AdminUserRow[] | null>(null);
+  const [adminUsersLoading, setAdminUsersLoading] = useState(false);
+
+  const loadAdminUsers = async () => {
+    setAdminUsersLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("admin-users", { body: {} });
+      if (error) throw error;
+      setAdminUsers(data?.users ?? []);
+    } catch (e: any) {
+      console.error("[admin users] error:", e);
+      toast.error(e?.message || "Couldn't load the users list.");
+    } finally {
+      setAdminUsersLoading(false);
+    }
+  };
+
   const displayName = profile?.display_name || user?.email?.split("@")[0] || "Tradie";
   const tradeLabel = profile?.trade_type
     ? profile.trade_type.split(",").filter(Boolean).map((id) => TRADE_LABELS[id] || id).join(", ")
@@ -766,6 +792,72 @@ const Profile = () => {
                           {granting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Gift className="h-4 w-4" />}
                           Send Invite
                         </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* All Users — Kyle only */}
+                {isAdmin && (
+                  <div>
+                    <button
+                      onClick={() => {
+                        togglePanel("all-users");
+                        if (activePanel !== "all-users" && adminUsers === null) loadAdminUsers();
+                      }}
+                      className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-foreground hover:bg-secondary transition-colors min-h-[44px]"
+                    >
+                      <Users className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
+                      <div className="flex-1 text-left">
+                        <span className="block">All Users</span>
+                        <span className="block text-xs text-muted-foreground font-normal mt-0.5">Admin only</span>
+                      </div>
+                      {activePanel === "all-users"
+                        ? <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        : <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      }
+                    </button>
+                    {activePanel === "all-users" && (
+                      <div className="px-3 pb-4 pt-1 space-y-3">
+                        {adminUsersLoading && (
+                          <div className="flex items-center justify-center py-6">
+                            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                          </div>
+                        )}
+                        {!adminUsersLoading && adminUsers && adminUsers.length === 0 && (
+                          <p className="text-xs text-muted-foreground">No users yet.</p>
+                        )}
+                        {!adminUsersLoading && adminUsers && adminUsers.length > 0 && (
+                          <div className="overflow-x-auto rounded-lg border border-border">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="bg-muted/50 text-left text-muted-foreground">
+                                  <th className="px-3 py-2 font-medium">Email</th>
+                                  <th className="px-3 py-2 font-medium">Signed up</th>
+                                  <th className="px-3 py-2 font-medium">Tier</th>
+                                  <th className="px-3 py-2 font-medium text-right">Queries</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {adminUsers.map((u) => (
+                                  <tr key={u.user_id} className="border-t border-border">
+                                    <td className="px-3 py-2 max-w-[160px] truncate" title={u.email ?? ""}>
+                                      {u.email || u.display_name || "—"}
+                                    </td>
+                                    <td className="px-3 py-2 whitespace-nowrap">
+                                      {new Date(u.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}
+                                    </td>
+                                    <td className="px-3 py-2 capitalize">{u.subscription_tier || "free"}</td>
+                                    <td className="px-3 py-2 text-right">{u.query_count}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                        <p className="text-[11px] text-muted-foreground">
+                          {adminUsers ? `${adminUsers.length} user${adminUsers.length === 1 ? "" : "s"}` : ""} · showing latest 500
+                        </p>
                       </div>
                     )}
                   </div>
