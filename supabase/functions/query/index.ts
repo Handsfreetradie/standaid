@@ -1208,12 +1208,21 @@ User's question/context: ${effectiveQuestion}` : "";
           // electrical citation. Only use the cross-standard best-guess when
           // we genuinely don't know which standard the AI meant.
           const findPageInChunks = (label: string, num: string, hintStdId?: string) => {
+            const wantLabel = `${label.toUpperCase()} ${num}`;
             const pat = new RegExp(`\\b${label}\\s+${num.replace(/\./g, "\\.")}\\b`, "i");
-            const matches = matchedChunks.filter((c: any) =>
-              pat.test(c.content) || (c.clause_number || "").toUpperCase() === `${label.toUpperCase()} ${num}`
-            );
-            const hit = hintStdId ? matches.find((c: any) => c.standard_id === hintStdId) : matches[0];
-            return hit ? { page_number: hit.page_number, standard_id: hit.standard_id } : null;
+            const scoped = hintStdId ? matchedChunks.filter((c: any) => c.standard_id === hintStdId) : matchedChunks;
+            // Prefer the chunk that IS this table/figure (exact clause_number
+            // match) over one that merely mentions it in passing prose. A
+            // clause referencing "table 3.1" in its text commonly outranks
+            // the table's own chunk in retrieval order — matching on loose
+            // content text picked the REFERENCING clause's page instead of
+            // the table's, landing the PDF viewer one page off (confirmed
+            // live against the real PDF: clause 3.6.3.1 on page 41 mentions
+            // "table 3.1" in prose; the actual Table 3.1 is on page 42).
+            const exact = scoped.find((c: any) => (c.clause_number || "").toUpperCase() === wantLabel);
+            if (exact) return { page_number: exact.page_number, standard_id: exact.standard_id };
+            const loose = scoped.find((c: any) => pat.test(c.content));
+            return loose ? { page_number: loose.page_number, standard_id: loose.standard_id } : null;
           };
 
           // Resolve hintStdId from a standard_code string via the shared normCode
