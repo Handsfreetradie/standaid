@@ -1348,7 +1348,18 @@ User's question/context: ${effectiveQuestion}` : "";
           // without this a correct, well-grounded answer shows no clickable
           // source at all — the gap the eval surfaced.
           if (parsedResponse.citations.length === 0 && (hasExactClauseHit || maxVectorSim >= 0.55)) {
-            const answerWords = new Set((parsedResponse.answer || "").toLowerCase().match(/\b[a-z]{5,}\b/g) || []);
+            // Distinctive tokens = 5+-letter words OR numeric/unit values
+            // ("1.9", "16a", "2.5mm", "230v"). Confirmed in production
+            // 2026-08-03: a well-grounded, correctly-cited answer for a
+            // numeric-table question (fault-loop impedance) got ZERO
+            // citations because the old letters-only regex excluded the
+            // exact values that prove grounding (1.9Ω, 16A) and left only
+            // generic prose words ("maximum", "circuit") to overlap against
+            // terse table-derived chunk text — which a casual, paraphrased
+            // answer style naturally scores low on. A matching number is
+            // stronger evidence of grounding than a matching common word,
+            // not weaker, so this tightens confidence rather than loosening it.
+            const answerWords = new Set((parsedResponse.answer || "").toLowerCase().match(/\b[a-z]{5,}\b|\b\d+(?:\.\d+)?[a-zΩ°]{0,3}\b/g) || []);
             if (answerWords.size >= 3) {
               const isRealClause = (cn: string) => cn !== "" && /^[A-Z]?\d+(?:\.\d+)*$/.test(cn);
               const scored = matchedChunks
