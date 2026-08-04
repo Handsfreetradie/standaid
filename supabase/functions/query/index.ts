@@ -577,6 +577,30 @@ serve(async (req) => {
     const fusedRanked = await rerankChunks(retrievalQuestion, fused, ANTHROPIC_API_KEY);
     const matchedChunks = [...clauseChunksFiltered, ...fusedRanked].slice(0, 15);
 
+    // Standard-diversity guarantee. A single global relevance rank lets one
+    // standard's better-worded content fully starve out an equally relevant
+    // second standard — confirmed live: AS/NZS 3000's own earth fault-loop
+    // impedance table says "MCB Type C" rather than "circuit-breaker", so it
+    // consistently lost to AS/NZS 3017's closer wording and never reached the
+    // model, even though both directly answer the same question and the user
+    // owns both. Reserve the best-ranked chunk from every other owned,
+    // same-trade standard that appears anywhere in the fused candidate pool
+    // (not just the top 15), capped so a large library can't balloon
+    // context/cost on tangentially-related standards.
+    const MAX_DIVERSITY_STANDARDS = 3;
+    {
+      const presentStdIds = new Set(matchedChunks.map((c: any) => c.standard_id));
+      const addedStdIds = new Set<string>();
+      for (const chunk of fusedRanked) {
+        if (addedStdIds.size >= MAX_DIVERSITY_STANDARDS) break;
+        if (presentStdIds.has(chunk.standard_id) || addedStdIds.has(chunk.standard_id)) continue;
+        const t = standardTradeMap.get(chunk.standard_id);
+        if (queryTrade !== "general" && t && t !== queryTrade) continue;
+        matchedChunks.push(chunk);
+        addedStdIds.add(chunk.standard_id);
+      }
+    }
+
     // Genuine relevance signal: the best REAL cosine similarity from vector
     // search. Clause hits get a fabricated 1.0 and keyword hits a fabricated
     // 0.5 for ranking, so matchedChunks[0].similarity is meaningless as a
