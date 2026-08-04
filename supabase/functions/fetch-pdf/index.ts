@@ -62,11 +62,16 @@ serve(async (req) => {
     let clause_title: string | null = null;
 
     if (page_number === null && clause_number) {
+      // Case-insensitive: the frontend sends "Table 8.1"/"Figure 3.2" (title
+      // case) for table/figure clicks, but extraction.ts stores clause_number
+      // as "TABLE 8.1"/"FIGURE 3.2" (uppercase) — a case-sensitive .eq() here
+      // silently matched nothing whenever the page wasn't already resolved
+      // upstream, defaulting to page 1 on every such table/figure open.
       const { data: chunks } = await supabase
         .from("standard_chunks")
         .select("page_number, clause_title, content, chunk_index")
         .eq("standard_id", standard.id)
-        .eq("clause_number", clause_number)
+        .ilike("clause_number", clause_number)
         .order("chunk_index", { ascending: true })
         .limit(5);
 
