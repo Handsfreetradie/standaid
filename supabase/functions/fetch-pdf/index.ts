@@ -29,11 +29,18 @@ serve(async (req) => {
     const { standard_id, standard_code, clause_number, page_number: pageOverride } = await req.json();
     if (!standard_id && !standard_code) return json({ error: "standard_id or standard_code required" }, 400);
 
-    // Look up standard (RLS ensures user can only see their own)
+    // Look up standard. This client uses the caller's own JWT (not service
+    // role), so RLS is the actual enforcement here — and RLS on `standards`
+    // already allows a user to see their OWN uploads OR any standard shared
+    // via an org they're an active member of (is_active_org_member). An
+    // explicit .eq("user_id", user.id) on top of that used to narrow every
+    // query back down to "only what I personally uploaded" — so a team
+    // member clicking a citation whose standard a teammate had uploaded got
+    // "Standard not found" -> "Could not load PDF", even though the answer
+    // itself (via query/index.ts's org-aware retrieval) correctly cited it.
     let standardQuery = supabase
       .from("standards")
       .select("id, file_path, title, standard_code")
-      .eq("user_id", user.id)
       .limit(1)
       .single();
 
@@ -42,13 +49,11 @@ serve(async (req) => {
         .from("standards")
         .select("id, file_path, title, standard_code")
         .eq("id", standard_id)
-        .eq("user_id", user.id)
         .single();
     } else {
       standardQuery = supabase
         .from("standards")
         .select("id, file_path, title, standard_code")
-        .eq("user_id", user.id)
         .ilike("standard_code", `%${standard_code}%`)
         .limit(1)
         .single();
