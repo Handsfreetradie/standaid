@@ -1,12 +1,13 @@
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { Calculator, BookOpen, GraduationCap, MessageSquare, User } from "lucide-react";
+import { Calculator, BookOpen, GraduationCap, MessageSquare, User, ClipboardCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import BottomNav from "./BottomNav";
 import { ProgressBar } from "./ProgressBar";
 
 const NAV_TABS = [
   { path: "/tools", icon: Calculator, label: "Tools" },
+  { path: "/audits", icon: ClipboardCheck, label: "Audit" },
   { path: "/standards", icon: BookOpen, label: "Standards" },
   { path: "/learn", icon: GraduationCap, label: "Learn" },
   { path: "/chat", icon: MessageSquare, label: "Chat" },
