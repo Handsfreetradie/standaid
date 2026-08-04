@@ -1049,7 +1049,16 @@ User's question/context: ${effectiveQuestion}` : "";
         // includes no chunk from it at all — in which case standardMap
         // never contained it, so no amount of code/title matching against
         // standardMap could ever have found it.
-        const normCode = (s: string) => (s || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+        // Strip the "NZS" token before collapsing to alphanumerics — the AI
+        // routinely calls a standard "AS/NZS 3017" while the DB row (title-
+        // scraped at upload, or entered by the user) has standard_code
+        // "AS3017" with no NZS at all. Without this, normCode("AS/NZS 3017")
+        // -> "asnzs3017" never substring-matches normCode("AS3017") ->
+        // "as3017" (the extra "nz" breaks it both ways), resolution silently
+        // fails, and every caller below falls back to its unscoped "any
+        // standard with this number" path — confirmed live: a Table 3.1
+        // citation for AS 3017 opened a different standard's plumbing table.
+        const normCode = (s: string) => (s || "").replace(/\bNZS\b/gi, "").replace(/[^a-z0-9]/gi, "").toLowerCase();
         const codeToStdId = new Map<string, string>();
         for (const s of ownedStandardsResult.data || []) {
           const id = (s as any).id;
@@ -1157,10 +1166,10 @@ User's question/context: ${effectiveQuestion}` : "";
             return hit ? { page_number: hit.page_number, standard_id: hit.standard_id } : null;
           };
 
-          // Resolve hintStdId from a standard_code string (same normCode helper defined below)
+          // Resolve hintStdId from a standard_code string via the shared normCode
           const resolveStdId = (code: string | null | undefined): string | null => {
             if (!code) return null;
-            const norm = (code || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+            const norm = normCode(code);
             return [...codeToStdId.entries()].find(([k]) => k.includes(norm) || norm.includes(k))?.[1] ?? null;
           };
 
@@ -1326,7 +1335,7 @@ User's question/context: ${effectiveQuestion}` : "";
             const window = answer.slice(Math.max(0, idx - 120), idx + ref.length + 120);
             const m = window.match(/\bAS(?:\/NZS)?\s*\d+(?:\.\d+)*(?::\d+)?\b/i);
             if (!m) return null;
-            const norm = (m[0] || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+            const norm = normCode(m[0] || "");
             return [...codeToStdId.entries()].find(([k]) => k.includes(norm) || norm.includes(k))?.[1] ?? null;
           };
 
