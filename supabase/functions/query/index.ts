@@ -1131,7 +1131,16 @@ User's question/context: ${effectiveQuestion}` : "";
           // found even though hintStdId (below) resolves it correctly.
           // Safe to broaden: which row wins is still gated by the exact
           // hintStdId::number match below, never on this query's scope.
-          const [figRows, tblRows] = await Promise.all([
+          // standard_tables/standard_figures only get populated by the
+          // separate table/figure image-extraction pass — a document whose
+          // text extraction succeeded can still have zero rows there (AS3017
+          // confirmed live: Table 3.1 image extraction never ran, so this
+          // query alone always returned page_number: null and the card
+          // silently disappeared even once the standard-matching bug above
+          // was fixed). standard_chunks always has the table/figure's own
+          // chunk with its real page_number as long as it was transcribed at
+          // all, so query it in parallel as a page-number-only fallback.
+          const [figRows, tblRows, figChunkRows, tblChunkRows] = await Promise.all([
             figNums.length > 0
               ? supabase.from("standard_figures").select("figure_number, image_url, caption, page_number, standard_id")
                   .or(ownershipFilter).in("figure_number", figNums)
@@ -1139,6 +1148,14 @@ User's question/context: ${effectiveQuestion}` : "";
             tblNums.length > 0
               ? supabase.from("standard_tables").select("table_number, image_url, caption, page_number, standard_id")
                   .or(ownershipFilter).in("table_number", tblNums)
+              : Promise.resolve({ data: [] }),
+            figNums.length > 0
+              ? supabase.from("standard_chunks").select("clause_number, page_number, standard_id")
+                  .or(ownershipFilter).eq("chunk_type", "figure").in("clause_number", figNums.map((n) => `FIGURE ${n}`))
+              : Promise.resolve({ data: [] }),
+            tblNums.length > 0
+              ? supabase.from("standard_chunks").select("clause_number, page_number, standard_id")
+                  .or(ownershipFilter).eq("chunk_type", "table").in("clause_number", tblNums.map((n) => `TABLE ${n}`))
               : Promise.resolve({ data: [] }),
           ]);
 
@@ -1150,6 +1167,15 @@ User's question/context: ${effectiveQuestion}` : "";
           for (const r of figRows.data || []) { if (!figMapByNum.has(r.figure_number)) figMapByNum.set(r.figure_number, r); }
           const tblMapByNum = new Map<string, any>();
           for (const r of tblRows.data || []) { if (!tblMapByNum.has(r.table_number)) tblMapByNum.set(r.table_number, r); }
+          // clause_number strips down from "TABLE 3.1"/"FIGURE 3.1" to the bare number
+          const figChunkNum = (r: any) => (r.clause_number || "").replace(/^FIGURE\s+/i, "");
+          const tblChunkNum = (r: any) => (r.clause_number || "").replace(/^TABLE\s+/i, "");
+          const figChunkMap = new Map((figChunkRows.data || []).map((r: any) => [`${r.standard_id}::${figChunkNum(r)}`, r]));
+          const tblChunkMap = new Map((tblChunkRows.data || []).map((r: any) => [`${r.standard_id}::${tblChunkNum(r)}`, r]));
+          const figChunkMapByNum = new Map<string, any>();
+          for (const r of figChunkRows.data || []) { const n = figChunkNum(r); if (!figChunkMapByNum.has(n)) figChunkMapByNum.set(n, r); }
+          const tblChunkMapByNum = new Map<string, any>();
+          for (const r of tblChunkRows.data || []) { const n = tblChunkNum(r); if (!tblChunkMapByNum.has(n)) tblChunkMapByNum.set(n, r); }
 
           // Find page in matched chunks. When hintStdId is known, only look
           // within that standard — falling back to matches[0] (any standard)
@@ -1196,6 +1222,8 @@ User's question/context: ${effectiveQuestion}` : "";
             }
             const pi = findPageInChunks("Figure", f.figure_number, hintStdId ?? undefined);
             if (pi) return { ...f, page_number: pi.page_number, standard_id: pi.standard_id };
+            const dbHit = hintStdId ? figChunkMap.get(`${hintStdId}::${f.figure_number}`) : figChunkMapByNum.get(f.figure_number);
+            if (dbHit) return { ...f, page_number: dbHit.page_number, standard_id: dbHit.standard_id };
             if (hintStdId) return { ...f, standard_id: hintStdId, page_number: null };
             return null;
           }))).filter(Boolean);
@@ -1209,6 +1237,8 @@ User's question/context: ${effectiveQuestion}` : "";
             if (row) return { ...t, image_url: row.image_url || null, caption: t.caption || row.caption, page_number: row.page_number, standard_id: row.standard_id };
             const pi = findPageInChunks("Table", t.table_number, hintStdId ?? undefined);
             if (pi) return { ...t, page_number: pi.page_number, standard_id: pi.standard_id };
+            const dbHit = hintStdId ? tblChunkMap.get(`${hintStdId}::${t.table_number}`) : tblChunkMapByNum.get(t.table_number);
+            if (dbHit) return { ...t, page_number: dbHit.page_number, standard_id: dbHit.standard_id };
             if (hintStdId) return { ...t, standard_id: hintStdId, page_number: null };
             return null;
           }).filter(Boolean);
