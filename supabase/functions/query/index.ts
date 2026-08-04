@@ -674,6 +674,7 @@ serve(async (req) => {
             .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index, chunk_type, is_normative")
             .or(ownershipFilter)
             .in("standard_id", targetIds)
+            .eq("is_indexed", true)
             .textSearch("fts", xFtsQuery, { type: "websearch" })
             .limit(6);
           const haveIds = new Set(matchedChunks.map((c: any) => c.id));
@@ -709,6 +710,7 @@ serve(async (req) => {
           .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index, chunk_type, is_normative")
           .or(ownershipFilter)
           .in("standard_id", standardIds)
+          .eq("is_indexed", true)
           .or("clause_title.ilike.%definition%,clause_title.ilike.%terms and definitions%,clause_number.ilike.1.4%")
           .or(orTerms)
           .limit(4);
@@ -1035,39 +1037,6 @@ User's question/context: ${effectiveQuestion}` : "";
           clarification_question: parsedMetadata.clarification_question || null,
         };
 
-        // Figure/table lookup — supports whole numbers ("Table 50"), appendix
-        // letters ("Table C1"), and "fig" abbreviation/typos
-        const questionFigNums = [...effectiveQuestion.matchAll(/\bfig(?:ure)?s?\s+([A-Z]?\d+(?:\.\d+)*)\b/gi)].map((m) => m[1].toUpperCase());
-        const questionTblNums = [...effectiveQuestion.matchAll(/\btable[s]?\s+([A-Z]?\d+(?:\.\d+)*)\b/gi)].map((m) => m[1].toUpperCase());
-        const aiFigures: any[] = parsedResponse.figures_referenced || [];
-        const aiTables: any[] = parsedResponse.tables_referenced || [];
-
-        const seenFigNums = new Set(aiFigures.map((f: any) => f.figure_number));
-        for (const n of questionFigNums) {
-          if (!seenFigNums.has(n)) { aiFigures.push({ figure_number: n }); seenFigNums.add(n); }
-        }
-        const seenTblNums = new Set(aiTables.map((t: any) => t.table_number));
-        for (const n of questionTblNums) {
-          if (!seenTblNums.has(n)) { aiTables.push({ table_number: n }); seenTblNums.add(n); }
-        }
-
-        // Always scan answer text for figure/table references — Claude is
-        // instructed to mention figure numbers from extracts, so any answer
-        // mentioning "Figure 4.17" should surface that figure regardless of
-        // whether the question was explicitly a visual request.
-        const answerText2 = parsedResponse.answer || "";
-        const answerFigRefs = [...answerText2.matchAll(/\bfigure\s+([A-Z]?\d+(?:\.\d+)*)\b/gi)].map((m) => m[1].toUpperCase());
-        for (const n of answerFigRefs) {
-          if (!seenFigNums.has(n)) { aiFigures.push({ figure_number: n }); seenFigNums.add(n); }
-        }
-        const answerTblRefs = [...answerText2.matchAll(/\btable\s+([A-Z]?\d+(?:\.\d+)*)\b/gi)].map((m) => m[1].toUpperCase());
-        for (const n of answerTblRefs) {
-          if (!seenTblNums.has(n)) { aiTables.push({ table_number: n }); seenTblNums.add(n); }
-        }
-
-        const figNums = aiFigures.map((f: any) => f.figure_number).filter(Boolean);
-        const tblNums = aiTables.map((t: any) => t.table_number).filter(Boolean);
-
         // Build standard code → UUID map once; used by figures, tables, and
         // citations below. Built from EVERY standard the user/org owns
         // (ownedStandardsResult, already fetched earlier for trade-scoping)
@@ -1093,6 +1062,56 @@ User's question/context: ${effectiveQuestion}` : "";
           const titleKey = normCode((s as any).title);
           if (titleKey && !codeToStdId.has(titleKey)) codeToStdId.set(titleKey, id);
         }
+
+        // Finds a standard mention ("AS/NZS 3017") textually near a clause/
+        // table/figure reference, without resolving it — callers attach the
+        // raw text as `standard_code` so it flows through the same
+        // resolveStdId lookup as a citation the model names directly.
+        const findNearbyStandardCode = (text: string, ref: string): string | null => {
+          const idx = text.search(new RegExp(`\\b${ref.replace(/\./g, "\\.")}\\b`));
+          if (idx === -1) return null;
+          const window = text.slice(Math.max(0, idx - 120), idx + ref.length + 120);
+          return window.match(/\bAS(?:\/NZS)?\s*\d+(?:\.\d+)*(?::\d+)?\b/i)?.[0] ?? null;
+        };
+
+        // Figure/table lookup — supports whole numbers ("Table 50"), appendix
+        // letters ("Table C1"), and "fig" abbreviation/typos
+        const questionFigNums = [...effectiveQuestion.matchAll(/\bfig(?:ure)?s?\s+([A-Z]?\d+(?:\.\d+)*)\b/gi)].map((m) => m[1].toUpperCase());
+        const questionTblNums = [...effectiveQuestion.matchAll(/\btable[s]?\s+([A-Z]?\d+(?:\.\d+)*)\b/gi)].map((m) => m[1].toUpperCase());
+        const aiFigures: any[] = parsedResponse.figures_referenced || [];
+        const aiTables: any[] = parsedResponse.tables_referenced || [];
+
+        const seenFigNums = new Set(aiFigures.map((f: any) => f.figure_number));
+        for (const n of questionFigNums) {
+          if (!seenFigNums.has(n)) { aiFigures.push({ figure_number: n, standard_code: findNearbyStandardCode(effectiveQuestion, n) }); seenFigNums.add(n); }
+        }
+        const seenTblNums = new Set(aiTables.map((t: any) => t.table_number));
+        for (const n of questionTblNums) {
+          if (!seenTblNums.has(n)) { aiTables.push({ table_number: n, standard_code: findNearbyStandardCode(effectiveQuestion, n) }); seenTblNums.add(n); }
+        }
+
+        // Always scan answer text for figure/table references — Claude is
+        // instructed to mention figure numbers from extracts, so any answer
+        // mentioning "Figure 4.17" should surface that figure regardless of
+        // whether the question was explicitly a visual request.
+        const answerText2 = parsedResponse.answer || "";
+        const answerFigRefs = [...answerText2.matchAll(/\bfigure\s+([A-Z]?\d+(?:\.\d+)*)\b/gi)].map((m) => m[1].toUpperCase());
+        for (const n of answerFigRefs) {
+          // Attach any nearby standard mention as standard_code — without it,
+          // this entry resolves via the unscoped "any standard with this
+          // number" fallback further down, which is how a plumbing table/
+          // figure opened for a citation the answer text correctly named a
+          // standard for, right next to the reference, in prose the model
+          // just wasn't asked to also put in structured JSON.
+          if (!seenFigNums.has(n)) { aiFigures.push({ figure_number: n, standard_code: findNearbyStandardCode(answerText2, n) }); seenFigNums.add(n); }
+        }
+        const answerTblRefs = [...answerText2.matchAll(/\btable\s+([A-Z]?\d+(?:\.\d+)*)\b/gi)].map((m) => m[1].toUpperCase());
+        for (const n of answerTblRefs) {
+          if (!seenTblNums.has(n)) { aiTables.push({ table_number: n, standard_code: findNearbyStandardCode(answerText2, n) }); seenTblNums.add(n); }
+        }
+
+        const figNums = aiFigures.map((f: any) => f.figure_number).filter(Boolean);
+        const tblNums = aiTables.map((t: any) => t.table_number).filter(Boolean);
 
         if (figNums.length > 0 || tblNums.length > 0) {
           // Scoped by ownershipFilter (security) and the specific numbers
