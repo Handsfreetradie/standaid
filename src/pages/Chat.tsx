@@ -760,7 +760,7 @@ const Chat = () => {
       </div>
 
       {/* Input — chat-input-wrapper class is locked in index.css, do not remove */}
-      <div className="chat-input-wrapper flex-shrink-0 border-t border-border px-4 pt-3 bg-card">
+      <div className="chat-input-wrapper flex-shrink-0 border-t border-border px-4 pt-4 bg-card">
         {/* Image preview */}
         {pendingImage && (
           <div className="relative inline-block mb-2">
