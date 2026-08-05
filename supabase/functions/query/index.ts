@@ -448,8 +448,11 @@ serve(async (req) => {
             confidence_score: cacheHit.similarity,
           };
 
-          // Non-blocking — mirrors the miss-path logging below.
-          (async () => {
+          // Non-blocking from the client's point of view, but wrapped in
+          // waitUntil so the edge runtime keeps this isolate alive to finish
+          // the writes instead of freezing it the instant the response
+          // above is sent — mirrors the miss-path logging below.
+          EdgeRuntime.waitUntil((async () => {
             await supabase.rpc("bump_question_cache_hit", { p_id: cacheHit.id });
             const { data: queryRecord } = await supabase.from("queries").insert({
               user_id: userId,
@@ -481,7 +484,7 @@ serve(async (req) => {
             } catch (countErr) {
               console.error("[query] cache-hit daily_query_count update failed:", countErr);
             }
-          })();
+          })());
 
           return new Response(
             `data: ${JSON.stringify(donePayload)}\n\n`,
@@ -1604,8 +1607,10 @@ User's question/context: ${effectiveQuestion}` : "";
         };
         await writer.write(encoder.encode(`data: ${JSON.stringify(donePayload)}\n\n`));
 
-        // Non-blocking DB logging
-        (async () => {
+        // Non-blocking DB logging, wrapped in waitUntil so the edge runtime
+        // keeps this isolate alive to finish the writes instead of freezing
+        // it the instant writer.close() below finishes the response.
+        EdgeRuntime.waitUntil((async () => {
           await supabase.from("query_log").insert({
             id: queryId,
             user_id: userId,
@@ -1693,7 +1698,7 @@ User's question/context: ${effectiveQuestion}` : "";
           } catch (countErr) {
             console.error("[query] Failed to increment daily_query_count:", countErr);
           }
-        })().catch(console.error);
+        })().catch(console.error));
 
       } catch (e) {
         console.error("Stream error:", e);
