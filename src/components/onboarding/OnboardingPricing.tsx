@@ -13,14 +13,13 @@ const OnboardingPricing = ({ onNext, onBack }: Props) => {
   const [annual, setAnnual] = useState(true);
 
   const freeFeatures = [
-    { text: "Government & public standards", included: true },
-    { text: "3 AI queries per day", included: true },
-    { text: "1 basic calculator", included: true },
+    { text: "5 AI queries per day", included: true },
+    { text: "All 20+ calculators — 1 free use each per day", included: true },
     { text: "Basic compliance chat", included: true },
     { text: "Upload your own standards", included: false },
     { text: "Photo & video analysis", included: false },
     { text: "Unlimited queries", included: false },
-    { text: "Full calculator suite", included: false },
+    { text: "Full clause detail in answers", included: false },
     { text: "Compliance reports", included: false },
     { text: "Voice input", included: false },
     { text: "Save history", included: false },
