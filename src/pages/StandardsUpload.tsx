@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import {
   AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogFooter,
@@ -184,6 +185,8 @@ const StandardsUpload = () => {
   const [licenceConfirmed, setLicenceConfirmed] = useState(false);
   const [canBackground, setCanBackground] = useState(false);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
+  const [isAmendment, setIsAmendment] = useState(false);
+  const [amendsStandardId, setAmendsStandardId] = useState<string>("");
 
   const fileRef = useRef<HTMLInputElement>(null);
   const { session } = useAuth();
@@ -231,9 +234,21 @@ const StandardsUpload = () => {
       toast.error("Please confirm you're licensed to upload this document.");
       return;
     }
+    if (isAmendment && !amendsStandardId) {
+      toast.error("Select which standard this amendment applies to.");
+      return;
+    }
 
     if (!skipDuplicateCheck) {
-      const match = findLikelyDuplicate(docName, standardCode, existingStandards || []);
+      // Scope the check to the same group: a base upload only warns against
+      // other base standards, an amendment only warns against other
+      // amendments already linked to the same base standard — otherwise
+      // "AS/NZS 3000 Amendment 2" would false-positive against the base
+      // "AS/NZS 3000" standard it's meant to sit alongside.
+      const comparisonSet = (existingStandards || []).filter((s: any) =>
+        isAmendment ? s.amends_standard_id === amendsStandardId : !s.amends_standard_id,
+      );
+      const match = findLikelyDuplicate(docName, standardCode, comparisonSet);
       if (match) {
         setDuplicateWarning(match);
         return;
@@ -314,6 +329,7 @@ const StandardsUpload = () => {
           file_path: filePath,
           extracted_text: textToSend,
           extracted_text_path: textPathToSend,
+          amends_standard_id: isAmendment ? amendsStandardId : undefined,
         },
       });
 
@@ -581,6 +597,43 @@ const StandardsUpload = () => {
             />
           </div>
         </div>
+
+        <label className="flex items-start gap-3 mb-4 cursor-pointer">
+          <Checkbox
+            checked={isAmendment}
+            onCheckedChange={(v) => {
+              setIsAmendment(v === true);
+              if (v !== true) setAmendsStandardId("");
+            }}
+            className="mt-0.5 flex-shrink-0"
+          />
+          <span className="text-xs text-muted-foreground leading-relaxed">
+            This is an amendment to a standard I've already uploaded (e.g. "AS/NZS 3000 Amendment 2").
+          </span>
+        </label>
+
+        {isAmendment && (
+          <div className="mb-6">
+            <Label className="text-sm">Which standard does this amend? *</Label>
+            <Select value={amendsStandardId} onValueChange={setAmendsStandardId}>
+              <SelectTrigger className="h-11 mt-1">
+                <SelectValue placeholder="Select a standard" />
+              </SelectTrigger>
+              <SelectContent>
+                {(existingStandards || [])
+                  .filter((s: any) => !s.amends_standard_id)
+                  .map((s: any) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.title}{s.standard_code ? ` (${s.standard_code})` : ""}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground mt-1">
+              The amendment's changes will take priority over the base standard when the AI answers.
+            </p>
+          </div>
+        )}
 
         <label className="flex items-start gap-3 mb-6 cursor-pointer">
           <Checkbox

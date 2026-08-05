@@ -575,7 +575,7 @@ serve(async (req) => {
     // reordered by a Haiku pass that judges which chunks actually answer the
     // question. Falls back to RRF order on any failure.
     const fusedRanked = await rerankChunks(retrievalQuestion, fused, ANTHROPIC_API_KEY);
-    const matchedChunks = [...clauseChunksFiltered, ...fusedRanked].slice(0, 15);
+    let matchedChunks = [...clauseChunksFiltered, ...fusedRanked].slice(0, 15);
 
     // Standard-diversity guarantee. A single global relevance rank lets one
     // standard's better-worded content fully starve out an equally relevant
@@ -712,6 +712,61 @@ serve(async (req) => {
       }
     }
 
+    // Amendment override — if any matched standard has a linked amendment
+    // (uploaded separately via the "this is an amendment" flow), pull the
+    // amendment's full chunk set in and let it take priority over the base
+    // standard for any clause it also covers. Amendments are small documents,
+    // so fetching all their chunks (not just vector-similar ones) is cheap
+    // and ensures a superseding clause isn't missed just because its wording
+    // didn't score high enough against the user's question.
+    {
+      const baseStandardIds = [...new Set(matchedChunks.map((c: any) => c.standard_id))];
+      if (baseStandardIds.length > 0) {
+        const { data: amendments } = await supabase
+          .from("standards")
+          .select("id, amends_standard_id")
+          .or(ownershipFilter)
+          .in("amends_standard_id", baseStandardIds);
+
+        if (amendments && amendments.length > 0) {
+          const amendmentIds = amendments.map((a: any) => a.id);
+          const { data: amendmentChunks } = await supabase
+            .from("standard_chunks")
+            .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index, chunk_type, is_normative")
+            .or(ownershipFilter)
+            .in("standard_id", amendmentIds)
+            .eq("is_indexed", true)
+            .limit(60);
+
+          if (amendmentChunks && amendmentChunks.length > 0) {
+            const baseIdByAmendmentId = new Map(amendments.map((a: any) => [a.id, a.amends_standard_id]));
+            // Clause numbers an amendment touches, per base standard it amends —
+            // any base chunk matching one of these is now superseded.
+            const supersededClauses = new Map<string, Set<string>>();
+            for (const ac of amendmentChunks) {
+              const baseId = baseIdByAmendmentId.get(ac.standard_id);
+              if (!baseId || !ac.clause_number) continue;
+              if (!supersededClauses.has(baseId)) supersededClauses.set(baseId, new Set());
+              supersededClauses.get(baseId)!.add(ac.clause_number);
+            }
+
+            matchedChunks = matchedChunks.filter((c: any) => {
+              const superseded = supersededClauses.get(c.standard_id);
+              return !(superseded && c.clause_number && superseded.has(c.clause_number));
+            });
+
+            const haveIds = new Set(matchedChunks.map((c: any) => c.id));
+            for (const ac of amendmentChunks) {
+              if (!haveIds.has(ac.id)) {
+                haveIds.add(ac.id);
+                matchedChunks.push({ ...ac, similarity: 0.95, is_amendment: true });
+              }
+            }
+          }
+        }
+      }
+    }
+
     // Get standard details
     const standardIds = [...new Set(matchedChunks.map((c: any) => c.standard_id))];
     const standards = standardIds.length > 0
@@ -795,11 +850,12 @@ serve(async (req) => {
     // before tagging existed carry NULL — those get no annotation rather
     // than a guess the model would treat as authoritative.
     const chunkTag = (c: any): string => {
-      if (c.chunk_type === "note") return " [NOTE]";
-      if (c.chunk_type === "definition") return " [DEFINITION]";
-      if (c.is_normative === true) return " [MANDATORY — normative]";
-      if (c.is_normative === false) return " [GUIDANCE — informative]";
-      return "";
+      const amendmentTag = c.is_amendment ? " [AMENDMENT — supersedes the base standard on this clause]" : "";
+      if (c.chunk_type === "note") return amendmentTag + " [NOTE]";
+      if (c.chunk_type === "definition") return amendmentTag + " [DEFINITION]";
+      if (c.is_normative === true) return amendmentTag + " [MANDATORY — normative]";
+      if (c.is_normative === false) return amendmentTag + " [GUIDANCE — informative]";
+      return amendmentTag;
     };
 
     // Build context string

@@ -53,7 +53,7 @@ serve(async (req) => {
 
     // Parse JSON body — file was uploaded directly to storage by the browser
     const body = await req.json();
-    const { title, standard_code: standardCode, version, trade_category: tradeCategory, file_path: filePath, extracted_text: extractedText, extracted_text_path: extractedTextPath } = body;
+    const { title, standard_code: standardCode, version, trade_category: tradeCategory, file_path: filePath, extracted_text: extractedText, extracted_text_path: extractedTextPath, amends_standard_id: amendsStandardId } = body;
 
     if (!title || !filePath) {
       return new Response(JSON.stringify({ error: "title and file_path are required" }), {
@@ -68,18 +68,40 @@ serve(async (req) => {
       });
     }
 
-    // If the user already has this standard code, delete the old record and its chunks
+    // An amendment must point at a standard the caller (or their team) actually owns —
+    // otherwise a crafted amends_standard_id could link onto someone else's library.
+    if (amendsStandardId) {
+      const targetQuery = supabaseAdmin.from("standards").select("id").eq("id", amendsStandardId);
+      const { data: target } = await (
+        organizationId ? targetQuery.eq("organization_id", organizationId) : targetQuery.eq("user_id", userId)
+      ).maybeSingle();
+      if (!target) {
+        return new Response(JSON.stringify({ error: "The standard this amends could not be found in your library" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    // If the user already has this exact document, delete the old record and its chunks
     // so the new upload replaces it cleanly. Do this BEFORE the tier check so re-uploads
     // of existing standards don't incorrectly count against the limit.
+    // Base standards and amendments are scoped separately: a base upload only replaces
+    // another base with the same code, and an amendment only replaces a PREVIOUS
+    // amendment of the SAME base standard with the same code — so uploading "AS/NZS
+    // 3000 Amendment 2" never wipes out the base "AS/NZS 3000" standard it amends, but
+    // re-uploading the same amendment twice still gets deduplicated instead of piling up.
     let isReplacement = false;
     if (standardCode) {
       // Team members share one library — match on the org's copy (any
       // member's upload), not just this caller's own, so re-uploading an
       // existing team standard replaces it rather than duplicating it.
-      const existingQuery = supabaseAdmin
+      let existingQuery = supabaseAdmin
         .from("standards")
         .select("id, file_path")
         .eq("standard_code", standardCode);
+      existingQuery = amendsStandardId
+        ? existingQuery.eq("amends_standard_id", amendsStandardId)
+        : existingQuery.is("amends_standard_id", null);
       const { data: existing } = await (
         organizationId ? existingQuery.eq("organization_id", organizationId) : existingQuery.eq("user_id", userId)
       ).maybeSingle();
@@ -112,12 +134,13 @@ serve(async (req) => {
       }
     }
 
-    // Tier limit only applies to brand-new standards (not replacements),
-    // and only to individual users — an active team member is covered by
-    // the org's paid seats instead.
+    // Tier limit only applies to brand-new standards (not replacements or
+    // amendments to a standard the user already has counted), and only to
+    // individual users — an active team member is covered by the org's paid
+    // seats instead.
     // Failed uploads don't count — a few doomed retries of a bad PDF used to
     // fill all 5 slots and lock the user out behind an upgrade prompt.
-    if (tier === "free" && !isReplacement && !organizationId) {
+    if (tier === "free" && !isReplacement && !amendsStandardId && !organizationId) {
       const { count } = await supabaseAdmin
         .from("standards")
         .select("*", { count: "exact", head: true })
@@ -143,6 +166,7 @@ serve(async (req) => {
         version: version || null,
         trade_category: tradeCategory || null,
         file_path: filePath,
+        amends_standard_id: amendsStandardId || null,
         extraction_status: "pending",
         is_partial: tier === "free" && !organizationId,
       })
