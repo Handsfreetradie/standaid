@@ -278,6 +278,12 @@ const Profile = () => {
   const planLabel = tier ? tier.charAt(0).toUpperCase() + tier.slice(1) : "";
   const queriesUsed = profile?.daily_query_count || 0;
   const isPro = tier === "pro" || tier === "business";
+  // pro_expires_at is only ever set for trials/promos (see
+  // 20260721000000_promo_pro_expiry.sql) — real paid Stripe subscribers
+  // never have it set, so its presence alone identifies a trial.
+  const trialDaysLeft = profile?.pro_expires_at
+    ? Math.max(0, Math.ceil((new Date(profile.pro_expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+    : null;
 
   const readyStandards = (standards || []).filter((s: any) => s.extraction_status === "complete");
   const totalClauses = (standards || []).reduce((sum: number, s: any) => sum + (s.indexed_chunks || 0), 0);
@@ -316,7 +322,9 @@ const Profile = () => {
                   <Shield className="h-5 w-5 text-primary" />
                   <span className="text-sm font-bold text-foreground capitalize">{tier} Plan</span>
                 </div>
-                <Badge className="bg-primary text-primary-foreground text-xs">Current</Badge>
+                <Badge className="bg-primary text-primary-foreground text-xs">
+                  {trialDaysLeft !== null ? `Trial — ${trialDaysLeft}d left` : "Current"}
+                </Badge>
               </div>
               <div className="space-y-2 mb-4">
                 <div className="flex justify-between text-xs">
@@ -338,14 +346,14 @@ const Profile = () => {
                   </span>
                 </div>
               </div>
-              {!isPro && (
+              {(!isPro || trialDaysLeft !== null) && (
                 <Button
                   className="w-full h-11 text-sm font-semibold gap-1.5"
                   disabled={billingBusy}
                   onClick={() => startCheckout("pro")}
                 >
                   {billingBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-                  Upgrade to Pro — $19.99/mo
+                  {trialDaysLeft !== null ? "Keep Pro — subscribe now" : "Upgrade to Pro — $19.99/mo"}
                 </Button>
               )}
             </Card>
@@ -552,7 +560,13 @@ const Profile = () => {
                     <div className="flex-1 text-left">
                       <span className="block">Subscription & Billing</span>
                       <span className="block text-xs text-muted-foreground font-normal mt-0.5">
-                        {profileLoading ? "Loading…" : isPro ? `${planLabel} plan active` : "Free plan"}
+                        {profileLoading
+                          ? "Loading…"
+                          : trialDaysLeft !== null
+                          ? `${planLabel} trial — ${trialDaysLeft}d left`
+                          : isPro
+                          ? `${planLabel} plan active`
+                          : "Free plan"}
                       </span>
                     </div>
                     {activePanel === "billing"
@@ -570,9 +584,25 @@ const Profile = () => {
                         <div className="flex justify-between text-xs">
                           <span className="text-muted-foreground">Price</span>
                           <span className="font-semibold text-foreground">
-                            {!isPro ? "Free" : org ? "Per-seat billing" : tier === "business" ? "$49.99/month" : "$19.99/month"}
+                            {trialDaysLeft !== null
+                              ? "Free during trial"
+                              : !isPro
+                              ? "Free"
+                              : org
+                              ? "Per-seat billing"
+                              : tier === "business"
+                              ? "$49.99/month"
+                              : "$19.99/month"}
                           </span>
                         </div>
+                        {trialDaysLeft !== null && (
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Trial ends</span>
+                            <span className="font-semibold text-foreground">
+                              {trialDaysLeft === 0 ? "Today" : `In ${trialDaysLeft} day${trialDaysLeft === 1 ? "" : "s"}`}
+                            </span>
+                          </div>
+                        )}
                         <div className="flex justify-between text-xs">
                           <span className="text-muted-foreground">Status</span>
                           <span className="flex items-center gap-1 font-semibold text-green-600">
@@ -580,7 +610,7 @@ const Profile = () => {
                           </span>
                         </div>
                       </div>
-                      {isPro ? (
+                      {isPro && trialDaysLeft === null ? (
                         <>
                           <Button
                             size="sm"
@@ -611,7 +641,7 @@ const Profile = () => {
                           onClick={() => startCheckout("pro")}
                         >
                           {billingBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
-                          Upgrade to Pro — $19.99/mo
+                          {trialDaysLeft !== null ? "Keep Pro — subscribe now" : "Upgrade to Pro — $19.99/mo"}
                         </Button>
                       )}
                       <p className="text-xs text-muted-foreground leading-relaxed">

@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
 interface Props {
-  onNext: (plan: "free" | "pro") => void;
+  onNext: () => void;
   onBack: () => void;
 }
 
@@ -35,7 +35,6 @@ const OnboardingPricing = ({ onNext, onBack }: Props) => {
     "Full job history saved",
     "Compliance reports & certificates",
     "Apprentice & capstone mode",
-    "7 day free trial — no card needed",
   ];
 
   return (
@@ -45,9 +44,9 @@ const OnboardingPricing = ({ onNext, onBack }: Props) => {
       </button>
 
       <div className="text-center mb-6">
-        <h2 className="font-sans text-2xl font-extrabold text-foreground">Start free.</h2>
+        <h2 className="font-sans text-2xl font-extrabold text-foreground">Start with a free trial.</h2>
         <p className="text-muted-foreground text-sm mt-2">
-          Upgrade when you need more on the job.
+          Every new account gets 7 days of Pro, free — no card needed. Drops to Free after unless you upgrade.
         </p>
       </div>
 
@@ -137,19 +136,13 @@ const OnboardingPricing = ({ onNext, onBack }: Props) => {
       {/* Fixed bottom */}
       <div className="fixed bottom-0 left-0 right-0 bg-background border-t border-border px-5 py-4 pb-safe">
         <Button
-          onClick={() => onNext("free")}
+          onClick={() => onNext()}
           className="w-full h-12 text-base font-bold rounded-xl"
         >
-          Start Free
+          Start my 7-day free trial
         </Button>
-        <button
-          onClick={() => onNext("pro")}
-          className="text-sm text-muted-foreground mt-3 block mx-auto hover:text-primary"
-        >
-          Start Pro free trial — no card needed →
-        </button>
         <p className="text-xs text-muted-foreground text-center mt-2">
-          Cancel any time. No lock in.
+          No card needed. Cancel any time. No lock in.
         </p>
       </div>
     </div>
