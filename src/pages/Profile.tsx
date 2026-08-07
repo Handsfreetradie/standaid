@@ -249,9 +249,11 @@ const Profile = () => {
     created_at: string;
     pro_expires_at: string | null;
     query_count: number;
+    total_cost_usd: number;
   };
   const [adminUsers, setAdminUsers] = useState<AdminUserRow[] | null>(null);
   const [adminUsersLoading, setAdminUsersLoading] = useState(false);
+  const [adminTotalCost, setAdminTotalCost] = useState<number | null>(null);
 
   const loadAdminUsers = async () => {
     setAdminUsersLoading(true);
@@ -259,6 +261,7 @@ const Profile = () => {
       const { data, error } = await supabase.functions.invoke("admin-users", { body: {} });
       if (error) throw error;
       setAdminUsers(data?.users ?? []);
+      setAdminTotalCost(typeof data?.total_cost_usd === "number" ? data.total_cost_usd : null);
     } catch (e: any) {
       console.error("[admin users] error:", e);
       toast.error(e?.message || "Couldn't load the users list.");
@@ -266,6 +269,8 @@ const Profile = () => {
       setAdminUsersLoading(false);
     }
   };
+
+  const formatCost = (n: number) => n < 0.01 && n > 0 ? "<$0.01" : `$${n.toFixed(2)}`;
 
   const displayName = profile?.display_name || user?.email?.split("@")[0] || "Tradie";
   const tradeLabel = profile?.trade_type
@@ -866,10 +871,11 @@ const Profile = () => {
                                   <th className="px-3 py-2 font-medium">Signed up</th>
                                   <th className="px-3 py-2 font-medium">Tier</th>
                                   <th className="px-3 py-2 font-medium text-right">Queries</th>
+                                  <th className="px-3 py-2 font-medium text-right">Cost</th>
                                 </tr>
                               </thead>
                               <tbody>
-                                {adminUsers.map((u) => (
+                                {[...adminUsers].sort((a, b) => b.total_cost_usd - a.total_cost_usd).map((u) => (
                                   <tr key={u.user_id} className="border-t border-border">
                                     <td className="px-3 py-2 max-w-[160px] truncate" title={u.email ?? ""}>
                                       {u.email || u.display_name || "—"}
@@ -879,6 +885,7 @@ const Profile = () => {
                                     </td>
                                     <td className="px-3 py-2 capitalize">{u.subscription_tier || "free"}</td>
                                     <td className="px-3 py-2 text-right">{u.query_count}</td>
+                                    <td className="px-3 py-2 text-right font-semibold">{formatCost(u.total_cost_usd)}</td>
                                   </tr>
                                 ))}
                               </tbody>
@@ -887,6 +894,7 @@ const Profile = () => {
                         )}
                         <p className="text-[11px] text-muted-foreground">
                           {adminUsers ? `${adminUsers.length} user${adminUsers.length === 1 ? "" : "s"}` : ""} · showing latest 500
+                          {adminTotalCost !== null ? ` · total spend: ${formatCost(adminTotalCost)}` : ""}
                         </p>
                       </div>
                     )}

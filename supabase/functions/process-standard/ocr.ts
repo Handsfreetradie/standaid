@@ -9,6 +9,18 @@ import {
   hasGoodTextQuality,
   convertPdfToBase64,
 } from "./extraction.ts";
+import { logTokenUsage } from "../_shared/log-usage.ts";
+
+// Exported so recover-page-gap can reuse this verbatim when re-transcribing
+// a single recovered page — it must format identically to normal OCR output
+// (e.g. a real "TABLE X.X" caption line) or extractTableChunks/etc. won't
+// classify it correctly.
+export const transcriptionRules =
+  `Include every clause number, heading, value, table, note, and figure caption exactly as written. ` +
+  `Format: clause headings as "X.X HEADING TITLE" on their own line. ` +
+  `Figure captions as "Figure X.X — Caption text" on their own line. ` +
+  `Do NOT summarise, paraphrase, or skip any content. ` +
+  `Pay special attention to numerical values and units (e.g. 0.5 Ω, 1 MΩ, 500 V).`;
 
 const SCANNED_DOC_RATIO = 0.85;
 // Memory guard for the pdf-lib slicing path only (whole-doc mode below is
@@ -136,6 +148,7 @@ async function extractTextWithAI(
   totalPages = 0,
   deadline = Number.POSITIVE_INFINITY,
   startPage = 1,
+  usageLogger?: { supabaseAdmin: any; userId: string; standardId: string },
 ): Promise<{ text: string; nextPage: number | null; totalPages: number }> {
   let srcDoc: PDFDocument | null = null;
   try {
@@ -164,13 +177,6 @@ async function extractTextWithAI(
     : firstBatch + 1; // unknown page count — try single call
 
   const wholeDocBase64 = ((useWholeDoc && !fileId) || !srcDoc) ? convertPdfToBase64(fileBytes) : null;
-
-  const transcriptionRules =
-    `Include every clause number, heading, value, table, note, and figure caption exactly as written. ` +
-    `Format: clause headings as "X.X HEADING TITLE" on their own line. ` +
-    `Figure captions as "Figure X.X — Caption text" on their own line. ` +
-    `Do NOT summarise, paraphrase, or skip any content. ` +
-    `Pay special attention to numerical values and units (e.g. 0.5 Ω, 1 MΩ, 500 V).`;
 
   let fullText = "";
   let nextPage: number | null = null;
@@ -266,6 +272,17 @@ async function extractTextWithAI(
     }
 
     const data = await completionResponse.json();
+    if (data.usage && usageLogger) {
+      logTokenUsage(usageLogger.supabaseAdmin, {
+        userId: usageLogger.userId, kind: "ocr", model: "claude-sonnet-4-6", refId: usageLogger.standardId,
+        usage: {
+          input_tokens: data.usage.input_tokens ?? 0,
+          output_tokens: data.usage.output_tokens ?? 0,
+          cache_read_tokens: data.usage.cache_read_input_tokens ?? 0,
+          cache_creation_tokens: data.usage.cache_creation_input_tokens ?? 0,
+        },
+      });
+    }
     const batchText: string = data.content?.[0]?.text || "";
     if (data.stop_reason === "max_tokens") {
       console.warn(`AI OCR batch ${batch + 1} hit max_tokens — output may have lost the tail of page ${endPage}`);
@@ -298,6 +315,7 @@ export async function extractTextFromPdf(
   anthropicApiKey: string,
   deadline: number,
   resume?: { priorText: string; startPage: number },
+  usageLogger?: { supabaseAdmin: any; userId: string; standardId: string },
 ): Promise<ExtractionOutcome> {
   // Use unpdf to extract text page-by-page
   let pageTexts: string[] = [];
@@ -373,7 +391,7 @@ export async function extractTextFromPdf(
   console.log(`Attempting batched AI OCR (${knownPageCount > 0 ? knownPageCount + " pages" : "unknown length"})${resume ? `, resuming at page ${resume.startPage}` : ""}...`);
   try {
     const { text: newText, nextPage, totalPages: realPages } = await extractTextWithAI(
-      fileBytes, anthropicApiKey, knownPageCount, deadline, resume?.startPage ?? 1,
+      fileBytes, anthropicApiKey, knownPageCount, deadline, resume?.startPage ?? 1, usageLogger,
     );
     const aiText = resume?.priorText ? `${resume.priorText}\n\n${newText}` : newText;
 

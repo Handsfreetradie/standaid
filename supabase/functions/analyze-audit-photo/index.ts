@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getAllowedOrigin } from "../_shared/cors.ts";
+import { logTokenUsage } from "../_shared/log-usage.ts";
 
 // Analyses one audit photo against the user's uploaded standards. Pro-only.
 // Returns structured findings: what it sees, per-point compliance verdicts with
@@ -168,7 +169,14 @@ serve(async (req) => {
         body: JSON.stringify({ model: "text-embedding-3-small", input: retrievalQuery }),
       });
       if (embRes.ok) {
-        const emb = (await embRes.json()).data[0].embedding;
+        const embJson = await embRes.json();
+        if (embJson.usage) {
+          logTokenUsage(supabase, {
+            userId, kind: "audit_embedding", model: "text-embedding-3-small", refId: photo_id,
+            usage: { input_tokens: embJson.usage.prompt_tokens ?? 0, output_tokens: 0 },
+          });
+        }
+        const emb = embJson.data[0].embedding;
         const { data: chunks } = await supabase.rpc("match_chunks", {
           query_embedding: emb, match_user_id: userId, match_threshold: 0.25, match_count: 16,
         });
@@ -248,6 +256,17 @@ ${contextChunks || "(none found — assess visually and flag what to check in th
     }
 
     const aiData = await aiRes.json();
+    if (aiData.usage) {
+      logTokenUsage(supabase, {
+        userId, kind: "audit_photo", model: "claude-opus-4-8", refId: photo_id,
+        usage: {
+          input_tokens: aiData.usage.input_tokens ?? 0,
+          output_tokens: aiData.usage.output_tokens ?? 0,
+          cache_read_tokens: aiData.usage.cache_read_input_tokens ?? 0,
+          cache_creation_tokens: aiData.usage.cache_creation_input_tokens ?? 0,
+        },
+      });
+    }
     const block = aiData.content?.find?.((b: any) => b.type === "tool_use");
     const result = block?.input;
     if (!result) {
@@ -277,7 +296,14 @@ ${contextChunks || "(none found — assess visually and flag what to check in th
           body: JSON.stringify({ model: "text-embedding-3-small", input: followUpQuery }),
         });
         if (embRes2.ok) {
-          const emb2 = (await embRes2.json()).data[0].embedding;
+          const embJson2 = await embRes2.json();
+          if (embJson2.usage) {
+            logTokenUsage(supabase, {
+              userId, kind: "audit_embedding", model: "text-embedding-3-small", refId: photo_id,
+              usage: { input_tokens: embJson2.usage.prompt_tokens ?? 0, output_tokens: 0 },
+            });
+          }
+          const emb2 = embJson2.data[0].embedding;
           const { data: moreChunks } = await supabase.rpc("match_chunks", {
             query_embedding: emb2, match_user_id: userId, match_threshold: 0.2, match_count: 10,
           });
@@ -326,6 +352,17 @@ ${contextChunks || "(none found — assess visually and flag what to check in th
 
             if (matchRes.ok) {
               const matchData = await matchRes.json();
+              if (matchData.usage) {
+                logTokenUsage(supabase, {
+                  userId, kind: "audit_clause_match", model: "claude-haiku-4-5", refId: photo_id,
+                  usage: {
+                    input_tokens: matchData.usage.input_tokens ?? 0,
+                    output_tokens: matchData.usage.output_tokens ?? 0,
+                    cache_read_tokens: matchData.usage.cache_read_input_tokens ?? 0,
+                    cache_creation_tokens: matchData.usage.cache_creation_input_tokens ?? 0,
+                  },
+                });
+              }
               const matchBlock = matchData.content?.find?.((b: any) => b.type === "tool_use");
               const matches = matchBlock?.input?.matches || [];
               for (const m of matches) {

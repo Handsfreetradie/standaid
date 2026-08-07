@@ -182,7 +182,9 @@ serve(async (req) => {
     let outcome;
     try {
       const deadline = requestStart + PROCESSING_TIMEOUT_MS - 20_000;
-      outcome = await extractTextFromPdf(fileBytes, ANTHROPIC_API_KEY, deadline, resume);
+      outcome = await extractTextFromPdf(fileBytes, ANTHROPIC_API_KEY, deadline, resume, {
+        supabaseAdmin, userId: standard.user_id, standardId: standard_id,
+      });
     } catch (e) {
       return fail(e instanceof Error ? e.message : "Text extraction failed.");
     }

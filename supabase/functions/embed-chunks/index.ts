@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { PAGE_GAP_SENTINEL } from "../process-standard/pipeline.ts";
+import { logTokenUsage } from "../_shared/log-usage.ts";
 
 const EMBED_BATCH_SIZE = 50;
 const PARALLEL_EMBED = 5;
@@ -17,6 +19,7 @@ async function contextualizeChunks(
   chunks: Array<{ id: string; content: string; context_generated?: boolean }>,
   docTitle: string,
   apiKey: string,
+  usageLogger: { supabaseAdmin: any; userId: string; standardId: string },
 ): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   const need = chunks.filter((c) => !c.context_generated && (c.content || "").length > 200);
@@ -39,6 +42,17 @@ async function contextualizeChunks(
       });
       if (!res.ok) continue;
       const data = await res.json();
+      if (data.usage) {
+        logTokenUsage(usageLogger.supabaseAdmin, {
+          userId: usageLogger.userId, kind: "contextualize", model: "claude-haiku-4-5", refId: usageLogger.standardId,
+          usage: {
+            input_tokens: data.usage.input_tokens ?? 0,
+            output_tokens: data.usage.output_tokens ?? 0,
+            cache_read_tokens: data.usage.cache_read_input_tokens ?? 0,
+            cache_creation_tokens: data.usage.cache_creation_input_tokens ?? 0,
+          },
+        });
+      }
       const text = data.content?.[0]?.text || "";
       for (const m of text.matchAll(/\[(\d+)\]\s*(.+?)(?=\n\[\d+\]|$)/gs)) {
         const idx = parseInt(m[1], 10);
@@ -51,7 +65,11 @@ async function contextualizeChunks(
   return out;
 }
 
-async function generateEmbeddingsBatch(texts: string[], apiKey: string): Promise<(number[] | null)[]> {
+async function generateEmbeddingsBatch(
+  texts: string[],
+  apiKey: string,
+  usageLogger: { supabaseAdmin: any; userId: string; standardId: string },
+): Promise<(number[] | null)[]> {
   const MAX_RETRIES = 3;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
@@ -69,6 +87,12 @@ async function generateEmbeddingsBatch(texts: string[], apiKey: string): Promise
       }
       if (!response.ok) throw new Error(`Embedding API error: ${response.status}`);
       const data = await response.json();
+      if (data.usage) {
+        logTokenUsage(usageLogger.supabaseAdmin, {
+          userId: usageLogger.userId, kind: "embed", model: "text-embedding-3-small", refId: usageLogger.standardId,
+          usage: { input_tokens: data.usage.prompt_tokens ?? 0, output_tokens: 0 },
+        });
+      }
       return data.data.map((d: any) => d.embedding);
     } catch (e) {
       if (attempt === MAX_RETRIES - 1) return texts.map(() => null);
@@ -208,6 +232,7 @@ serve(async (req) => {
         .lt("index_attempts", 3)
         .not("content", "ilike", "%visual description will be generated shortly%")
         .not("content", "ilike", "%transcription of this table will be generated shortly%")
+        .not("content", "ilike", `%${PAGE_GAP_SENTINEL}%`)
         .or(`chunk_index.lt.${indexLimit},clause_number.like.TABLE%,clause_number.like.FIGURE%`)
         .order("chunk_index")
         .limit(EMBED_BATCH_SIZE * PARALLEL_EMBED);
@@ -219,7 +244,9 @@ serve(async (req) => {
       // in memory; the flag + new content are persisted in the embedding write
       // below (one round-trip, no extra writes). Skipped entirely if no key.
       if (ANTHROPIC_API_KEY) {
-        const ctxMap = await contextualizeChunks(chunks, standard.title || "an Australian Standard", ANTHROPIC_API_KEY);
+        const ctxMap = await contextualizeChunks(chunks, standard.title || "an Australian Standard", ANTHROPIC_API_KEY, {
+          supabaseAdmin, userId: user_id, standardId: standard_id,
+        });
         for (const c of chunks) {
           const ctx = ctxMap.get(c.id);
           if (ctx) c.content = `[Context] ${ctx}\n\n${c.content}`;
@@ -235,7 +262,9 @@ serve(async (req) => {
       for (let i = 0; i < batches.length; i += PARALLEL_EMBED) {
         const group = batches.slice(i, i + PARALLEL_EMBED);
         const results = await Promise.all(
-          group.map(batch => generateEmbeddingsBatch(batch.map(c => c.content), OPENAI_API_KEY))
+          group.map(batch => generateEmbeddingsBatch(batch.map(c => c.content), OPENAI_API_KEY, {
+            supabaseAdmin, userId: user_id, standardId: standard_id,
+          }))
         );
 
         // Write embeddings back to DB — parallel updates within each batch
@@ -295,6 +324,7 @@ serve(async (req) => {
       .lt("index_attempts", 3)
       .not("content", "ilike", "%visual description will be generated shortly%")
       .not("content", "ilike", "%transcription of this table will be generated shortly%")
+      .not("content", "ilike", `%${PAGE_GAP_SENTINEL}%`)
       .or(`chunk_index.lt.${indexLimit},clause_number.like.TABLE%,clause_number.like.FIGURE%`);
 
     const allDone = (remaining ?? 1) === 0;

@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getAllowedOrigin } from "../_shared/cors.ts";
+import { logTokenUsage } from "../_shared/log-usage.ts";
 import { parseExtractedText } from "../process-standard/extraction.ts";
 import { detectTrade } from "../query/trade-detection.ts";
 import type { TradeType } from "../query/system-prompt.ts";
@@ -206,7 +207,11 @@ function getText(aiData: any): string {
 async function callAI(
   body: Record<string, unknown>,
   anthropicKey: string,
-  options: { temperature?: number; max_tokens?: number } = {},
+  options: {
+    temperature?: number;
+    max_tokens?: number;
+    usageLogger?: { supabaseAdmin: any; userId: string; kind: string };
+  } = {},
 ): Promise<Response> {
   const payload: Record<string, unknown> = { ...body };
   if (!("max_tokens" in payload)) payload.max_tokens = options.max_tokens ?? 1000;
@@ -253,6 +258,21 @@ async function callAI(
   if (!res.ok) {
     const errText = await res.clone().text();
     console.error(`[capstone] Claude error (${res.status}): ${errText}`);
+  } else if (options.usageLogger) {
+    // Clone so the caller can still read the body — .json() can only be
+    // consumed once per Response.
+    res.clone().json().then((data) => {
+      if (!data?.usage) return;
+      logTokenUsage(options.usageLogger!.supabaseAdmin, {
+        userId: options.usageLogger!.userId, kind: options.usageLogger!.kind, model: (payload.model as string) || "claude-sonnet-4-6",
+        usage: {
+          input_tokens: data.usage.input_tokens ?? 0,
+          output_tokens: data.usage.output_tokens ?? 0,
+          cache_read_tokens: data.usage.cache_read_input_tokens ?? 0,
+          cache_creation_tokens: data.usage.cache_creation_input_tokens ?? 0,
+        },
+      });
+    }).catch((e) => console.error("[capstone] usage logging parse failed:", e));
   }
   return res;
 }
@@ -458,7 +478,7 @@ Write questions and explanations in plain Australian English. Each explanation m
             },
           }],
           tool_choice: { type: "function", function: { name: "return_questions" } },
-      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 3000 });
+      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 3000, usageLogger: { supabaseAdmin: supabase, userId: user.id, kind: "capstone_generate_questions" } });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
 
@@ -524,7 +544,7 @@ ${APPRENTICE_STYLE}`,
               ],
             },
           ],
-      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 1500 });
+      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 1500, usageLogger: { supabaseAdmin: supabase, userId: user.id, kind: "capstone_analyze_photo" } });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
 
@@ -579,7 +599,7 @@ ${APPRENTICE_STYLE}`,
               content: `Explain this standard clause in apprentice-friendly language:\n\n[${chunk.clause_number || ""}${chunk.clause_title ? " — " + chunk.clause_title : ""}]\n${chunk.content}`,
             },
           ],
-      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 1000 });
+      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 1000, usageLogger: { supabaseAdmin: supabase, userId: user.id, kind: "capstone_explain_chunk" } });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
 
@@ -666,7 +686,7 @@ Write questions and explanations in plain Australian English. Each explanation m
             },
           }],
           tool_choice: { type: "function", function: { name: "return_questions" } },
-        }, ANTHROPIC_API_KEY, { max_tokens: 3000 });
+        }, ANTHROPIC_API_KEY, { max_tokens: 3000, usageLogger: { supabaseAdmin: supabase, userId: user.id, kind: "capstone_start_exam" } });
 
         if (!genResponse.ok) return await aiError(genResponse);
         const genData = await genResponse.json();
@@ -805,7 +825,7 @@ Structure the guide so it's easy to revise from: start with a 2-3 sentence "What
 ${APPRENTICE_STYLE}` },
             { role: "user", content: `Create a comprehensive study guide for apprentices from this standard. ${focusNote}\n\nStandard: ${standard?.standard_code || standard?.title}${sectionLabel}\n\nContent:\n${allChunks.map((c) => `[${c.clause_number || ""}${c.clause_title ? " - " + c.clause_title : ""}] ${(c.content || "").slice(0, 700)}`).join("\n\n")}` },
           ],
-      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 3000 });
+      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 3000, usageLogger: { supabaseAdmin: supabase, userId: user.id, kind: "capstone_study_guide" } });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
 
@@ -943,7 +963,7 @@ ${APPRENTICE_STYLE}`,
             },
           }],
           tool_choice: { type: "function", function: { name: "return_exam_prep" } },
-      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 4000 });
+      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 4000, usageLogger: { supabaseAdmin: supabase, userId: user.id, kind: "capstone_exam_prep" } });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
 
@@ -1088,7 +1108,7 @@ ${APPRENTICE_STYLE}`,
           },
         }],
         tool_choice: { type: "function", function: { name: "return_calculation" } },
-      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 2000 });
+      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 2000, usageLogger: { supabaseAdmin: supabase, userId: user.id, kind: "capstone_generate_calculation" } });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
       const aiData = await aiResponse.json();
@@ -1172,7 +1192,7 @@ Feedback rules: 2-4 short sentences in plain Australian English, written directl
           },
         }],
         tool_choice: { type: "function", function: { name: "return_grade" } },
-      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 1000 });
+      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 1000, usageLogger: { supabaseAdmin: supabase, userId: user.id, kind: "capstone_grade_calculation" } });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
       const aiData = await aiResponse.json();
@@ -1242,7 +1262,7 @@ CRITICAL: Never mention any clause number in the question text itself. Clause nu
           },
         }],
         tool_choice: { type: "function", function: { name: "return_questions" } },
-      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 3000 });
+      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 3000, usageLogger: { supabaseAdmin: supabase, userId: user.id, kind: "capstone_generate_short_answer" } });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
 
@@ -1309,7 +1329,7 @@ Feedback rules: 1-3 short sentences in plain Australian English, written directl
           },
         }],
         tool_choice: { type: "function", function: { name: "return_grade" } },
-      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 1000 });
+      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 1000, usageLogger: { supabaseAdmin: supabase, userId: user.id, kind: "capstone_grade_short_answer" } });
 
       if (!aiResponse.ok) return await aiError(aiResponse);
 

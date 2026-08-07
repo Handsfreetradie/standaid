@@ -46,13 +46,22 @@ serve(async (req) => {
       .rpc("admin_query_counts_by_user");
     if (countsError) throw countsError;
 
+    // Lifetime AI cost per user, from token_usage
+    // (20260807010000_token_usage_tracking.sql) — every AI call across the
+    // app logs here, so this is a real total, not just chat queries.
+    const { data: costs, error: costsError } = await supabaseAdmin
+      .rpc("admin_cost_by_user");
+    if (costsError) throw costsError;
+
     const countByUser = new Map<string, number>((counts ?? []).map((r: { user_id: string; total: number }) => [r.user_id, r.total]));
+    const costByUser = new Map<string, number>((costs ?? []).map((r: { user_id: string; total_cost_usd: number }) => [r.user_id, r.total_cost_usd]));
     const usersWithCounts = (users ?? []).map((u) => ({
       ...u,
       query_count: countByUser.get(u.user_id) ?? 0,
+      total_cost_usd: costByUser.get(u.user_id) ?? 0,
     }));
 
-    return json({ users: usersWithCounts });
+    return json({ users: usersWithCounts, total_cost_usd: [...costByUser.values()].reduce((a, b) => a + b, 0) });
   } catch (e) {
     console.error("[admin-users] Unexpected error:", e);
     return json({ error: e instanceof Error ? e.message : "Unknown error" }, 500);

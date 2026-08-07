@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getAllowedOrigin } from "../_shared/cors.ts";
+import { logTokenUsage } from "../_shared/log-usage.ts";
 
 type FeedbackRating = "helpful" | "wrong" | "unclear";
 
@@ -80,6 +81,12 @@ serve(async (req: Request) => {
             if (embRes.ok) {
               const embData = await embRes.json();
               questionEmbedding = embData.data[0].embedding;
+              if (embData.usage) {
+                logTokenUsage(supabase, {
+                  userId, kind: "feedback_embedding", model: "text-embedding-3-small",
+                  usage: { input_tokens: embData.usage.prompt_tokens ?? 0, output_tokens: 0 },
+                });
+              }
             }
           } catch (e) {
             // Non-fatal — feedback still saves without embedding

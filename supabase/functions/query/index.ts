@@ -5,6 +5,7 @@ import { detectTrade, standardTradeFromCode } from "./trade-detection.ts";
 import { validateResponse } from "./validation.ts";
 import { getAllowedOrigin } from "../_shared/cors.ts";
 import { expandQuery, TRADIE_SYNONYMS } from "./synonyms.ts";
+import { logTokenUsage } from "../_shared/log-usage.ts";
 
 // Hash of the prompt + synonym logic, computed once per cold start. Cached
 // answers are tagged with this on write and only reused on read if it still
@@ -33,7 +34,7 @@ const MARKER_SAFE_MARGIN = 24;
 // most likely to CONTAIN THE ANSWER, not just share vocabulary. Timeout-
 // guarded and fully degrading: any failure keeps the original RRF order, so
 // this can only ever help.
-async function rerankChunks(question: string, candidates: any[], apiKey: string): Promise<any[]> {
+async function rerankChunks(question: string, candidates: any[], apiKey: string, supabaseAdmin: any, userId: string): Promise<any[]> {
   if (candidates.length <= 8) return candidates;
   const pool = candidates.slice(0, 20);
   const listing = pool.map((c, i) =>
@@ -57,6 +58,17 @@ async function rerankChunks(question: string, candidates: any[], apiKey: string)
     });
     if (!res.ok) return candidates;
     const data = await res.json();
+    if (data.usage) {
+      logTokenUsage(supabaseAdmin, {
+        userId, kind: "chat_rerank", model: "claude-haiku-4-5",
+        usage: {
+          input_tokens: data.usage.input_tokens ?? 0,
+          output_tokens: data.usage.output_tokens ?? 0,
+          cache_read_tokens: data.usage.cache_read_input_tokens ?? 0,
+          cache_creation_tokens: data.usage.cache_creation_input_tokens ?? 0,
+        },
+      });
+    }
     const raw = data.content?.[0]?.text || "";
     const order = [...raw.matchAll(/\d+/g)].map((m: any) => parseInt(m[0], 10)).filter((n: number) => n >= 0 && n < pool.length);
     if (order.length === 0) return candidates;
@@ -256,6 +268,17 @@ serve(async (req) => {
             const condenseData = await condenseRes.json();
             const t = (condenseData.content?.[0]?.text || "").trim();
             if (t && t.length > 2 && t.length < 500) retrievalQuestion = t;
+            if (condenseData.usage) {
+              logTokenUsage(supabase, {
+                userId, kind: "chat_condense", model: "claude-haiku-4-5",
+                usage: {
+                  input_tokens: condenseData.usage.input_tokens ?? 0,
+                  output_tokens: condenseData.usage.output_tokens ?? 0,
+                  cache_read_tokens: condenseData.usage.cache_read_input_tokens ?? 0,
+                  cache_creation_tokens: condenseData.usage.cache_creation_input_tokens ?? 0,
+                },
+              });
+            }
           }
         } finally {
           clearTimeout(condenseTimeout);
@@ -294,6 +317,17 @@ serve(async (req) => {
           if (visionRes.ok) {
             const visionData = await visionRes.json();
             imageDescription = (visionData.content?.[0]?.text || "").trim();
+            if (visionData.usage) {
+              logTokenUsage(supabase, {
+                userId, kind: "chat_vision_prepass", model: "claude-haiku-4-5",
+                usage: {
+                  input_tokens: visionData.usage.input_tokens ?? 0,
+                  output_tokens: visionData.usage.output_tokens ?? 0,
+                  cache_read_tokens: visionData.usage.cache_read_input_tokens ?? 0,
+                  cache_creation_tokens: visionData.usage.cache_creation_input_tokens ?? 0,
+                },
+              });
+            }
           } else {
             console.error(`[query] vision pre-pass HTTP ${visionRes.status}`);
           }
@@ -403,6 +437,12 @@ serve(async (req) => {
       const embData = await embResponse.json();
       const queryEmbedding = embData.data[0].embedding;
       cachedQueryEmbedding = queryEmbedding;
+      if (embData.usage) {
+        logTokenUsage(supabase, {
+          userId, kind: "chat_embedding", model: "text-embedding-3-small",
+          usage: { input_tokens: embData.usage.prompt_tokens ?? 0, output_tokens: 0 },
+        });
+      }
 
       // Shared team question cache — a close-enough repeat question within
       // the org reuses a previous answer instead of paying for Claude again.
@@ -516,6 +556,12 @@ serve(async (req) => {
     if (hasExpansion && expandedEmbResponse?.ok) {
       const embData2 = await expandedEmbResponse.json();
       const expandedEmbedding = embData2.data[0].embedding;
+      if (embData2.usage) {
+        logTokenUsage(supabase, {
+          userId, kind: "chat_embedding", model: "text-embedding-3-small",
+          usage: { input_tokens: embData2.usage.prompt_tokens ?? 0, output_tokens: 0 },
+        });
+      }
       const { data, error: matchError2 } = await supabase.rpc("match_chunks", {
         query_embedding: expandedEmbedding,
         match_user_id: userId,
@@ -577,7 +623,7 @@ serve(async (req) => {
     // pinned first (explicit intent, not fuzzy matching); everything else is
     // reordered by a Haiku pass that judges which chunks actually answer the
     // question. Falls back to RRF order on any failure.
-    const fusedRanked = await rerankChunks(retrievalQuestion, fused, ANTHROPIC_API_KEY);
+    const fusedRanked = await rerankChunks(retrievalQuestion, fused, ANTHROPIC_API_KEY, supabase, userId);
     let matchedChunks = [...clauseChunksFiltered, ...fusedRanked].slice(0, 15);
 
     // Standard-diversity guarantee. A single global relevance rank lets one
@@ -997,6 +1043,7 @@ User's question/context: ${effectiveQuestion}` : "";
         let accumulated = "";
         let lastSentIdx = 0;
         let pastSeparator = false;
+        const streamUsage = { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0 };
 
         const reader = aiResponse.body!.getReader();
         const decoder = new TextDecoder();
@@ -1012,6 +1059,16 @@ User's question/context: ${effectiveQuestion}` : "";
             if (data === "[DONE]") continue;
             try {
               const parsed = JSON.parse(data);
+              // message_start carries the input side of usage (plus cache
+              // read/write counts); message_delta carries the final
+              // cumulative output_tokens once generation finishes.
+              if (parsed.type === "message_start" && parsed.message?.usage) {
+                streamUsage.input_tokens = parsed.message.usage.input_tokens ?? 0;
+                streamUsage.cache_read_tokens = parsed.message.usage.cache_read_input_tokens ?? 0;
+                streamUsage.cache_creation_tokens = parsed.message.usage.cache_creation_input_tokens ?? 0;
+              } else if (parsed.type === "message_delta" && parsed.usage) {
+                streamUsage.output_tokens = parsed.usage.output_tokens ?? 0;
+              }
               // Claude format: { type: "content_block_delta", delta: { type: "text_delta", text: "..." } }
               const token = parsed.delta?.text || "";
               if (!token) continue;
@@ -1046,6 +1103,10 @@ User's question/context: ${effectiveQuestion}` : "";
           if (remaining.trim()) {
             await writer.write(encoder.encode(`data: ${JSON.stringify({ token: remaining })}\n\n`));
           }
+        }
+
+        if (streamUsage.input_tokens > 0 || streamUsage.output_tokens > 0) {
+          logTokenUsage(supabase, { userId, kind: "chat_answer", model: "claude-sonnet-4-6", usage: streamUsage });
         }
 
         // Parse full accumulated response
@@ -1367,6 +1428,7 @@ User's question/context: ${effectiveQuestion}` : "";
           query: effectiveQuestion,
           trade,
           knownClauseNumbers: dbClauseNumbers,
+          safetyCritical: parsedResponse.safety_critical,
         });
         parsedResponse.answer = validation.cleanedResponse;
 
@@ -1629,7 +1691,7 @@ User's question/context: ${effectiveQuestion}` : "";
             question: effectiveQuestion,
             response: parsedResponse.answer,
             citations: citationsForLog,
-            confidence_score: topSimilarity,
+            confidence_score: validation.confidenceScore,
             safety_flagged: parsedResponse.safety_critical || false,
             subscription_tier_at_time: tier,
           }).select().single();

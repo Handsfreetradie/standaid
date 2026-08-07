@@ -198,7 +198,9 @@ serve(async (req) => {
       try {
         // Leave ~20s of the processing window for chunking + DB writes
         const extractionDeadline = requestStart + PROCESSING_TIMEOUT_MS - 20_000;
-        const outcome = await extractTextFromPdf(fileBytes, ANTHROPIC_API_KEY, extractionDeadline, resume);
+        const outcome = await extractTextFromPdf(fileBytes, ANTHROPIC_API_KEY, extractionDeadline, resume, {
+          supabaseAdmin, userId, standardId: standard_id,
+        });
 
         if (!outcome.done) {
           // No forward progress since last run (e.g. the same batch keeps
@@ -308,21 +310,45 @@ serve(async (req) => {
     // "AS 3008.1.1 2017") — which branded every chunk "[Unknown]" and baked
     // that junk into the embeddings. Derive code + version from the title and
     // persist them so citations and the vision prompts name the real standard.
+    // Matches "AS/NZS 3000", "AS NZS 3000" (no slash — a common filename/
+    // title variant), and plain "AS 3000". The slash was previously
+    // mandatory for the NZS branch, so a title like "AS NZS 3000 2018..."
+    // silently fell through to no match at all (confirmed in production,
+    // 2026-08-05 — a user's own AS/NZS 3000:2018 upload).
+    const findStandardCode = (text: string): { code: string; version: string } | null => {
+      const m = text.match(/\bAS(?:\s*\/?\s*(NZS))?\s*(\d+(?:\.\d+)*)/i);
+      if (!m) return null;
+      const code = `AS${m[1] ? "/NZS" : ""} ${m[2]}`;
+      let version = "";
+      const rest = text.slice((m.index || 0) + m[0].length, (m.index || 0) + m[0].length + 200);
+      const vm = rest.match(/\b((?:19|20)\d{2})\b/);
+      if (vm) version = vm[1];
+      return { code, version };
+    };
+
     let standardCode = standard.standard_code as string | null;
     let version = (standard.version as string | null) || "";
-    if (!standardCode && standard.title) {
-      const m = (standard.title as string).match(/\b(AS(?:\s*\/\s*NZS)?)\s*(\d+(?:\.\d+)*)/i);
-      if (m) {
-        standardCode = `${m[1].toUpperCase().replace(/\s*\/\s*/, "/")} ${m[2]}`;
-        if (!version) {
-          const rest = (standard.title as string).slice((m.index || 0) + m[0].length);
-          const vm = rest.match(/\b((?:19|20)\d{2})\b/);
-          if (vm) version = vm[1];
-        }
+    if (!standardCode) {
+      // Try the title first (cheap, no extraction dependency), then fall
+      // back to the extracted document text itself — the real title page
+      // reliably names the standard even when the upload's title field is
+      // generic (e.g. a file literally named "PDF.pdf" pre-fills the title
+      // field as "PDF", which has nothing for the title-only match to find).
+      const fromTitle = standard.title ? findStandardCode(standard.title as string) : null;
+      const titleIsGeneric = !fromTitle;
+      const found = fromTitle || findStandardCode(extracted.text.slice(0, 6000));
+      if (found) {
+        standardCode = found.code;
+        if (!version && found.version) version = found.version;
         await supabaseAdmin.from("standards")
-          .update({ standard_code: standardCode, ...(version && !standard.version ? { version } : {}) })
+          .update({
+            standard_code: standardCode,
+            ...(version && !standard.version ? { version } : {}),
+            // Only replace the title if it wasn't already a real standard name.
+            ...(titleIsGeneric ? { title: `${standardCode}${version ? `:${version}` : ""}` } : {}),
+          })
           .eq("id", standard_id);
-        console.log(`[${standard_id}] Derived standard_code "${standardCode}"${version ? ` version ${version}` : ""} from title`);
+        console.log(`[${standard_id}] Derived standard_code "${standardCode}"${version ? ` version ${version}` : ""} from ${titleIsGeneric ? "document text (generic title)" : "title"}`);
       }
     }
     standardCode = standardCode || "Unknown";

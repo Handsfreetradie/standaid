@@ -10,6 +10,7 @@ import {
   buildVisionParams,
   extractPageBase64,
 } from "../describe-figures/shared.ts";
+import { logTokenUsage } from "../_shared/log-usage.ts";
 
 // Runs on a pg_cron heartbeat (every 2 minutes, see migration
 // 20260801000001_poll_vision_batches_cron.sql) to pick up Anthropic Message
@@ -159,6 +160,19 @@ serve(async (req) => {
           let text: string = result.result.message?.content?.[0]?.text || "";
           let usedPage = item.page;
 
+          if (result.result.message?.usage) {
+            const u = result.result.message.usage;
+            logTokenUsage(supabaseAdmin, {
+              userId: job.user_id, kind: "figure_desc", model: "claude-sonnet-4-6", refId: job.standard_id, isBatch: true,
+              usage: {
+                input_tokens: u.input_tokens ?? 0,
+                output_tokens: u.output_tokens ?? 0,
+                cache_read_tokens: u.cache_read_input_tokens ?? 0,
+                cache_creation_tokens: u.cache_creation_input_tokens ?? 0,
+              },
+            });
+          }
+
           // ── Tail: mis-anchored caption — try page+1 synchronously ────────
           if (item.isTable && (!text || text.length < 20 || text.includes("TABLE NOT ON PAGE"))) {
             const doc = await getSrcDoc();
@@ -173,6 +187,17 @@ serve(async (req) => {
               });
               if (retryRes.ok) {
                 const retryData = await retryRes.json();
+                if (retryData.usage) {
+                  logTokenUsage(supabaseAdmin, {
+                    userId: job.user_id, kind: "figure_desc_retry", model: "claude-sonnet-4-6", refId: job.standard_id,
+                    usage: {
+                      input_tokens: retryData.usage.input_tokens ?? 0,
+                      output_tokens: retryData.usage.output_tokens ?? 0,
+                      cache_read_tokens: retryData.usage.cache_read_input_tokens ?? 0,
+                      cache_creation_tokens: retryData.usage.cache_creation_input_tokens ?? 0,
+                    },
+                  });
+                }
                 const retryText: string = retryData.content?.[0]?.text || "";
                 if (retryText && retryText.length >= 20 && !retryText.includes("TABLE NOT ON PAGE")) {
                   text = retryText;
@@ -208,6 +233,17 @@ serve(async (req) => {
               });
               if (!contRes.ok) break;
               const contData = await contRes.json();
+              if (contData.usage) {
+                logTokenUsage(supabaseAdmin, {
+                  userId: job.user_id, kind: "figure_desc_continuation", model: "claude-sonnet-4-6", refId: job.standard_id,
+                  usage: {
+                    input_tokens: contData.usage.input_tokens ?? 0,
+                    output_tokens: contData.usage.output_tokens ?? 0,
+                    cache_read_tokens: contData.usage.cache_read_input_tokens ?? 0,
+                    cache_creation_tokens: contData.usage.cache_creation_input_tokens ?? 0,
+                  },
+                });
+              }
               const contText: string = contData.content?.[0]?.text || "";
               if (!contText || contText.length < 20 || contText.includes("TABLE NOT ON PAGE")) break;
               text = text.replace(/\(table continues on next page\)\s*$/i, "").trimEnd() +
