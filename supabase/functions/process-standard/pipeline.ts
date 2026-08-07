@@ -11,7 +11,15 @@ import {
   extractFigureChunks,
   buildDocumentMapChunk,
   stripRepeatedPageFurniture,
+  findGapPages,
 } from "./extraction.ts";
+
+// Must NOT contain "will be generated shortly" — that substring is what
+// resume-stalled-indexing's existing sweep matches on for table/figure
+// placeholders; a distinct sentinel keeps a PAGE-GAP row from double-firing
+// that unrelated cron. recover-page-gap and embed-chunks both match on this
+// exact string too, so it must stay in sync across all three.
+export const PAGE_GAP_SENTINEL = "[PAGE-GAP-SENTINEL]";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseAdmin = any;
@@ -119,6 +127,31 @@ export async function chunkAndPersist(
   }
 
   console.log(`[${standard_id}] All chunks stored (text-only)`);
+
+  // Pages the OCR pass produced essentially no content for — flag for
+  // background recovery (recover-page-gap, on the same ~10-min auto-resume
+  // cadence as table/figure description) rather than losing that content
+  // silently. Placeholder only — never counted in totalChunks/is_indexed.
+  const gapPages = findGapPages(pages);
+  if (gapPages.length > 0) {
+    console.log(`[${standard_id}] ${gapPages.length} page(s) look empty and are queued for recovery: ${gapPages.join(", ")}`);
+    const gapRecords = gapPages.map((pageNum, i) => ({
+      standard_id,
+      user_id: userId,
+      organization_id: organizationId,
+      clause_number: `PAGE-GAP ${pageNum}`,
+      clause_title: null,
+      content: `${PAGE_GAP_SENTINEL} Page ${pageNum} produced no readable content during extraction and is pending automatic recovery.`,
+      page_number: pageNum,
+      chunk_index: totalChunks + i,
+      chunk_type: null,
+      is_normative: null,
+      embedding: null,
+      is_indexed: false,
+    }));
+    const { error: gapError } = await supabaseAdmin.from("standard_chunks").insert(gapRecords);
+    if (gapError) console.error(`Gap-page placeholder insert error for ${standard_id}:`, gapError);
+  }
 
   // Chunks are in — safe to drop any OCR resume text now
   await supabaseAdmin.from("processing_jobs")

@@ -38,7 +38,7 @@ const OnboardingAccount = ({ onNext, onBack, onSignIn }: Props) => {
       if (error) {
         toast.error(error.message);
       } else {
-        toast.success("Account created! Check your email to confirm.");
+        toast.success("Account created! Check your email (and junk/spam folder) to confirm.");
         onNext(name.split(" ")[0] || name);
       }
     } finally {

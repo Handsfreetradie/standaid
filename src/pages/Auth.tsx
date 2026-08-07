@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Mail, Lock, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,8 +15,31 @@ const Auth = () => {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { signIn, signUp, resetPassword } = useAuth();
+  const [signupSent, setSignupSent] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const { signIn, signUp, resetPassword, resendConfirmation } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => setResendCooldown((s) => s - 1), 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown > 0]);
+
+  const handleResend = async () => {
+    setLoading(true);
+    try {
+      const { error } = await resendConfirmation(email);
+      if (error) {
+        toast.error(error.message);
+      } else {
+        toast.success("Confirmation email resent");
+        setResendCooldown(60);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,7 +56,8 @@ const Auth = () => {
         if (error) {
           toast.error(error.message);
         } else {
-          toast.success("Account created! Check your email to confirm.");
+          setSignupSent(true);
+          setResendCooldown(60);
         }
       } else {
         const { error } = await signIn(email, password);
@@ -123,6 +147,45 @@ const Auth = () => {
               </p>
             </>
           )}
+        </Card>
+      </div>
+    );
+  }
+
+  // ── CHECK YOUR EMAIL (post sign-up) ──
+  if (signupSent) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center px-5 bg-background">
+        <h1 className="mb-8 text-[64px] font-bold tracking-[-0.02em] leading-tight">
+          <span className="text-foreground">Stand</span>
+          <span className="text-primary">A</span>
+          <span className="text-primary">I</span>
+          <span className="text-foreground">d</span>
+        </h1>
+
+        <Card className="w-full max-w-sm p-6">
+          <h2 className="font-display text-xl font-bold text-foreground mb-1">Check your inbox</h2>
+          <p className="text-sm text-muted-foreground mb-2">
+            We've sent a confirmation link to <strong>{email}</strong>. Click it to activate your account.
+          </p>
+          <p className="text-sm text-muted-foreground mb-6">
+            Can't see it? Check your <strong>junk / spam folder</strong> — it can take a minute or two to land.
+          </p>
+          <Button
+            variant="outline"
+            className="w-full h-11"
+            onClick={handleResend}
+            disabled={loading || resendCooldown > 0}
+          >
+            {resendCooldown > 0 ? `Resend email (${resendCooldown}s)` : "Resend email"}
+          </Button>
+          <button
+            type="button"
+            onClick={() => { setSignupSent(false); setIsSignUp(false); }}
+            className="text-sm text-center text-muted-foreground hover:text-foreground hover:underline w-full mt-4"
+          >
+            Back to sign in
+          </button>
         </Card>
       </div>
     );

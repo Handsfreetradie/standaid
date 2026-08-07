@@ -12,6 +12,7 @@ import {
   hasGoodTextQuality,
   buildDocumentMapChunk,
   stripRepeatedPageFurniture,
+  findGapPages,
 } from "../../supabase/functions/process-standard/extraction";
 
 describe("convertPdfToBase64", () => {
@@ -523,5 +524,67 @@ describe("stripRepeatedPageFurniture", () => {
       `Body text for page ${i + 1}.`,
     ].join("\n")).join("\n");
     expect(stripRepeatedPageFurniture(shortDoc)).toBe(shortDoc);
+  });
+});
+
+describe("findGapPages", () => {
+  const REAL_CONTENT = "This page has plenty of real transcribed body text on it, well past the threshold.";
+
+  // 200-page doc with real content everywhere except the given 1-indexed
+  // page numbers, which are left empty (simulating a silently-dropped page).
+  function docWithGaps(gapPages: number[], total = 200): string[] {
+    const pages = Array.from({ length: total }, () => REAL_CONTENT);
+    for (const p of gapPages) pages[p - 1] = "";
+    return pages;
+  }
+
+  it("returns nothing for an empty pages array", () => {
+    expect(findGapPages([])).toEqual([]);
+  });
+
+  it("returns nothing when every page has real content", () => {
+    expect(findGapPages(docWithGaps([]))).toEqual([]);
+  });
+
+  it("finds a single isolated gap page in the middle of the document", () => {
+    expect(findGapPages(docWithGaps([100]))).toEqual([100]);
+  });
+
+  it("excludes a gap within the front-matter guard", () => {
+    // 200 pages -> edgeGuard = round(200*0.02) = 4, so pages 1-4 are guarded.
+    expect(findGapPages(docWithGaps([2]))).toEqual([]);
+  });
+
+  it("excludes a gap within the back-matter guard", () => {
+    expect(findGapPages(docWithGaps([199]))).toEqual([]);
+  });
+
+  it("does NOT exclude a long consecutive run — a catastrophic OCR early-stop must still surface", () => {
+    // Pages 50-59 all missing (10-page run). The run-length-exclusion idea
+    // was deliberately rejected: it would hide exactly this failure mode.
+    const gaps = Array.from({ length: 10 }, (_, i) => 50 + i);
+    const found = findGapPages(docWithGaps(gaps), 5);
+    expect(found.length).toBe(5);
+    for (const p of found) expect(gaps).toContain(p);
+  });
+
+  it("prioritises shorter runs over longer ones when trimming to the cap", () => {
+    const longRun = Array.from({ length: 8 }, (_, i) => 40 + i); // 8-page run
+    const shortRun = [100]; // isolated single-page gap
+    const found = findGapPages(docWithGaps([...longRun, ...shortRun]), 3);
+    // The isolated single-page run should win a slot before the long run does.
+    expect(found).toContain(100);
+  });
+
+  it("respects the maxCandidates cap", () => {
+    const gaps = [30, 60, 90, 120, 150, 180];
+    const found = findGapPages(docWithGaps(gaps), 3);
+    expect(found.length).toBe(3);
+  });
+
+  it("treats whitespace-only pages the same as empty ones", () => {
+    const pages = Array.from({ length: 200 }, () => REAL_CONTENT);
+    pages[99] = "   \n\n  ";
+    expect(findGapPages(pages)).toEqual([100]);
   });
 });

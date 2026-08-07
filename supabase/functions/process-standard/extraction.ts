@@ -8,7 +8,7 @@
 // stamped with this value when chunks are (re)built, so stale standards
 // (pipeline_version < PIPELINE_VERSION) can be found and reprocessed via
 // reprocess-standard without requiring users to re-upload.
-export const PIPELINE_VERSION = 1;
+export const PIPELINE_VERSION = 2;
 
 export interface Section {
   heading: string | null;
@@ -159,6 +159,52 @@ export function matchClauseHeading(line: string, inAppendix = false): ClauseHead
 const TARGET_CHUNK_CHARS = 2000;
 const MAX_CHUNK_CHARS = 2500;
 export const SCANNED_PAGE_THRESHOLD = 15;
+
+// Pages the OCR pass produced essentially no text for — content silently
+// dropped rather than a genuinely blank page LOOKS identical from this
+// array alone, which is why the caller always confirms with one real vision
+// check before trusting a candidate; this only decides which pages are
+// worth that cheap check.
+//
+// Deliberately does NOT exclude long consecutive runs of missing pages —
+// extractTextWithAI's `batchText.length < 50` bailout (ocr.ts) silently
+// terminates OCR for the REST of the document on a single bad batch
+// response, which produces exactly a long run of missing pages and is
+// indistinguishable from a legitimate long blank tail from this array
+// alone. Excluding long runs would specifically hide that failure mode.
+// Cost is bounded instead by maxCandidates, prioritising the shortest runs
+// (closest to the confirmed real-world case: one isolated missing page).
+export function findGapPages(pages: string[], maxCandidates = 5): number[] {
+  const total = pages.length;
+  if (total === 0) return [];
+  const edgeGuard = Math.max(2, Math.round(total * 0.02));
+
+  const isGap = (i: number) => (pages[i] || "").trim().length < SCANNED_PAGE_THRESHOLD;
+
+  const runs: number[][] = [];
+  let current: number[] = [];
+  for (let i = edgeGuard; i < total - edgeGuard; i++) {
+    if (isGap(i)) {
+      current.push(i + 1); // 1-indexed page number
+    } else if (current.length) {
+      runs.push(current);
+      current = [];
+    }
+  }
+  if (current.length) runs.push(current);
+
+  // Shortest runs first — closest match to the observed single-page failure.
+  runs.sort((a, b) => a.length - b.length);
+
+  const candidates: number[] = [];
+  for (const run of runs) {
+    for (const page of run) {
+      if (candidates.length >= maxCandidates) return candidates;
+      candidates.push(page);
+    }
+  }
+  return candidates;
+}
 
 // Detect encoding corruption common in SAI Global / licensed PDFs.
 // Symptoms: Ω glyph swallows adjacent digits → "0.5 Ω" becomes "0. "

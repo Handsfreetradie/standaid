@@ -9,6 +9,11 @@ export interface ValidationInput {
   // lookup) — citations of these are never treated as hallucinated, even if
   // the retrieved chunks happen not to contain the number.
   knownClauseNumbers?: Set<string>;
+  // The model's own self-reported safety_critical flag (system-prompt
+  // metadata). Independent of this file's keyword-based safety check —
+  // OR'd into needsReview so a model-flagged answer always reaches the
+  // review queue even when the local heuristics find nothing wrong.
+  safetyCritical?: boolean;
 }
 
 export interface ValidationIssue {
@@ -78,7 +83,7 @@ export function validateResponse(input: ValidationInput): ValidationResult {
     issues,
     confidenceScore,
     shouldBlock: criticalCount > 0,
-    needsReview: warningCount > 0 || confidenceScore < 0.7,
+    needsReview: warningCount > 0 || confidenceScore < 0.7 || !!input.safetyCritical,
   };
 }
 
