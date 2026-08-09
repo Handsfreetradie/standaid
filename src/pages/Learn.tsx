@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
-import { GraduationCap, BookOpen, ClipboardList, FileText, ChevronRight, Loader2, CheckCircle2, XCircle, ArrowLeft, Trophy, Clock, Camera, Target, Upload, Calculator, ExternalLink, HelpCircle } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { GraduationCap, BookOpen, ClipboardList, FileText, ChevronRight, Loader2, CheckCircle2, XCircle, ArrowLeft, Trophy, Clock, Camera, Target, Upload, Calculator, ExternalLink, HelpCircle, Route, AlertTriangle, Wrench } from "lucide-react";
 import { PDFViewerModal } from "@/components/PDFViewerModal";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -14,7 +16,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { extractPdfText } from "@/lib/pdf-text";
 
-type Mode = "menu" | "quiz" | "exam" | "exam-active" | "exam-result" | "study-guide" | "study-view" | "photo-analysis" | "exam-prep" | "exam-prep-result" | "short-answer" | "short-answer-result" | "calculation";
+type Mode = "menu" | "quiz" | "exam" | "exam-active" | "exam-result" | "study-guide" | "study-view" | "photo-analysis" | "exam-prep" | "exam-prep-result" | "short-answer" | "short-answer-result" | "calculation" | "scenario" | "scenario-result";
 
 interface CalculationQuestion {
   id: string;
@@ -44,6 +46,42 @@ interface ShortAnswerResult {
   model_answer: string;
   clause_reference: string;
 }
+
+interface ScenarioWalkthrough {
+  decision_points: { situation: string; correct_approach: string; standard_reference: string; source_standard: string; suggested_tool: string; suggested_tool_label: string }[];
+  safety_considerations: string[];
+  testing_steps: string[];
+  certs_required: string[];
+  supervision_warning: string;
+}
+
+// Scenario walkthrough snapshot, kept in sessionStorage so tapping "Work
+// this out in the Cable Sizer tool" (which navigates away to /tools) doesn't
+// lose the walkthrough or the apprentice's ticked-off progress.
+interface SavedScenario {
+  standardId: string;
+  scenarioText: string;
+  result: ScenarioWalkthrough;
+  checked: Record<string, boolean>;
+}
+
+const SCENARIO_STORAGE_KEY = "standaid-active-scenario";
+
+const readSavedScenario = (): SavedScenario | null => {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(SCENARIO_STORAGE_KEY) || "null");
+    if (saved?.result?.decision_points) return saved;
+  } catch { /* corrupted entry — fall through and clear */ }
+  sessionStorage.removeItem(SCENARIO_STORAGE_KEY);
+  return null;
+};
+
+const updateSavedScenario = (patch: Partial<SavedScenario>) => {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(SCENARIO_STORAGE_KEY) || "null");
+    if (saved?.result) sessionStorage.setItem(SCENARIO_STORAGE_KEY, JSON.stringify({ ...saved, ...patch }));
+  } catch { /* storage unavailable — resume just won't be offered */ }
+};
 
 // Minimal in-progress mock exam snapshot, kept in sessionStorage so iOS Safari
 // killing the tab mid-exam doesn't lose the apprentice's progress.
@@ -153,6 +191,7 @@ const ScrollPage = ({ children }: { children: React.ReactNode }) => (
 
 const Learn = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>("menu");
   const [standards, setStandards] = useState<any[]>([]);
   const [selectedStandard, setSelectedStandard] = useState("");
@@ -199,6 +238,13 @@ const Learn = () => {
   const [shortAnswerGrading, setShortAnswerGrading] = useState(false);
   const [shortAnswerCurrentResult, setShortAnswerCurrentResult] = useState<ShortAnswerResult | null>(null);
 
+  // Scenario walkthrough state
+  const [scenarioText, setScenarioText] = useState("");
+  const [scenarioResult, setScenarioResult] = useState<ScenarioWalkthrough | null>(null);
+  const [scenarioLoading, setScenarioLoading] = useState(false);
+  const [scenarioChecked, setScenarioChecked] = useState<Record<string, boolean>>({});
+  const [resumableScenario, setResumableScenario] = useState<SavedScenario | null>(null);
+
   // Exam prep state
   const [examPrepTopics, setExamPrepTopics] = useState("");
   const [examPrepPdfText, setExamPrepPdfText] = useState<string | null>(null);
@@ -212,6 +258,7 @@ const Learn = () => {
 
   useEffect(() => {
     setResumableExam(readSavedExam());
+    setResumableScenario(readSavedScenario());
   }, []);
 
   // Countdown for the mock exam — auto-submits when time runs out.
@@ -631,6 +678,53 @@ const Learn = () => {
     }
   };
 
+  const submitScenario = async () => {
+    if (!selectedStandard) { toast.error("Select a standard first"); return; }
+    if (!scenarioText.trim()) { toast.error("Describe the job situation first"); return; }
+    setScenarioLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("capstone", {
+        body: {
+          action: "scenario_walkthrough",
+          standardId: selectedStandard,
+          sectionFilter: (selectedSection && selectedSection !== "__all__") ? selectedSection : undefined,
+          scenarioText: scenarioText.trim(),
+        },
+      });
+      if (error) throw await extractFnError(error);
+      if (data?.error) throw new Error(data.error);
+      setScenarioResult(data);
+      setScenarioChecked({});
+      sessionStorage.setItem(SCENARIO_STORAGE_KEY, JSON.stringify({
+        standardId: selectedStandard, scenarioText: scenarioText.trim(), result: data, checked: {},
+      } satisfies SavedScenario));
+      setResumableScenario(null);
+      setMode("scenario-result");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to generate walkthrough");
+    } finally {
+      setScenarioLoading(false);
+    }
+  };
+
+  const toggleScenarioCheck = (key: string) => {
+    setScenarioChecked((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      updateSavedScenario({ checked: next });
+      return next;
+    });
+  };
+
+  const resumeScenario = () => {
+    const saved = readSavedScenario();
+    if (!saved) return;
+    setSelectedStandard(saved.standardId);
+    setScenarioText(saved.scenarioText);
+    setScenarioResult(saved.result);
+    setScenarioChecked(saved.checked || {});
+    setMode("scenario-result");
+  };
+
   const generateShortAnswer = async () => {
     if (!selectedStandard) { toast.error("Select a standard first"); return; }
     setLoading(true);
@@ -799,6 +893,11 @@ const Learn = () => {
     setCalcQuestion(null);
     setCalcWorking("");
     setCalcResult(null);
+    if (mode === "scenario-result" || mode === "scenario") sessionStorage.removeItem(SCENARIO_STORAGE_KEY);
+    setScenarioText("");
+    setScenarioResult(null);
+    setScenarioChecked({});
+    setResumableScenario(readSavedScenario());
   };
 
   const handleExamPdfUpload = () => {
@@ -898,6 +997,25 @@ const Learn = () => {
           </Card>
         )}
 
+        {resumableScenario && (
+          <Card className="p-4 mb-4 border-primary/40 bg-primary/5">
+            <div className="flex items-center gap-2 mb-1">
+              <Route className="h-4 w-4 text-primary" />
+              <p className="text-sm font-bold text-foreground">Scenario in progress</p>
+            </div>
+            <p className="text-xs text-muted-foreground mb-3 line-clamp-2">{resumableScenario.scenarioText}</p>
+            <div className="flex gap-2">
+              <Button onClick={resumeScenario} size="sm" className="h-9 font-bold">Resume</Button>
+              <Button
+                onClick={() => { sessionStorage.removeItem(SCENARIO_STORAGE_KEY); setResumableScenario(null); }}
+                size="sm" variant="outline" className="h-9"
+              >
+                Discard
+              </Button>
+            </div>
+          </Card>
+        )}
+
         <div className="mb-4">
           <label className="text-sm font-medium text-foreground mb-2 block">Select a standard</label>
           <Select value={selectedStandard} onValueChange={(v) => { setSelectedStandard(v); loadSections(v); }}>
@@ -980,6 +1098,22 @@ const Learn = () => {
               <div className="flex-1">
                 <p className="font-bold text-foreground text-sm">Calculation Practice</p>
                 <p className="text-xs text-muted-foreground">Section C style — work through a real on-site calculation, show your working</p>
+              </div>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </div>
+          </Card>
+
+          <Card
+            className="p-4 cursor-pointer hover:border-primary/50 transition-colors"
+            onClick={() => { if (!selectedStandard) { toast.error("Select a standard first"); return; } setScenarioText(""); setScenarioResult(null); setMode("scenario"); }}
+          >
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                <Route className="h-5 w-5 text-primary" />
+              </div>
+              <div className="flex-1">
+                <p className="font-bold text-foreground text-sm">Scenario Walkthrough</p>
+                <p className="text-xs text-muted-foreground">Describe a real job, get a decision-by-decision breakdown</p>
               </div>
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </div>
@@ -1623,6 +1757,158 @@ const Learn = () => {
           standardId={pdfViewer?.standardId ?? ""}
           pageNumber={pdfViewer?.pageNumber}
         />
+      </ScrollPage>
+    );
+  }
+
+  // ── SCENARIO INPUT ──
+  if (mode === "scenario") {
+    return (
+      <ScrollPage>
+        <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
+          <ArrowLeft className="h-4 w-4" /> Back
+        </button>
+        <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Scenario Walkthrough</h2>
+        <p className="text-xs text-muted-foreground mb-5">Describe a real job situation and get a decision-by-decision breakdown — not scored, just guidance.</p>
+
+        <div className="mb-4">
+          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">Your Situation</label>
+          <Textarea
+            placeholder={"e.g. I'm replacing a switchboard in an occupied house and need to isolate supply for the day…"}
+            value={scenarioText}
+            onChange={(e) => setScenarioText(e.target.value)}
+            className="min-h-[140px] text-sm"
+            disabled={scenarioLoading}
+            maxLength={2000}
+          />
+        </div>
+
+        <Button
+          className="w-full h-12 font-bold rounded-xl"
+          onClick={submitScenario}
+          disabled={scenarioLoading || !scenarioText.trim()}
+        >
+          {scenarioLoading ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Working it through…</> : "Get Guidance"}
+        </Button>
+      </ScrollPage>
+    );
+  }
+
+  // ── SCENARIO RESULT ──
+  if (mode === "scenario-result" && scenarioResult) {
+    return (
+      <ScrollPage>
+        <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
+          <ArrowLeft className="h-4 w-4" /> Back
+        </button>
+        <h2 className="font-sans text-lg font-extrabold text-foreground mb-4">Scenario Walkthrough</h2>
+
+        {scenarioResult.supervision_warning && (
+          <Card className="p-4 mb-4 border-destructive bg-destructive/5">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-bold text-destructive mb-1">Not for unsupervised work</p>
+                <p className="text-xs text-destructive/90 leading-relaxed">{scenarioResult.supervision_warning}</p>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {scenarioResult.decision_points.map((dp, i) => {
+          const key = `dp-${i}`;
+          const done = !!scenarioChecked[key];
+          return (
+            <Card key={i} className={`p-4 mb-4 transition-opacity ${done ? "opacity-60" : ""}`}>
+              <div className="flex items-start gap-3">
+                <Checkbox checked={done} onCheckedChange={() => toggleScenarioCheck(key)} className="mt-1" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Decision {i + 1}</p>
+                  <p className={`text-sm text-foreground font-semibold mb-2 ${done ? "line-through" : ""}`}>{dp.situation}</p>
+                  <p className="text-sm text-foreground leading-relaxed mb-2">{dp.correct_approach}</p>
+                  {dp.standard_reference && !dp.source_standard && (
+                    <Badge className="bg-primary/10 text-primary border-0 text-xs">{dp.standard_reference}</Badge>
+                  )}
+                  {dp.standard_reference && dp.source_standard && (
+                    <Badge className="bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-400 border-0 text-xs">
+                      {dp.source_standard} {dp.standard_reference} — not your selected standard
+                    </Badge>
+                  )}
+                  {!dp.standard_reference && (
+                    <Badge variant="outline" className="text-xs text-muted-foreground">Not found in your uploaded standards — verify with your supervisor</Badge>
+                  )}
+                  {dp.suggested_tool && (
+                    <button
+                      onClick={() => navigate(`/tools?tool=${dp.suggested_tool}`)}
+                      className="flex items-center gap-1.5 w-full text-left rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-primary font-semibold mt-3 hover:bg-primary/10 active:scale-[0.99] transition-all"
+                    >
+                      <Wrench className="h-3.5 w-3.5 flex-shrink-0" />
+                      Work this out in the {dp.suggested_tool_label} tool
+                      <ChevronRight className="h-3.5 w-3.5 ml-auto flex-shrink-0" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </Card>
+          );
+        })}
+
+        {scenarioResult.safety_considerations.length > 0 && (
+          <Card className="p-4 mb-4 bg-secondary/50">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Safety Considerations</p>
+            <ul className="space-y-1">
+              {scenarioResult.safety_considerations.map((s, i) => (
+                <li key={i} className="text-sm text-foreground">• {s}</li>
+              ))}
+            </ul>
+          </Card>
+        )}
+
+        {(scenarioResult.testing_steps.length > 0 || scenarioResult.certs_required.length > 0) && (
+          <Card className="p-4 mb-4">
+            {scenarioResult.testing_steps.length > 0 && (
+              <div className="mb-3">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Testing &amp; Verification</p>
+                <ul className="space-y-2">
+                  {scenarioResult.testing_steps.map((s, i) => {
+                    const key = `test-${i}`;
+                    const done = !!scenarioChecked[key];
+                    return (
+                      <li key={i} className="flex items-start gap-2">
+                        <Checkbox checked={done} onCheckedChange={() => toggleScenarioCheck(key)} className="mt-0.5" />
+                        <span className={`text-sm text-foreground ${done ? "line-through text-muted-foreground" : ""}`}>{s}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+            {scenarioResult.certs_required.length > 0 && (
+              <div className={scenarioResult.testing_steps.length > 0 ? "pt-3 border-t border-border" : ""}>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Certificates &amp; Notifications</p>
+                <ul className="space-y-2">
+                  {scenarioResult.certs_required.map((s, i) => {
+                    const key = `cert-${i}`;
+                    const done = !!scenarioChecked[key];
+                    return (
+                      <li key={i} className="flex items-start gap-2">
+                        <Checkbox checked={done} onCheckedChange={() => toggleScenarioCheck(key)} className="mt-0.5" />
+                        <span className={`text-sm text-foreground ${done ? "line-through text-muted-foreground" : ""}`}>{s}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+          </Card>
+        )}
+
+        <div className="space-y-3">
+          <Button className="w-full h-12 font-bold rounded-xl" onClick={() => { sessionStorage.removeItem(SCENARIO_STORAGE_KEY); setResumableScenario(null); setScenarioText(""); setScenarioResult(null); setScenarioChecked({}); setMode("scenario"); }}>
+            Ask Another Scenario
+          </Button>
+          <Button variant="outline" className="w-full h-11" onClick={goBack}>Back to Learn</Button>
+        </div>
       </ScrollPage>
     );
   }

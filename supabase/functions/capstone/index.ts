@@ -177,6 +177,106 @@ async function getChunksWithRecovery(
   return chunks;
 }
 
+type OtherStandardChunk = StandardChunk & { standard_code: string };
+
+// Semantic search for scenario_walkthrough. Two parts:
+// 1. primaryChunks — search across the WHOLE selected standard (via
+//    match_chunks_by_standard), not a keyword-filtered slice of it. The AI's
+//    own decision points often use terms (e.g. "RCD") the apprentice's
+//    scenario text never mentioned, so keyword-overlap retrieval misses real
+//    clauses that semantic search finds.
+// 2. otherChunks — the same embedding, searched across the rest of the
+//    user's own uploaded standards (via match_chunks, scoped to their
+//    user/org — never another user's licensed content). Lets the AI say
+//    "that's covered in AS/NZS 3017, not the standard you're studying"
+//    instead of a flat "not covered" when the apprentice has that standard
+//    uploaded but simply isn't studying it right now.
+// Falls back to keyword-based fetchStandardChunks for primaryChunks if
+// embeddings are unavailable or return too little — never leave the caller
+// with nothing to work with.
+async function fetchScenarioContext(
+  supabase: any,
+  standardId: string,
+  queryText: string,
+  openaiKey: string | undefined,
+  limit: number,
+  userId: string,
+  sectionFilter?: string,
+): Promise<{ primaryChunks: StandardChunk[]; otherChunks: OtherStandardChunk[] }> {
+  if (openaiKey) {
+    try {
+      const embResponse = await fetch("https://api.openai.com/v1/embeddings", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${openaiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "text-embedding-3-small", input: queryText }),
+      });
+      if (embResponse.ok) {
+        const embData = await embResponse.json();
+        if (embData.usage) {
+          logTokenUsage(supabase, {
+            userId, kind: "capstone_scenario_embedding", model: "text-embedding-3-small",
+            usage: { input_tokens: embData.usage.prompt_tokens ?? 0, output_tokens: 0 },
+          });
+        }
+        const queryEmbedding = embData.data[0].embedding;
+        const [primaryResult, otherResult] = await Promise.all([
+          supabase.rpc("match_chunks_by_standard", {
+            query_embedding: queryEmbedding,
+            match_standard_id: standardId,
+            match_threshold: 0.30,
+            match_count: limit,
+          }),
+          // Higher threshold than the primary search — this is only for
+          // "you might find this elsewhere" hints, so only surface genuinely
+          // close matches, not loosely-related noise from another standard.
+          supabase.rpc("match_chunks", {
+            query_embedding: queryEmbedding,
+            match_user_id: userId,
+            match_threshold: 0.45,
+            match_count: 15,
+          }),
+        ]);
+
+        let primaryChunks: StandardChunk[] = [];
+        if (!primaryResult.error && primaryResult.data?.length >= 5) {
+          primaryChunks = primaryResult.data as StandardChunk[];
+          // The RPC can't apply the section filter itself, so narrow client
+          // side — but only if enough survives, otherwise the unfiltered
+          // whole-standard result is more useful than an empty one.
+          if (sectionFilter) {
+            const re = new RegExp(`^(FIGURE |TABLE )?${sectionFilter.replace(".", "\\.")}(\\.|$)`, "i");
+            const narrowed = primaryChunks.filter((c) => c.clause_number && re.test(c.clause_number));
+            if (narrowed.length >= 3) primaryChunks = narrowed;
+          }
+        } else {
+          primaryChunks = await fetchStandardChunks(supabase, standardId, limit, queryText, sectionFilter);
+        }
+
+        let otherChunks: OtherStandardChunk[] = [];
+        const otherRaw = ((otherResult.data || []) as any[]).filter((c) => c.standard_id !== standardId);
+        if (otherRaw.length > 0) {
+          const otherIds = [...new Set(otherRaw.map((c) => c.standard_id))];
+          const { data: otherStandards } = await supabase
+            .from("standards")
+            .select("id, standard_code, title")
+            .in("id", otherIds);
+          const codeById = new Map((otherStandards || []).map((s: any) => [s.id, s.standard_code || s.title || "another standard"]));
+          otherChunks = otherRaw
+            .slice(0, 10)
+            .map((c) => ({ ...c, standard_code: codeById.get(c.standard_id) || "another standard" }));
+        }
+
+        return { primaryChunks, otherChunks };
+      }
+      console.error("[capstone] embedding request failed:", embResponse.status, await embResponse.text());
+    } catch (e) {
+      console.error("[capstone] semantic retrieval failed, falling back to keyword search:", e);
+    }
+  }
+  const primaryChunks = await fetchStandardChunks(supabase, standardId, limit, queryText, sectionFilter);
+  return { primaryChunks, otherChunks: [] };
+}
+
 // Convert an OpenAI-style message content array into Anthropic blocks.
 // Mainly handles images: OpenAI uses {type:"image_url", image_url:{url}},
 // Anthropic uses {type:"image", source:{type:"base64", media_type, data}}.
@@ -298,6 +398,36 @@ const TRADE_LABEL: Record<TradeType, string> = {
   general: "trade",
 };
 
+// Mirrors the `id` keys in TOOL_COMPONENTS (src/pages/Tools.tsx) — keep in
+// sync if a tool is added/renamed there. Used by scenario_walkthrough to
+// point an apprentice at an existing calculator instead of leaving a
+// calculation-shaped decision point as plain text.
+const TOOL_CATALOG: { id: string; title: string; hint: string }[] = [
+  { id: "voltage-drop", title: "Voltage Drop", hint: "AC/DC voltage drop over a cable run" },
+  { id: "cable-sizer", title: "Cable Sizer", hint: "selecting cable size/rating for a load, run and install conditions" },
+  { id: "max-demand", title: "Maximum Demand", hint: "diversity/demand factor and main switch sizing" },
+  { id: "conduit-fill", title: "Conduit Fill", hint: "space-factor check for multiple cables in one conduit" },
+  { id: "earth-conductor", title: "Earth Conductor Size", hint: "minimum earthing conductor size" },
+  { id: "fault-loop", title: "Fault Loop Impedance", hint: "maximum Zs for a breaker/curve to trip in time" },
+  { id: "pv-string", title: "PV String Sizing", hint: "temperature-corrected solar string voltage vs inverter window" },
+  { id: "dc-isolator", title: "DC Isolator Rating", hint: "minimum DC isolator ratings from array datasheet values" },
+  { id: "battery-check", title: "Battery Install Checker", hint: "battery location/install screening" },
+  { id: "heat-load", title: "Heat Load", hint: "cooling/heating capacity estimate" },
+  { id: "duct-sizing", title: "Duct Sizing", hint: "round/rectangular duct size from airflow" },
+  { id: "ventilation", title: "Ventilation Sizing", hint: "exhaust/outside-air rate" },
+  { id: "pipe-sizing", title: "Pipe Sizing", hint: "pipe diameter from flow rate" },
+  { id: "gas-pipe", title: "Gas Pipe Sizing", hint: "gas pipe size by load and run length" },
+  { id: "drainage-fall", title: "Drainage Fall", hint: "drainage pipe grade/fall" },
+  { id: "backflow", title: "Backflow Prevention", hint: "backflow device selection by hazard rating" },
+  { id: "stormwater", title: "Stormwater Sizing", hint: "gutter/downpipe sizing" },
+  { id: "brick-calc", title: "Brick & Block", hint: "brick/mortar/sand quantity estimate" },
+  { id: "timber-span", title: "Timber Span", hint: "joist/rafter/bearer span selection" },
+  { id: "roof-pitch", title: "Roof Pitch", hint: "pitch, rafter length, roof area" },
+  { id: "concrete-volume", title: "Concrete Volume", hint: "concrete volume for a slab/footing/pad" },
+  { id: "steel-lintel", title: "Steel Lintel Sizing", hint: "indicative lintel size guide" },
+  { id: "stair-compliance", title: "Stair Rise & Going", hint: "stair riser/going compliance check" },
+];
+
 // Electrical keeps its own dedicated formula cheat-sheet (proven, unchanged).
 // Every other trade is steered towards topics that are genuinely calculation-
 // shaped in these standards, but the actual formulas/values must always come
@@ -351,9 +481,10 @@ serve(async (req) => {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return unauthorised();
 
-    const { action, standardId, topic, difficulty, questionCount, examId, questionId, questionIds, userAnswer, imageBase64, chunkId, examTopics, examPdfText, sectionFilter: rawSectionFilter, userClauseRef, practiceQuestionId } = await req.json();
+    const { action, standardId, topic, difficulty, questionCount, examId, questionId, questionIds, userAnswer, imageBase64, chunkId, examTopics, examPdfText, sectionFilter: rawSectionFilter, userClauseRef, practiceQuestionId, scenarioText } = await req.json();
     const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
     if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
+    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 
     // sectionFilter is interpolated into PostgREST .or() filter strings, so it
     // must be a bare section/clause number (e.g. "3", "8.3.1"). Reject anything
@@ -387,10 +518,26 @@ serve(async (req) => {
       }
     }
 
+    // Validate before the rate-limit gate so a rejected scenario doesn't
+    // burn one of the user's hourly AI credits.
+    if (action === "scenario_walkthrough") {
+      if (!standardId) throw new Error("Select a standard first");
+      if (typeof scenarioText !== "string" || !scenarioText.trim()) {
+        return new Response(JSON.stringify({ error: "Describe the job situation first" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (scenarioText.length > 2000) {
+        return new Response(JSON.stringify({ error: "That's a lot of detail — keep it under 2000 characters." }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     // start_exam is not in AI_ACTIONS: it only calls Claude when the question
     // pool is short, so it invokes enforceAiRateLimit() itself at that point
     // rather than charging a slot for every exam start.
-    const AI_ACTIONS = ["generate_questions", "analyze_photo", "explain_chunk", "generate_study_guide", "generate_short_answer", "generate_calculation", "grade_calculation", "grade_short_answer", "exam_prep"];
+    const AI_ACTIONS = ["generate_questions", "analyze_photo", "explain_chunk", "generate_study_guide", "generate_short_answer", "generate_calculation", "grade_calculation", "grade_short_answer", "exam_prep", "scenario_walkthrough"];
     const enforceAiRateLimit = async (): Promise<Response | null> => {
       // check_and_record_ai_usage is locked to service_role (migration
       // 20260706000001) — the user-scoped client would get permission denied.
@@ -1201,6 +1348,112 @@ Feedback rules: 2-4 short sentences in plain Australian English, written directl
       return new Response(JSON.stringify(grade), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // ── SCENARIO WALKTHROUGH ──
+    // Reverse of every other Learn mode: the apprentice supplies a real job
+    // situation instead of answering an AI-generated question. Not graded —
+    // this is a mentoring breakdown, not an exam, so nothing is persisted.
+    if (action === "scenario_walkthrough") {
+      // Semantic search across the whole standard: a scenario can touch
+      // several regulatory topics (isolation, earthing, RCD protection,
+      // testing) that the apprentice's own wording rarely names explicitly
+      // ("RCD" never appears just because they're wiring a hotplate), so
+      // keyword-overlap retrieval misses real clauses too often. Also pulls
+      // a few close matches from the apprentice's OTHER uploaded standards,
+      // so a gap in the selected standard can be pointed at the right one
+      // instead of a flat "not covered".
+      const { primaryChunks: chunks, otherChunks } = await fetchScenarioContext(
+        supabase, standardId, scenarioText, OPENAI_API_KEY, 40, user.id, sectionFilter
+      );
+      if (!chunks?.length) throw new Error("No content found for this standard");
+
+      const { data: standard } = await supabase.from("standards").select("title, standard_code").eq("id", standardId).single();
+      const primaryLabel = standard?.standard_code || standard?.title || "the standard";
+      const trade: TradeType = detectTrade("", standard?.standard_code || standard?.title || null);
+
+      const otherStandardsBlock = otherChunks.length > 0
+        ? `\n\nOTHER STANDARDS THIS APPRENTICE HAS UPLOADED (for reference only — they are not currently studying these, so never use them as the source for a decision point that ${primaryLabel} already covers; only mention one if it fills a genuine gap in ${primaryLabel}):\n${otherChunks.map((c) => `[${c.standard_code} ${c.clause_number || ""}] ${(c.content || "").slice(0, 400)}`).join("\n\n")}`
+        : "";
+
+      const aiResponse = await callAI({
+        model: "claude-sonnet-4-6",
+        messages: [
+          {
+            role: "system",
+            content: `You are an on-site mentor helping a ${TRADE_LABEL[trade]} apprentice think through a real job situation they've described, using ${primaryLabel}.
+
+Break the scenario down into decision points. At each point, explain the correct approach and reference the relevant standard. Identify any safety considerations that apply. Walk through the testing or verification steps that would apply after the work is complete. Note any certificates or notifications required.
+
+If the scenario involves something an apprentice should NOT be doing unsupervised (live work, mains work, isolating a switchboard alone, etc.), say so clearly in supervision_warning and explain why — leave supervision_warning as an empty string otherwise.
+
+Do not use any formula, table value, clause number, or standard reference from your own general knowledge — never guess one, and never cite a nearby or plausible-sounding clause number as a stand-in for one you can't find. Every standard_reference must be a clause number that literally appears in the content provided, quoting it exactly.
+For each decision point:
+- If ${primaryLabel}'s content (STANDARD CONTENT below) covers it: cite that clause in standard_reference, leave source_standard empty.
+- Else if one of the OTHER STANDARDS blocks covers it: set standard_reference to that clause number and source_standard to that standard's name, and say plainly in correct_approach that this is covered in that other standard, not ${primaryLabel} — name it so the apprentice knows to check that copy instead.
+- Else (not covered anywhere provided): leave standard_reference and source_standard both as empty strings, and say plainly in correct_approach that it isn't confirmed against any of their uploaded standards, so the apprentice knows to verify it with their supervisor rather than treating the answer as sourced.
+
+This app also has built-in calculators. If — and only if — a decision point is something one of these calculators actually solves (e.g. picking a cable size, checking voltage drop, sizing a conduit), set suggested_tool to that tool's exact id from this list; otherwise leave it as an empty string. Never invent an id that isn't in this list:
+${TOOL_CATALOG.map((t) => `- ${t.id}: ${t.title} — ${t.hint}`).join("\n")}
+${APPRENTICE_STYLE}`,
+          },
+          {
+            role: "user",
+            content: `Apprentice's scenario:\n${scenarioText}\n\nSTANDARD CONTENT (${primaryLabel}):\n${chunks.map((c) => `[${c.clause_number || ""}${c.clause_title ? " — " + c.clause_title : ""}] ${(c.content || "").slice(0, 700)}`).join("\n\n")}${otherStandardsBlock}`,
+          },
+        ],
+        tools: [{
+          type: "function",
+          function: {
+            name: "return_walkthrough",
+            description: "Return a scenario walkthrough",
+            parameters: {
+              type: "object",
+              properties: {
+                decision_points: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      situation: { type: "string", description: "The specific decision or step being addressed" },
+                      correct_approach: { type: "string" },
+                      standard_reference: { type: "string", description: "Real clause number quoted from the content provided, e.g. '5.3.2.1' — empty string if nothing provided covers this point" },
+                      source_standard: { type: "string", description: "Empty if standard_reference is from the primary standard being studied; otherwise the name of the OTHER uploaded standard it came from" },
+                      suggested_tool: { type: "string", description: "One of the exact tool ids provided if a built-in calculator solves this decision point, else empty string" },
+                    },
+                    required: ["situation", "correct_approach", "standard_reference", "source_standard", "suggested_tool"],
+                  },
+                },
+                safety_considerations: { type: "array", items: { type: "string" } },
+                testing_steps: { type: "array", items: { type: "string" } },
+                certs_required: { type: "array", items: { type: "string" } },
+                supervision_warning: { type: "string", description: "Non-empty only if this scenario involves unsupervised work an apprentice shouldn't be doing alone; empty string otherwise" },
+              },
+              required: ["decision_points", "safety_considerations", "testing_steps", "certs_required", "supervision_warning"],
+              additionalProperties: false,
+            },
+          },
+        }],
+        tool_choice: { type: "function", function: { name: "return_walkthrough" } },
+      }, ANTHROPIC_API_KEY, { temperature: 0.1, max_tokens: 2000, usageLogger: { supabaseAdmin: supabase, userId: user.id, kind: "capstone_scenario_walkthrough" } });
+
+      if (!aiResponse.ok) return await aiError(aiResponse);
+      const aiData = await aiResponse.json();
+      const input = getToolInput(aiData);
+      if (!input) throw new Error("No walkthrough generated");
+
+      // Never trust an AI-produced id as a navigation target — clamp to the
+      // real catalog and attach the display title server-side so the
+      // frontend doesn't need its own copy of tool names to stay in sync.
+      const toolById = new Map(TOOL_CATALOG.map((t) => [t.id, t.title]));
+      input.decision_points = (input.decision_points || []).map((dp: any) => {
+        const title = toolById.get(dp.suggested_tool);
+        return title
+          ? { ...dp, suggested_tool: dp.suggested_tool, suggested_tool_label: title }
+          : { ...dp, suggested_tool: "", suggested_tool_label: "" };
+      });
+
+      return new Response(JSON.stringify(input), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // ── GENERATE SHORT ANSWER QUESTIONS (Section B style) ──

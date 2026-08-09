@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Calculator, ChevronRight, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -95,6 +95,18 @@ const Tools = () => {
   const navigate = useNavigate();
   const { data: profile } = useProfile();
   const isFree = (profile?.subscription_tier || "free") === "free";
+
+  // Deep-link from Learn's Scenario Walkthrough ("Work this out in the
+  // Cable Sizer tool" button) — same ?q= prefill pattern Chat.tsx uses.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const toolId = params.get("tool");
+    if (toolId && TOOL_COMPONENTS[toolId]) {
+      openTool(toolId as ToolMode);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (mode !== "menu") {
     const ToolComponent = TOOL_COMPONENTS[mode];
