@@ -116,7 +116,7 @@ const VoltageDropTool = ({ onBack }: Props) => {
     const designCurrent = Math.round(I * 100) / 100;
 
     const conductorTemp = conductorTempFor(ct?.maxTemp);
-    const mv = mvPerAm(material, cableSize, system, phase, conductorTemp, pf);
+    const mv = mvPerAm(material, cableSize, system, phase, conductorTemp, pf, cableType);
     if (!mv) return;
 
     const vdVolts = (mv * I * L) / 1000;
@@ -148,7 +148,7 @@ const VoltageDropTool = ({ onBack }: Props) => {
     let recommendedSize: string | null = null;
     if (vdPercent > 5 || !capacityOk) {
       for (const size of availableSizes) {
-        const testMv = mvPerAm(material, size, system, phase, conductorTemp, pf);
+        const testMv = mvPerAm(material, size, system, phase, conductorTemp, pf, cableType);
         if (!testMv) continue;
         const testVd = ((testMv * I * L) / 1000 / V) * 100;
         const testCap = CURRENT_CAPACITY[getCapacityKey(cableType, material)]?.[size];
@@ -204,7 +204,7 @@ const VoltageDropTool = ({ onBack }: Props) => {
       label: "Voltage drop",
       working: `(${result.mvUsed} mV/A·m × ${result.designCurrent} A × ${length} m) ÷ 1000`,
       result: `${result.vdVolts} V`,
-      reference: `AS/NZS 3008.1.1 mV/A/m table — ${cableSize} mm² ${material}`,
+      reference: `AS/NZS 3008.1.1 Tables 30, 34-35 — ${cableSize} mm² ${material}`,
     },
     {
       label: "Voltage drop % check",
@@ -229,7 +229,7 @@ const VoltageDropTool = ({ onBack }: Props) => {
     <ToolLayout
       title="Voltage Drop Calculator"
       subtitle="Per AS/NZS 3008.1.1 — Full cable analysis with derating"
-      disclaimer="Based on AS/NZS 3008.1.1 mV/A/m tables and current capacity. Derating factors are per Tables 22-27. Always verify with the full standard and manufacturer data for critical installations."
+      disclaimer="Based on AS/NZS 3008.1.1 current capacity tables and resistance/reactance from Tables 30, 34-35. Derating factors are per Tables 22-27. Always verify with the full standard and manufacturer data for critical installations."
       onBack={onBack}
       onCalculate={calculate}
       verifyQuestion={result

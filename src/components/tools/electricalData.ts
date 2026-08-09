@@ -141,13 +141,86 @@ export const CURRENT_CAPACITY: Record<string, Record<string, number>> = {
   },
 };
 
-// --- Voltage drop (mV/A·m) computed the same way AS/NZS 3008.1.1 derives
-// Tables 40-51: conductor resistance at operating temperature plus cable
-// reactance. The previous hand-typed tables ignored reactance, which made
-// large cables (≥120mm²) read up to 21% LOW — a compliance risk on submains.
+// --- Voltage drop (mV/A·m) — resistance and reactance transcribed directly
+// from the user's copy of AS/NZS 3008.1.1:2017 (Tables 30, 34, 35), keyed by
+// cable construction, rather than derived from a 20°C reference resistance.
+// Table 34 (single-core) and Table 35 (multicore circular) are near-identical
+// at common sizes but diverge slightly ≥240mm² — worth keeping separate.
 //
-// R20 values are the standard conductor resistances (IEC 60228 / AS 1125).
-export const R20_OHM_PER_KM: Record<CableMaterial, Record<string, number>> = {
+// a.c. resistance (Rc), Ω/km, at [75°C, 90°C] conductor temperature.
+const R34_SINGLE_CORE: Record<CableMaterial, Record<string, [number, number]>> = {
+  copper: {
+    "1": [25.8, 27.0], "1.5": [16.5, 17.3], "2.5": [9.01, 9.45], "4": [5.61, 5.88],
+    "6": [3.75, 3.93], "10": [2.23, 2.33], "16": [1.40, 1.47], "25": [0.884, 0.927],
+    "35": [0.638, 0.668], "50": [0.471, 0.494], "70": [0.327, 0.342], "95": [0.236, 0.247],
+    "120": [0.188, 0.197], "150": [0.153, 0.160], "185": [0.123, 0.129], "240": [0.0948, 0.0991],
+  },
+  aluminium: {
+    "16": [2.33, 2.45], "25": [1.47, 1.54], "35": [1.06, 1.11], "50": [0.783, 0.822],
+    "70": [0.542, 0.568], "95": [0.392, 0.411], "120": [0.310, 0.325], "150": [0.253, 0.265],
+    "185": [0.202, 0.212], "240": [0.155, 0.162],
+  },
+};
+
+// Copper only — both multicore cable types modelled in this app use copper conductors.
+const R35_MULTICORE_CIRCULAR: Record<string, [number, number]> = {
+  "1": [25.8, 27.0], "1.5": [16.5, 17.3], "2.5": [9.01, 9.45], "4": [5.61, 5.88],
+  "6": [3.75, 3.93], "10": [2.23, 2.33], "16": [1.40, 1.47], "25": [0.884, 0.927],
+  "35": [0.638, 0.669], "50": [0.471, 0.494],
+};
+
+// Reactance (Xc), Ω/km — geometric, so the same value applies to copper and
+// aluminium conductors of the same size. Single-core uses the "trefoil (or
+// single phase)" column; multicore uses the "circular conductors" column.
+const X30_SINGLE_CORE_TREFOIL_PVC: Record<string, number> = {
+  "1": 0.168, "1.5": 0.157, "2.5": 0.143, "4": 0.137, "6": 0.128, "10": 0.118, "16": 0.111,
+};
+const X30_SINGLE_CORE_TREFOIL_XLPE: Record<string, number> = {
+  "1.5": 0.155, "2.5": 0.141, "4": 0.131, "6": 0.123, "10": 0.114, "16": 0.106, "25": 0.102,
+  "35": 0.0982, "50": 0.0924, "70": 0.0893, "95": 0.0868, "120": 0.0844, "150": 0.0844,
+  "185": 0.0835, "240": 0.0818,
+};
+const X30_MULTICORE_CIRCULAR_PVC: Record<string, number> = {
+  "1": 0.119, "1.5": 0.111, "2.5": 0.102, "4": 0.102, "6": 0.0967, "10": 0.0906, "16": 0.0861,
+  "25": 0.0853, "35": 0.0826, "50": 0.0797,
+};
+
+// Which AS/NZS 3008.1.1 construction table applies to each cable type this app
+// models. Mineral Insulated (MICC) isn't mapped — it uses its own separate
+// Table 38, and its 1-4mm² size range makes voltage drop a non-issue in
+// practice — it keeps the 20°C-reference estimate below as a fallback.
+const CABLE_CONSTRUCTION: Partial<Record<string, "single-core" | "multicore-circular">> = {
+  "flat-tps-v75": "multicore-circular",
+  "v90": "single-core",
+  "xlpe": "single-core",
+  "orange-circular": "multicore-circular",
+  "sdi": "single-core",
+};
+
+function resistanceFromTable(
+  material: CableMaterial,
+  size: string,
+  construction: "single-core" | "multicore-circular",
+  conductorTempC: number,
+): number | null {
+  const col = conductorTempC >= 82.5 ? 1 : 0; // nearest of the tabled 75°C/90°C columns
+  if (construction === "single-core") return R34_SINGLE_CORE[material]?.[size]?.[col] ?? null;
+  return material === "copper" ? R35_MULTICORE_CIRCULAR[size]?.[col] ?? null : null;
+}
+
+function reactanceFromTable(
+  size: string,
+  construction: "single-core" | "multicore-circular",
+  insulation: string,
+): number | null {
+  if (construction === "multicore-circular") return X30_MULTICORE_CIRCULAR_PVC[size] ?? null;
+  const isXlpe = insulation.includes("XLPE") || insulation.includes("Cross-linked");
+  return (isXlpe ? X30_SINGLE_CORE_TREFOIL_XLPE : X30_SINGLE_CORE_TREFOIL_PVC)[size] ?? null;
+}
+
+// Fallback resistance model (20°C reference + temperature coefficient) for
+// cable types without a direct AS/NZS 3008.1.1 table mapping above, e.g. MICC.
+const R20_OHM_PER_KM: Record<CableMaterial, Record<string, number>> = {
   copper: {
     "1": 18.1, "1.5": 12.1, "2.5": 7.41, "4": 4.61, "6": 3.08, "10": 1.83,
     "16": 1.15, "25": 0.727, "35": 0.524, "50": 0.387, "70": 0.268,
@@ -158,13 +231,17 @@ export const R20_OHM_PER_KM: Record<CableMaterial, Record<string, number>> = {
     "95": 0.320, "120": 0.253, "150": 0.206, "185": 0.164, "240": 0.125,
   },
 };
-
-// Typical multicore cable reactance (Ω/km) — near-constant across sizes
-const REACTANCE_OHM_PER_KM = 0.08;
+const REACTANCE_OHM_PER_KM = 0.08; // typical multicore reactance, near-constant across sizes
 
 // mV/A·m for a run: single-phase = 2·Zc, three-phase = √3·Zc, DC = 2·R.
 // conductorTempC should be the insulation's operating temperature
 // (75 for V-75, 90 for XLPE/V-90) — resistance rises ~6% from 75→90°C.
+//
+// cableType (a key from CABLE_TYPES) selects the real AS/NZS 3008.1.1 table
+// for the cable's actual construction — single-core (Table 34) vs multicore
+// circular (Table 35) resistance, and the matching Table 30 reactance column.
+// Omit it to fall back to the 20°C-reference estimate (used for cable types
+// not yet mapped in CABLE_CONSTRUCTION, e.g. MICC).
 //
 // powerFactor: AS/NZS 3008.1.1 Clause 4.5 computes AC voltage drop from
 // (R·cosφ + X·sinφ), not |Z|. At unity pf only R matters; ignoring this
@@ -178,13 +255,30 @@ export function mvPerAm(
   phase?: PhaseType,
   conductorTempC = 75,
   powerFactor?: number,
+  cableType?: string,
 ): number | null {
-  const r20 = R20_OHM_PER_KM[material]?.[size];
-  if (!r20) return null;
-  const alpha = material === "copper" ? 0.00393 : 0.00403;
-  const r = r20 * (1 + alpha * (conductorTempC - 20));
+  const construction = cableType ? CABLE_CONSTRUCTION[cableType] : undefined;
+  let r: number | null = null;
+  let x = REACTANCE_OHM_PER_KM;
+
+  if (construction) {
+    const tabledR = resistanceFromTable(material, size, construction, conductorTempC);
+    if (tabledR !== null) {
+      r = tabledR;
+      const insulation = CABLE_TYPES[cableType!]?.insulation ?? "PVC";
+      const tabledX = reactanceFromTable(size, construction, insulation);
+      if (tabledX !== null) x = tabledX;
+    }
+  }
+
+  if (r === null) {
+    const r20 = R20_OHM_PER_KM[material]?.[size];
+    if (!r20) return null;
+    const alpha = material === "copper" ? 0.00393 : 0.00403;
+    r = r20 * (1 + alpha * (conductorTempC - 20));
+  }
+
   if (system === "dc") return 2 * r;
-  const x = REACTANCE_OHM_PER_KM;
   let effective: number;
   if (powerFactor !== undefined && powerFactor > 0 && powerFactor < 1) {
     const sinPhi = Math.sqrt(1 - powerFactor * powerFactor);

@@ -111,7 +111,7 @@ const CableSizerTool = ({ onBack }: Props) => {
     const conductorTemp = conductorTempFor(ct?.maxTemp);
     const mvTable: Record<string, number> = {};
     for (const size of availableSizes) {
-      const v = mvPerAm(material, size, system, phase, conductorTemp, pf);
+      const v = mvPerAm(material, size, system, phase, conductorTemp, pf, cableType);
       if (v !== null) mvTable[size] = v;
     }
     const capKey = getCapacityKey(cableType, material);
@@ -234,7 +234,7 @@ const CableSizerTool = ({ onBack }: Props) => {
       label: "Voltage drop",
       working: `(${result.mvUsed} mV/A·m × ${result.designCurrent} A × ${length} m) ÷ 1000`,
       result: `${result.vdVolts} V`,
-      reference: "AS/NZS 3008.1.1 mV/A/m table",
+      reference: "AS/NZS 3008.1.1 Tables 30, 34-35 (Rc & Xc)",
     },
     {
       label: "Voltage drop % check",
@@ -248,7 +248,7 @@ const CableSizerTool = ({ onBack }: Props) => {
     <ToolLayout
       title="Cable Sizer"
       subtitle="Auto-select the right cable for your load, run & conditions"
-      disclaimer="Based on AS/NZS 3008.1.1 current capacity and mV/A/m tables. Derating per Tables 22-27. Always verify with the full standard for critical installations."
+      disclaimer="Based on AS/NZS 3008.1.1 current capacity tables and resistance/reactance from Tables 30, 34-35. Derating per Tables 22-27. Always verify with the full standard for critical installations."
       onBack={onBack}
       onCalculate={calculate}
       verifyQuestion={result

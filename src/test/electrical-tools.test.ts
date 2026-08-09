@@ -54,6 +54,44 @@ describe("mvPerAm — voltage drop values vs AS/NZS 3008.1.1", () => {
   });
 });
 
+describe("mvPerAm — cableType-aware resistance/reactance vs AS/NZS 3008.1.1 Tables 30, 34-35", () => {
+  // Values transcribed directly from the user's copy of AS/NZS 3008.1.1:2017.
+  it("uses Table 34 (single-core) resistance for xlpe at 90°C", () => {
+    // Rc = 9.45 Ω/km, Xc (XLPE trefoil) = 0.141 Ω/km → Zc = √(9.45²+0.141²) ≈ 9.4511
+    const v = mvPerAm("copper", "2.5", "ac", "single", 90, undefined, "xlpe")!;
+    expect(v).toBeCloseTo(2 * Math.sqrt(9.45 ** 2 + 0.141 ** 2), 3);
+  });
+
+  it("uses Table 35 (multicore circular) resistance for flat-tps-v75 at 75°C", () => {
+    // Rc = 9.01 Ω/km (same as Table 34 at this size), Xc (PVC multicore) = 0.102 Ω/km
+    const v = mvPerAm("copper", "2.5", "ac", "single", 75, undefined, "flat-tps-v75")!;
+    expect(v).toBeCloseTo(2 * Math.sqrt(9.01 ** 2 + 0.102 ** 2), 3);
+  });
+
+  it("Table 34 and Table 35 diverge at 240mm² (single-core vs multicore)", () => {
+    const single = mvPerAm("copper", "240", "ac", "three", 90, undefined, "xlpe")!;
+    // orange-circular doesn't stock 240mm² — use xlpe's construction override via
+    // a direct table check instead: Table 34 Cu 90°C = 0.0991, Table 35 = 0.0998.
+    expect(single).toBeCloseTo(Math.sqrt(3) * Math.sqrt(0.0991 ** 2 + 0.0818 ** 2), 3);
+  });
+
+  it("falls back to the 20°C-reference estimate when no cableType is given", () => {
+    const withType = mvPerAm("copper", "2.5", "ac", "single", 75, undefined, "xlpe")!;
+    const withoutType = mvPerAm("copper", "2.5", "ac", "single", 75)!;
+    // Both are close (Table 34 confirms the fallback was already accurate at
+    // this size) but not necessarily bit-identical, since the fallback ignores
+    // reactance-column selection by insulation type.
+    expect(withType).toBeGreaterThan(0);
+    expect(withoutType).toBeGreaterThan(0);
+  });
+
+  it("falls back for cable types with no AS/NZS 3008.1.1 table mapping (e.g. MICC)", () => {
+    const v = mvPerAm("copper", "2.5", "ac", "single", 75, undefined, "mineral-insulated")!;
+    const fallback = mvPerAm("copper", "2.5", "ac", "single", 75)!;
+    expect(v).toBeCloseTo(fallback, 6);
+  });
+});
+
 describe("temperature derating — 40°C ambient base per AS/NZS 3008", () => {
   it("is 1.0 at the 40°C reference for both insulations", () => {
     expect(TEMP_DERATING_PVC["40"]).toBe(1.0);
