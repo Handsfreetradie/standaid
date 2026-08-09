@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Trash2, Plus } from "lucide-react";
 import ToolLayout from "./ToolLayout";
 import ResultRow from "./ResultRow";
+import WorkingTable, { WorkingStep } from "./WorkingTable";
 import { CONDUIT_SIZES, CABLE_OD, CONDUIT_FILL_RATIOS } from "./electricalData";
 
 interface CableEntry {
@@ -104,6 +105,36 @@ const ConduitFillTool = ({ onBack }: Props) => {
     });
   };
 
+  const totalCableCount = cables.reduce((s, c) => s + c.quantity, 0);
+  const fillRatioKey = totalCableCount === 1 ? "1" : totalCableCount === 2 ? "2" : "3+";
+
+  const workingSteps: WorkingStep[] = result ? [
+    {
+      label: "Total cross-sectional area of cables",
+      working: cables.map(c => `π×(OD/2)² × ${c.quantity} (${c.cableType} ${c.cableSize}mm²)`).join(" + "),
+      result: `${result.totalCableArea} mm²`,
+      reference: "Cable OD data — manufacturer / AS/NZS 2053",
+    },
+    {
+      label: "Applicable space factor",
+      working: `${totalCableCount} cable(s) in conduit → ${fillRatioKey === "3+" ? "3 or more" : fillRatioKey} cable rule`,
+      result: `${result.maxFillPercent}% max fill`,
+      reference: "Accepted conduit space factors (53% / 31% / 40%)",
+    },
+    {
+      label: "Fill percentage",
+      working: `${result.totalCableArea} mm² ÷ ${result.conduitArea} mm² × 100`,
+      result: `${result.fillPercent}%`,
+      reference: `${conduitSize} mm conduit internal area`,
+    },
+    {
+      label: "Compliance check",
+      working: `${result.fillPercent}% vs ${result.maxFillPercent}% max allowed`,
+      result: result.passes ? "PASS" : "FAIL",
+      reference: "Space factor limit",
+    },
+  ] : [];
+
   return (
     <ToolLayout
       title="Conduit Fill Calculator"
@@ -148,6 +179,8 @@ const ConduitFillTool = ({ onBack }: Props) => {
           {result.warnings.map((w, i) => (
             <p key={i} className="text-xs text-destructive mt-2 font-medium">⚠️ {w}</p>
           ))}
+
+          <WorkingTable steps={workingSteps} />
         </>
       ) : undefined}
       advancedInputs={undefined}

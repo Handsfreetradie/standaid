@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import ToolLayout from "./ToolLayout";
 import ResultRow from "./ResultRow";
+import WorkingTable, { WorkingStep } from "./WorkingTable";
 import {
   SystemType, PhaseType, CableMaterial,
   CABLE_TYPES, CURRENT_CAPACITY,
@@ -23,6 +24,14 @@ interface SizerResult {
   totalDerating: number;
   warnings: string[];
   suggestions: string[];
+  // Kept for the "show the working" breakdown — not shown in the main result UI
+  designCurrent: number;
+  loadConverted: boolean;
+  tempFactor: number;
+  installFactor: number;
+  groupFactor: number;
+  baseCapacity: number;
+  mvUsed: number;
 }
 
 interface Props { onBack: () => void }
@@ -85,11 +94,13 @@ const CableSizerTool = ({ onBack }: Props) => {
     let I = parseFloat(loadValue);
     if (isNaN(V) || isNaN(L) || isNaN(I) || V <= 0 || L <= 0 || I <= 0) return;
 
-    if (loadMode === "kw") {
+    const loadConverted = loadMode === "kw";
+    if (loadConverted) {
       I = system === "ac" && phase === "three"
         ? (I * 1000) / (Math.sqrt(3) * V * pf)
         : (I * 1000) / (V * pf);
     }
+    const designCurrent = Math.round(I * 100) / 100;
 
     const insulation = ct?.insulation || "PVC";
     const tempFactor = getTempDerating(insulation, ambientTemp);
@@ -115,6 +126,8 @@ const CableSizerTool = ({ onBack }: Props) => {
     let deratedCap = 0;
     let vdP = 0;
     let vdV = 0;
+    let recBaseCap = 0;
+    let recMv = 0;
 
     for (const size of availableSizes) {
       const baseCap = capTable[size];
@@ -129,6 +142,8 @@ const CableSizerTool = ({ onBack }: Props) => {
         deratedCap = Math.round(derated);
         vdP = Math.round(vdPct * 100) / 100;
         vdV = Math.round(voltageDrop * 100) / 100;
+        recBaseCap = baseCap;
+        recMv = mv;
         break;
       }
     }
@@ -153,6 +168,13 @@ const CableSizerTool = ({ onBack }: Props) => {
           totalDerating: Math.round(totalDerating * 100) / 100,
           warnings,
           suggestions,
+          designCurrent,
+          loadConverted,
+          tempFactor: Math.round(tempFactor * 100) / 100,
+          installFactor: Math.round(installFactor * 100) / 100,
+          groupFactor: Math.round(groupFactor * 100) / 100,
+          baseCapacity: lastCap,
+          mvUsed: lastMv,
         });
       }
       return;
@@ -177,8 +199,50 @@ const CableSizerTool = ({ onBack }: Props) => {
       totalDerating: Math.round(totalDerating * 100) / 100,
       warnings,
       suggestions,
+      designCurrent,
+      loadConverted,
+      tempFactor: Math.round(tempFactor * 100) / 100,
+      installFactor: Math.round(installFactor * 100) / 100,
+      groupFactor: Math.round(groupFactor * 100) / 100,
+      baseCapacity: recBaseCap,
+      mvUsed: recMv,
     });
   };
+
+  const workingSteps: WorkingStep[] = result ? [
+    ...(result.loadConverted ? [{
+      label: "Convert load to design current",
+      working: system === "ac" && phase === "three"
+        ? `(${loadValue} × 1000) ÷ (√3 × ${voltage} V × ${powerFactor} pf)`
+        : `(${loadValue} × 1000) ÷ (${voltage} V × ${powerFactor} pf)`,
+      result: `${result.designCurrent} A`,
+      reference: "P = √3×V×I×pf (3Ø) or P = V×I×pf (1Ø)",
+    }] : []),
+    {
+      label: "Combined derating factor",
+      working: `${result.tempFactor} (${ambientTemp}°C) × ${result.installFactor} (${INSTALL_METHODS[installMethod]?.label}) × ${result.groupFactor} (${circuits} circuit${circuits !== "1" ? "s" : ""})`,
+      result: `×${result.totalDerating}`,
+      reference: "AS/NZS 3008.1.1 Tables 22-27",
+    },
+    {
+      label: "Derated current capacity",
+      working: `${result.baseCapacity} A (table) × ${result.totalDerating}`,
+      result: `${result.deratedCapacity} A ≥ ${result.designCurrent} A required`,
+      reference: `AS/NZS 3008.1.1 current capacity — ${result.recommendedSize.replace(">", "")} mm²`,
+    },
+    {
+      label: "Voltage drop",
+      working: `(${result.mvUsed} mV/A·m × ${result.designCurrent} A × ${length} m) ÷ 1000`,
+      result: `${result.vdVolts} V`,
+      reference: "AS/NZS 3008.1.1 mV/A/m table",
+    },
+    {
+      label: "Voltage drop % check",
+      working: `${result.vdVolts} V ÷ ${voltage} V × 100`,
+      result: `${result.vdPercent}% vs ${maxVdPercent}% max`,
+      reference: "Max allowable voltage drop",
+    },
+  ] : [];
 
   return (
     <ToolLayout
@@ -222,6 +286,8 @@ const CableSizerTool = ({ onBack }: Props) => {
           {result.warnings.map((w, i) => (
             <p key={i} className="text-xs text-destructive mt-2 font-medium">⚠️ {w}</p>
           ))}
+
+          <WorkingTable steps={workingSteps} />
         </>
       ) : undefined}
       advancedInputs={

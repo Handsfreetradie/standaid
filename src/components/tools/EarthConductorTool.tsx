@@ -3,6 +3,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import ToolLayout from "./ToolLayout";
 import ResultRow from "./ResultRow";
+import WorkingTable, { WorkingStep } from "./WorkingTable";
 
 // AS/NZS 3000:2018 Table 5.1 — MINIMUM COPPER EARTHING CONDUCTOR SIZE.
 // Values transcribed verbatim (2026-07-13) from the vision-captured Table 5.1
@@ -58,6 +59,21 @@ const EarthConductorTool = ({ onBack }: Props) => {
     ? (activeMaterial === "copper" ? result.cuActive : result.alActive)
     : null;
 
+  const workingSteps: WorkingStep[] = result ? [
+    {
+      label: "Table 5.1 lookup",
+      working: `${activeSize} mm² active (${activeMaterial}) → find matching row`,
+      result: `Row: ${activeSize} mm² active`,
+      reference: "AS/NZS 3000:2018 Table 5.1",
+    },
+    {
+      label: `Read off the ${activeMaterial === "copper" ? "copper-active" : "aluminium-active"} column`,
+      working: `Table 5.1, ${activeMaterial === "copper" ? "Cu actives" : "Al actives"} column, ${activeSize} mm² row`,
+      result: `${earthSize} mm² minimum copper earth`,
+      reference: "AS/NZS 3000:2018 Table 5.1",
+    },
+  ] : [];
+
   return (
     <ToolLayout
       title="Earth Conductor Size"
@@ -97,6 +113,8 @@ const EarthConductorTool = ({ onBack }: Props) => {
               may be required to satisfy Clause 5.3.3.1.1. Check the calculation method.
             </p>
           )}
+
+          <WorkingTable steps={workingSteps} />
         </>
       ) : undefined}
     >

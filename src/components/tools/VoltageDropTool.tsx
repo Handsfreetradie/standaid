@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import ToolLayout from "./ToolLayout";
 import ResultRow from "./ResultRow";
+import WorkingTable, { WorkingStep } from "./WorkingTable";
 import {
   SystemType, PhaseType, CableMaterial,
   CABLE_TYPES, CURRENT_CAPACITY,
@@ -23,6 +24,14 @@ interface VdResult {
   totalDerating: number;
   warnings: string[];
   suggestions: string[];
+  // Kept for the "show the working" breakdown — not shown in the main result UI
+  designCurrent: number;
+  loadConverted: boolean;
+  mvUsed: number;
+  tempFactor: number;
+  installFactor: number;
+  groupFactor: number;
+  baseCapacityUsed: number | null;
 }
 
 interface Props { onBack: () => void }
@@ -96,13 +105,15 @@ const VoltageDropTool = ({ onBack }: Props) => {
     if (isNaN(V) || isNaN(L) || isNaN(I) || V <= 0 || L <= 0 || I <= 0) return;
 
     // Convert kW to amps if needed
-    if (loadMode === "kw") {
+    const loadConverted = loadMode === "kw";
+    if (loadConverted) {
       if (system === "ac" && phase === "three") {
         I = (I * 1000) / (Math.sqrt(3) * V * pf);
       } else {
         I = (I * 1000) / (V * pf);
       }
     }
+    const designCurrent = Math.round(I * 100) / 100;
 
     const conductorTemp = conductorTempFor(ct?.maxTemp);
     const mv = mvPerAm(material, cableSize, system, phase, conductorTemp, pf);
@@ -170,8 +181,49 @@ const VoltageDropTool = ({ onBack }: Props) => {
       totalDerating: Math.round(totalDerating * 100) / 100,
       warnings,
       suggestions,
+      designCurrent,
+      loadConverted,
+      mvUsed: mv,
+      tempFactor: Math.round(tempFactor * 100) / 100,
+      installFactor: Math.round(installFactor * 100) / 100,
+      groupFactor: Math.round(groupFactor * 100) / 100,
+      baseCapacityUsed: baseCapacity,
     });
   };
+
+  const workingSteps: WorkingStep[] = result ? [
+    ...(result.loadConverted ? [{
+      label: "Convert load to design current",
+      working: system === "ac" && phase === "three"
+        ? `(${loadValue} × 1000) ÷ (√3 × ${voltage} V × ${powerFactor} pf)`
+        : `(${loadValue} × 1000) ÷ (${voltage} V × ${powerFactor} pf)`,
+      result: `${result.designCurrent} A`,
+      reference: "P = √3×V×I×pf (3Ø) or P = V×I×pf (1Ø)",
+    }] : []),
+    {
+      label: "Voltage drop",
+      working: `(${result.mvUsed} mV/A·m × ${result.designCurrent} A × ${length} m) ÷ 1000`,
+      result: `${result.vdVolts} V`,
+      reference: `AS/NZS 3008.1.1 mV/A/m table — ${cableSize} mm² ${material}`,
+    },
+    {
+      label: "Voltage drop % check",
+      working: `${result.vdVolts} V ÷ ${voltage} V × 100`,
+      result: `${result.vdPercent}% vs 5% max`,
+      reference: "AS/NZS 3000 max 5% voltage drop",
+    },
+    ...(result.baseCapacityUsed !== null ? [{
+      label: "Combined derating factor",
+      working: `${result.tempFactor} (${ambientTemp}°C) × ${result.installFactor} (${INSTALL_METHODS[installMethod]?.label}) × ${result.groupFactor} (${circuits} circuit${circuits !== "1" ? "s" : ""})`,
+      result: `×${result.totalDerating}`,
+      reference: "AS/NZS 3008.1.1 Tables 22-27",
+    }, {
+      label: "Derated current capacity check",
+      working: `${result.baseCapacityUsed} A (table) × ${result.totalDerating}`,
+      result: `${result.deratedCapacity} A ${result.capacityOk ? "≥" : "<"} ${result.designCurrent} A required`,
+      reference: `AS/NZS 3008.1.1 current capacity — ${cableSize} mm²`,
+    }] : []),
+  ] : [];
 
   return (
     <ToolLayout
@@ -232,6 +284,8 @@ const VoltageDropTool = ({ onBack }: Props) => {
           {result.warnings.map((w, i) => (
             <p key={i} className="text-xs text-destructive mt-2 font-medium">⚠️ {w}</p>
           ))}
+
+          <WorkingTable steps={workingSteps} />
         </>
       ) : undefined}
       advancedInputs={

@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import ToolLayout from "./ToolLayout";
 import ResultRow from "./ResultRow";
+import WorkingTable, { WorkingStep } from "./WorkingTable";
 import { PhaseType } from "./electricalData";
 import { C1_LOAD_GROUPS, calculateMaxDemandC1, MaxDemandResult } from "./maxDemandC1";
 
@@ -32,6 +33,21 @@ const MaxDemandTool = ({ onBack }: Props) => {
     }
     setResult(calculateMaxDemandC1(numeric));
   };
+
+  const workingSteps: WorkingStep[] = result ? [
+    {
+      label: "Sum load-group demands",
+      working: result.lines.map((l) => `${l.demandA} A (${l.label})`).join(" + "),
+      result: `${result.totalDemandA} A`,
+      reference: "AS/NZS 3000:2018 Appendix C, Table C1",
+    },
+    {
+      label: "Select main switch / protective device",
+      working: `Smallest standard rating ≥ ${result.totalDemandA} A`,
+      result: `${result.mainSwitchSizeA} A`,
+      reference: "Standard device ratings",
+    },
+  ] : [];
 
   return (
     <ToolLayout
@@ -86,6 +102,8 @@ const MaxDemandTool = ({ onBack }: Props) => {
               ⚠️ Demand above 63 A on single phase — check supply capacity with your DNSP or consider three-phase.
             </p>
           )}
+
+          <WorkingTable steps={workingSteps} />
         </>
       ) : undefined}
     >
