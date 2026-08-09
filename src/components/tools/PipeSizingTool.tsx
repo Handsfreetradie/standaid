@@ -17,9 +17,9 @@ const PIPE_SIZES: Record<string, number[]> = {
 
 // Recommended max velocity by application (m/s)
 const APPLICATIONS: Record<string, { label: string; maxVelocity: number; desc: string }> = {
-  "domestic-cold": { label: "Domestic cold water", maxVelocity: 2.0, desc: "AS/NZS 3500.1 — max 2.0 m/s" },
-  "domestic-hot": { label: "Domestic hot water", maxVelocity: 1.5, desc: "AS/NZS 3500.4 — max 1.5 m/s" },
-  "commercial": { label: "Commercial supply", maxVelocity: 2.5, desc: "Commercial installations" },
+  "domestic-cold": { label: "Domestic cold water", maxVelocity: 3.0, desc: "AS/NZS 3500.1 Cl 3.4 — max 3.0 m/s" },
+  "domestic-hot": { label: "Domestic hot water", maxVelocity: 3.0, desc: "AS/NZS 3500.4 Cl 1.8 — max 3.0 m/s" },
+  "commercial": { label: "Commercial supply", maxVelocity: 3.0, desc: "AS/NZS 3500.1 Cl 3.4 — max 3.0 m/s" },
   "fire-hydrant": { label: "Fire hydrant", maxVelocity: 3.0, desc: "AS 2419 — fire hydrant systems" },
   "fire-sprinkler": { label: "Fire sprinkler", maxVelocity: 6.0, desc: "AS 2118 — sprinkler systems" },
   "drainage": { label: "Drainage / stormwater", maxVelocity: 3.0, desc: "Gravity-fed drainage" },
@@ -117,7 +117,7 @@ const PipeSizingTool = ({ onBack }: Props) => {
     <ToolLayout
       title="Pipe Sizing Calculator"
       subtitle="Flow rate → recommended pipe diameter by application"
-      disclaimer="Based on Q = v × A continuity equation. Standard sizes per AS 1432 / AS 4020 / AS 4130. Fittings equivalent length is approximate. Always verify with project hydraulic engineer for critical installations."
+      disclaimer="Based on Q = v × A continuity equation. Max velocity per AS/NZS 3500.1 Cl 3.4 / AS/NZS 3500.4 Cl 1.8 (3.0 m/s, all non-fire water services). Standard pipe sizes per AS 1432 (copper) / AS/NZS 1477 (PVC) / AS 4130 (PE). Fittings equivalent length is approximate. Always verify with project hydraulic engineer for critical installations."
       onBack={onBack}
       onCalculate={calculate}
       result={result ? (

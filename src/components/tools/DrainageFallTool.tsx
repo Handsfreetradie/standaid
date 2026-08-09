@@ -6,14 +6,16 @@ import { Badge } from "@/components/ui/badge";
 import ToolLayout from "./ToolLayout";
 import ResultRow from "./ResultRow";
 
-// AS/NZS 3500.2 minimum grades
+// Sanitary/sewer grades verified against AS/NZS 3500.2:2003 Table 3.2 (2026-08-10).
+// The "100-storm" entry is stormwater, actually governed by AS/NZS 3500.3 —
+// not verified against that document, kept as a typical industry figure.
 const PIPE_GRADES: Record<string, { label: string; minGrade: number; desc: string }> = {
   "65-drain": { label: "65mm branch drain", minGrade: 2.5, desc: "Basin, laundry tub" },
-  "80-drain": { label: "80mm branch drain", minGrade: 2.5, desc: "Shower, floor waste" },
+  "80-drain": { label: "80mm branch drain", minGrade: 1.65, desc: "Shower, floor waste" },
   "100-drain": { label: "100mm sanitary drain", minGrade: 1.65, desc: "Toilet, main drain" },
-  "100-storm": { label: "100mm stormwater", minGrade: 1.0, desc: "Downpipe connections" },
+  "100-storm": { label: "100mm stormwater", minGrade: 1.0, desc: "Downpipe connections (AS/NZS 3500.3 — not independently verified, see disclaimer)" },
   "150-sewer": { label: "150mm sewer main", minGrade: 1.0, desc: "Property sewer line (AS/NZS 3500.2 min 1.00%)" },
-  "225-sewer": { label: "225mm sewer main", minGrade: 1.0, desc: "Main sewer" },
+  "225-sewer": { label: "225mm sewer main", minGrade: 0.65, desc: "Main sewer" },
   "custom": { label: "Custom", minGrade: 1.0, desc: "Enter your own values" },
 };
 
@@ -90,7 +92,7 @@ const DrainageFallTool = ({ onBack }: Props) => {
     <ToolLayout
       title="Drainage Fall Calculator"
       subtitle="AS/NZS 3500.2 — Pipe grades & fall distances"
-      disclaimer="Based on AS/NZS 3500.2 minimum grades. Velocity estimates use Manning's equation at half-full flow with PVC pipe (n=0.011). Actual site conditions may require steeper grades."
+      disclaimer="Sanitary/sewer grades per AS/NZS 3500.2 Table 3.2 (verified against the standard). Stormwater grade is a typical industry figure, not independently verified against AS/NZS 3500.3, which actually governs stormwater drainage. Velocity estimates use Manning's equation at half-full flow with PVC pipe (n=0.011). Actual site conditions may require steeper grades."
       onBack={onBack}
       onCalculate={calculate}
       result={result ? (

@@ -9,7 +9,12 @@ type Hazard = "low" | "medium" | "high";
 type Protection = "containment" | "zone" | "individual";
 
 // Connection types → preset hazard rating.
-// Presets per AS/NZS 3500.1 hazard-rating methodology supplied by lead engineer.
+// Presets per AS/NZS 3500.1 Cl 4.3 hazard-rating methodology, supplied by lead engineer.
+// Note: Section 7 (irrigation, p.50) actually uses a 4-tier system (Types A-D),
+// where Type A (outlet >150mm above ground, no ponding, no chemical injection)
+// needs no backflow device at all. This tool simplifies that to a binary
+// chemicals/no-chemicals split, which is conservative (may recommend a device
+// an elevated Type A outlet wouldn't legally need) but never unsafe.
 const CONNECTION_TYPES: { value: string; label: string; preset: Hazard }[] = [
   { value: "cooling-tower", label: "Cooling tower make-up", preset: "high" },
   { value: "fire-additives", label: "Fire system with foam/additives", preset: "high" },
@@ -29,7 +34,7 @@ const PROTECTION_LEVELS: { value: Protection; label: string }[] = [
   { value: "individual", label: "Individual (at fixture)" },
 ];
 
-// Device selection table — AS/NZS 3500.1 hazard-rating methodology, as supplied by lead engineer.
+// Device selection table — AS/NZS 3500.1 Table 4.1(a)/(b), verified against the standard 2026-08-10.
 interface DeviceResult {
   primary: string;
   alternatives: string;
@@ -82,7 +87,7 @@ const BackflowPreventionTool = ({ onBack }: Props) => {
     <ToolLayout
       title="Backflow Prevention"
       subtitle="AS/NZS 3500.1 — device selection by hazard rating"
-      disclaimer="Device selection guidance based on AS/NZS 3500.1 hazard-rating methodology. The network utility (water supplier) has final say on containment requirements and device registration, and hazard ratings for specific installations are determined by inspection. Always confirm against your copy of the standard and your local utility's requirements."
+      disclaimer="Device selection per AS/NZS 3500.1 Table 4.1(a)/(b), hazard ratings per Cl 4.3 — verified against the standard. Irrigation presets are simplified from Section 7's 4-tier system; an elevated outlet may need no device at all under Type A. The network utility (water supplier) has final say on containment requirements and device registration, and hazard ratings for specific installations are determined by inspection. Always confirm against your copy of the standard and your local utility's requirements."
       onBack={onBack}
       onCalculate={calculate}
       verifyQuestion={
@@ -116,7 +121,7 @@ const BackflowPreventionTool = ({ onBack }: Props) => {
             Alternative devices: {result.alternatives}
           </p>
           <p className="text-[10px] text-muted-foreground mt-2">
-            High = potential to endanger life · Medium = potential to endanger health · Low = nuisance only
+            High = potential to cause death · Medium = potential to endanger health · Low = nuisance, does not endanger health or cause injury (AS/NZS 3500.1 Cl 4.3)
           </p>
           {result.testable && (
             <p className="text-xs text-destructive mt-3 font-medium">
