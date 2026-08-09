@@ -53,12 +53,25 @@ serve(async (req) => {
       .rpc("admin_cost_by_user");
     if (costsError) throw costsError;
 
+    // Email confirmation status lives on auth.users, not profiles — a
+    // profile row is created at signup time (handle_new_user trigger),
+    // before the user ever confirms, so this can't come from the profiles
+    // select above. Paginate the Auth Admin API rather than a raw SQL join.
+    const confirmedByUser = new Map<string, boolean>();
+    for (let page = 1; page <= 5; page++) {
+      const { data: page_, error: listError } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 1000 });
+      if (listError) throw listError;
+      for (const u of page_.users) confirmedByUser.set(u.id, !!u.email_confirmed_at);
+      if (page_.users.length < 1000) break;
+    }
+
     const countByUser = new Map<string, number>((counts ?? []).map((r: { user_id: string; total: number }) => [r.user_id, r.total]));
     const costByUser = new Map<string, number>((costs ?? []).map((r: { user_id: string; total_cost_usd: number }) => [r.user_id, r.total_cost_usd]));
     const usersWithCounts = (users ?? []).map((u) => ({
       ...u,
       query_count: countByUser.get(u.user_id) ?? 0,
       total_cost_usd: costByUser.get(u.user_id) ?? 0,
+      email_confirmed: confirmedByUser.get(u.user_id) ?? false,
     }));
 
     return json({ users: usersWithCounts, total_cost_usd: [...costByUser.values()].reduce((a, b) => a + b, 0) });

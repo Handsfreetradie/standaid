@@ -250,6 +250,7 @@ const Profile = () => {
     pro_expires_at: string | null;
     query_count: number;
     total_cost_usd: number;
+    email_confirmed: boolean;
   };
   const [adminUsers, setAdminUsers] = useState<AdminUserRow[] | null>(null);
   const [adminUsersLoading, setAdminUsersLoading] = useState(false);
@@ -869,6 +870,7 @@ const Profile = () => {
                                 <tr className="bg-muted/50 text-left text-muted-foreground">
                                   <th className="px-3 py-2 font-medium">Email</th>
                                   <th className="px-3 py-2 font-medium">Signed up</th>
+                                  <th className="px-3 py-2 font-medium">Status</th>
                                   <th className="px-3 py-2 font-medium">Tier</th>
                                   <th className="px-3 py-2 font-medium text-right">Queries</th>
                                   <th className="px-3 py-2 font-medium text-right">Cost</th>
@@ -882,6 +884,17 @@ const Profile = () => {
                                     </td>
                                     <td className="px-3 py-2 whitespace-nowrap">
                                       {new Date(u.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}
+                                    </td>
+                                    <td className="px-3 py-2 whitespace-nowrap">
+                                      {u.email_confirmed ? (
+                                        <Badge className="bg-green-600/15 text-green-700 dark:text-green-400 text-[11px] px-1.5 py-0 font-normal">
+                                          Confirmed
+                                        </Badge>
+                                      ) : (
+                                        <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-400 text-[11px] px-1.5 py-0 font-normal">
+                                          Pending
+                                        </Badge>
+                                      )}
                                     </td>
                                     <td className="px-3 py-2 capitalize">{u.subscription_tier || "free"}</td>
                                     <td className="px-3 py-2 text-right">{u.query_count}</td>
