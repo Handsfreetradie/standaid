@@ -1048,13 +1048,13 @@ Voltage drop limit: 5% of supply voltage (AS/NZS 3000 Clause 3.6)`;
 - Single-phase V_supply = 230V; three-phase V_supply = 230V phase (use 400V only for line voltage)
 - Maximum demand: total load groups × demand factors from AS/NZS 3000
 - Cable sizing: Iz (derated) ≥ load current, In ≤ Iz
-- Fault loop: Zs = Ze + (R1+R2); If = Vc / Zs
+- Fault loop: Zs = Ze + (R1+R2); If = Vc / Zs. Never stop at the calculated Zs alone — a fault-loop answer is only complete once it's checked against the standard's limit, the same way a voltage-drop answer is checked against 5%.
 
 Question types (pick one):
 1. voltage_drop — given cable, current, length → calculate VD% and state compliance
 2. maximum_demand — given load schedule → calculate maximum demand per phase
 3. cable_sizing — given load, installation conditions → select minimum cable size
-4. fault_current — given supply impedance, cable data → calculate fault level`
+4. fault_current — given supply impedance, cable data → calculate the actual Zs (and If), look up the maximum permissible Zs for the stated protective device and disconnection time (AS/NZS 3000 Table 8.1 for circuit breakers, Table 8.2 for fuses — treat this as a standard table value per the given_data rule below, never state it up front), then state both figures side by side and conclude compliant/non-compliant`
         : `Do not use any formula, table value, or standard reference from your own general knowledge — never guess a value. Every formula, lookup value, and clause/table reference in given_data, model_solution and key_answers must come directly from the STANDARD CONTENT provided below, quoting the real clause/table numbers exactly as they appear in it. If the provided content doesn't contain enough information to build a genuine, correctly-sourced calculation, pick a simpler calculation that the content does support rather than guessing.
 
 Typical calculation topics for this trade: ${tradeConfig.hint}.
