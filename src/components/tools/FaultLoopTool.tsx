@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import ToolLayout from "./ToolLayout";
 import ResultRow from "./ResultRow";
+import WorkingTable, { WorkingStep } from "./WorkingTable";
 
 // AS/NZS 3000:2018 Appendix B — maximum earth-fault-loop impedance for MCBs
 // (AS/NZS 60898 curves B/C/D only). Method supplied by the lead engineer:
@@ -85,6 +86,33 @@ const FaultLoopTool = ({ onBack }: Props) => {
     });
   };
 
+  const workingSteps: WorkingStep[] = result ? [
+    {
+      label: "Trip current (instantaneous)",
+      working: `${K_BY_CURVE[result.curve]} (curve ${result.curve}) × ${result.rating} A`,
+      result: `${result.tripCurrent} A`,
+      reference: "AS/NZS 3000:2018 App B — curve trip multiple",
+    },
+    {
+      label: "Max Zs (table method)",
+      working: `${result.uo} V ÷ ${result.tripCurrent} A`,
+      result: `${result.tableZs.toFixed(2)} Ω`,
+      reference: "AS/NZS 3000:2018 Table B1 method",
+    },
+    {
+      label: "On-site measured limit",
+      working: `0.8 × ${result.tableZs.toFixed(2)} Ω`,
+      result: `${result.measuredLimit.toFixed(2)} Ω`,
+      reference: "App B — cold conductor allowance",
+    },
+    ...(result.zs !== null && result.appliedLimit !== null && result.margin !== null ? [{
+      label: `Compare your Zs (${result.zsMeasured ? "measured" : "calculated"})`,
+      working: `(${result.appliedLimit.toFixed(2)} Ω − ${result.zs} Ω) ÷ ${result.appliedLimit.toFixed(2)} Ω × 100`,
+      result: `${result.margin.toFixed(1)}% margin — ${result.pass ? "PASS" : "FAIL"}`,
+      reference: result.zsMeasured ? "vs 0.8 × table limit" : "vs table limit",
+    }] : []),
+  ] : [];
+
   return (
     <ToolLayout
       title="Fault Loop Impedance (Zs)"
@@ -154,6 +182,8 @@ const FaultLoopTool = ({ onBack }: Props) => {
             💡 Zs limits derive from Uo/(k×In) with k = 5 (B), 10 (C), 20 (D) — the top of each curve's instantaneous
             trip band, per the method behind AS/NZS 3000 Table B1.
           </p>
+
+          <WorkingTable steps={workingSteps} />
         </>
       ) : undefined}
       advancedInputs={
