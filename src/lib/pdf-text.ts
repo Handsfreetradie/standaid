@@ -76,11 +76,12 @@ const PAGE_WINDOW = 25;
 export async function extractPdfText(
   file: File,
   onProgress: (pct: number) => void,
+  options?: { maxPages?: number },
 ): Promise<string> {
   const buffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
   try {
-    const numPages = pdf.numPages;
+    const numPages = options?.maxPages ? Math.min(pdf.numPages, options.maxPages) : pdf.numPages;
     let completed = 0;
     const pageTexts: string[] = [];
 

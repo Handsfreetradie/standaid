@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import * as pdfjsLib from "pdfjs-dist";
@@ -32,26 +32,61 @@ function normalizeStandardName(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-function findLikelyDuplicate(
+function findMatchingStandard<T extends { title: string; standard_code: string | null }>(
   newName: string,
   newCode: string,
-  existing: { title: string; standard_code: string | null }[],
-): string | null {
+  existing: T[],
+): T | null {
   const normNew = normalizeStandardName(newName);
   const codeNew = newCode.trim().toLowerCase();
 
   for (const s of existing) {
     if (codeNew && s.standard_code && s.standard_code.trim().toLowerCase() === codeNew) {
-      return s.title;
+      return s;
     }
     const normExisting = normalizeStandardName(s.title);
-    if (normExisting === normNew) return s.title;
+    if (normExisting === normNew) return s;
     if (normNew.length > 4 && normExisting.length > 4 &&
         (normExisting.includes(normNew) || normNew.includes(normExisting))) {
-      return s.title;
+      return s;
     }
   }
   return null;
+}
+
+function findLikelyDuplicate(
+  newName: string,
+  newCode: string,
+  existing: { title: string; standard_code: string | null }[],
+): string | null {
+  return findMatchingStandard(newName, newCode, existing)?.title ?? null;
+}
+
+// Cover-page scan (first few pages only, see extractPdfText's maxPages option)
+// to guess a standard code and whether this document is an amendment, so the
+// naming step doesn't rely on the user typing an accurate code/title. Soft
+// signals only — always overridable, never silently trusted for the actual
+// upload payload.
+const STANDARD_CODE_RE = /\b(AS\s*\/\s*NZS|NZS|AS)\s+(\d{1,5}(?:\.\d{1,3})?)(?:\s*:\s*(\d{4}))?\b/i;
+const NCC_CODE_RE = /\bNCC\s+(\d{4})\b/i;
+
+function extractStandardCode(coverText: string): string | null {
+  const m = coverText.match(STANDARD_CODE_RE);
+  if (m) {
+    const prefix = m[1].toUpperCase().replace(/\s*\/\s*/, "/");
+    return `${prefix} ${m[2]}${m[3] ? `:${m[3]}` : ""}`;
+  }
+  const ncc = coverText.match(NCC_CODE_RE);
+  return ncc ? `NCC ${ncc[1]}` : null;
+}
+
+const AMENDMENT_RE = /\b(Amendment\s+No\.?\s*\d+|Amdt\.?\s*\d+|Corrigendum(?:\s+No\.?\s*\d+)?)\b/i;
+
+function detectAmendment(coverText: string): boolean {
+  // "Incorporating Amendment No. N" describes a base standard's revision
+  // history, not a standalone amendment document — strip it before matching.
+  const cleaned = coverText.replace(/incorporat\w*\s+amendment[^\n]*/gi, "");
+  return AMENDMENT_RE.test(cleaned);
 }
 
 // Supabase edge functions have a ~6MB body limit — drop extracted text above this
@@ -187,6 +222,7 @@ const StandardsUpload = () => {
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const [isAmendment, setIsAmendment] = useState(false);
   const [amendsStandardId, setAmendsStandardId] = useState<string>("");
+  const [coverScanNote, setCoverScanNote] = useState<string | null>(null);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const { session } = useAuth();
@@ -196,6 +232,19 @@ const StandardsUpload = () => {
   const amendableStandards = (existingStandards || []).filter(
     (s: any) => !s.amends_standard_id && s.extraction_status === "complete"
   );
+
+  // Mirror refs so the async cover-page scan (fired from handleFileSelect,
+  // resolves later) always reads current values instead of a stale closure,
+  // and so a manual edit — before or after the scan resolves — always wins.
+  const fileTokenRef = useRef(0);
+  const standardCodeRef = useRef(standardCode);
+  const isAmendmentRef = useRef(isAmendment);
+  const amendableStandardsRef = useRef(amendableStandards);
+  const userEditedCodeRef = useRef(false);
+  const userEditedAmendmentRef = useRef(false);
+  useEffect(() => { standardCodeRef.current = standardCode; }, [standardCode]);
+  useEffect(() => { isAmendmentRef.current = isAmendment; }, [isAmendment]);
+  useEffect(() => { amendableStandardsRef.current = amendableStandards; }, [amendableStandards]);
 
   const isPdf = (f: File) =>
     f.type === "application/pdf" || /\.pdf$/i.test(f.name);
@@ -221,6 +270,51 @@ const StandardsUpload = () => {
     const name = selected.name.replace(/\.pdf$/i, "").replace(/[_-]/g, " ");
     setDocName(name);
     setStep("naming");
+
+    // Cheap, non-blocking cover-page scan — first 5 pages only, no AI, just
+    // regex — to guess the standard code and whether this is an amendment,
+    // so the user isn't relying on a filename-derived name being accurate.
+    const myToken = ++fileTokenRef.current;
+    userEditedCodeRef.current = false;
+    userEditedAmendmentRef.current = false;
+    setCoverScanNote(null);
+
+    extractPdfText(selected, () => {}, { maxPages: 5 })
+      .then((coverText) => {
+        if (fileTokenRef.current !== myToken) return; // superseded by a newer file pick
+        const stripped = coverText.replace(/\[PAGE \d+\]/g, "").trim();
+        if (!stripped) return; // no text layer (scanned) — nothing to detect
+
+        const code = extractStandardCode(coverText);
+        const isAmendmentDoc = detectAmendment(coverText);
+        const notes: string[] = [];
+
+        if (code && !userEditedCodeRef.current && !standardCodeRef.current.trim()) {
+          setStandardCode(code);
+          notes.push(`detected code "${code}"`);
+        }
+
+        if (isAmendmentDoc && !userEditedAmendmentRef.current && !isAmendmentRef.current) {
+          setIsAmendment(true);
+          const effectiveCode = code ?? standardCodeRef.current;
+          const match = effectiveCode
+            ? amendableStandardsRef.current.find(
+                (s: any) => s.standard_code?.trim().toLowerCase() === effectiveCode.trim().toLowerCase(),
+              )
+            : null;
+          if (match) {
+            setAmendsStandardId(match.id);
+            notes.push(`matched it as an amendment to "${match.title}"`);
+          } else {
+            notes.push("flagged this as an amendment — pick which standard it applies to below");
+          }
+        }
+
+        if (notes.length) {
+          setCoverScanNote(`Auto-filled from the document: ${notes.join(" and ")}. Double-check before continuing.`);
+        }
+      })
+      .catch((err) => console.warn("Cover-page scan failed (non-fatal):", err));
   };
 
   const startProcessing = async (skipDuplicateCheck = false) => {
@@ -580,6 +674,16 @@ const StandardsUpload = () => {
           </Card>
         )}
 
+        {coverScanNote && (
+          <div className="flex items-start gap-2 mb-4 p-3 rounded-lg bg-primary/5 border border-primary/20 text-xs text-muted-foreground">
+            <Sparkles className="h-3.5 w-3.5 text-primary flex-shrink-0 mt-0.5" />
+            <p className="flex-1">{coverScanNote}</p>
+            <button type="button" onClick={() => setCoverScanNote(null)} className="text-muted-foreground hover:text-foreground" aria-label="Dismiss">
+              ✕
+            </button>
+          </div>
+        )}
+
         <div className="space-y-4 mb-6">
           <div>
             <Label className="text-sm">Document Name *</Label>
@@ -596,7 +700,7 @@ const StandardsUpload = () => {
               className="h-11 mt-1"
               placeholder="e.g. AS/NZS 3000:2018"
               value={standardCode}
-              onChange={(e) => setStandardCode(e.target.value)}
+              onChange={(e) => { setStandardCode(e.target.value); userEditedCodeRef.current = true; }}
             />
           </div>
         </div>
@@ -606,6 +710,7 @@ const StandardsUpload = () => {
             checked={isAmendment}
             onCheckedChange={(v) => {
               setIsAmendment(v === true);
+              userEditedAmendmentRef.current = true;
               if (v !== true) setAmendsStandardId("");
             }}
             className="mt-0.5 flex-shrink-0"
@@ -620,7 +725,7 @@ const StandardsUpload = () => {
             {amendableStandards.length > 0 ? (
               <>
                 <Label className="text-sm">Which standard does this amend? *</Label>
-                <Select value={amendsStandardId} onValueChange={setAmendsStandardId}>
+                <Select value={amendsStandardId} onValueChange={(v) => { setAmendsStandardId(v); userEditedAmendmentRef.current = true; }}>
                   <SelectTrigger className="h-11 mt-1">
                     <SelectValue placeholder="Select a standard" />
                   </SelectTrigger>
