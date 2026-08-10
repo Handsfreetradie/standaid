@@ -6,7 +6,9 @@ import { Badge } from "@/components/ui/badge";
 import ToolLayout from "./ToolLayout";
 import ResultRow from "./ResultRow";
 
-// Simplified AS 1684 span tables — max span in mm for common scenarios
+// Simplified AS 1684 span tables — max span in mm for common scenarios.
+// UNVERIFIED against a real AS 1684.2 span table CD except where noted below —
+// see VERIFIED_FLOOR_JOIST_MGP10.
 const TIMBER_DATA: Record<string, Record<string, Record<string, number>>> = {
   "floor-joist": {
     "MGP10": { "70x35": 1200, "90x35": 1600, "90x45": 1800, "120x35": 2100, "120x45": 2400, "140x45": 2700, "190x45": 3300, "240x45": 4000 },
@@ -25,6 +27,33 @@ const TIMBER_DATA: Record<string, Record<string, Record<string, number>>> = {
   },
 };
 
+// Verified against AS 1684-2006 (Residential Timber-Framed Construction) via
+// the Timber Development Association / TABMA "Seasoned Softwood Span Tables:
+// Domestic Internal Floor Joists Not Supporting Roof Loads" Technical Note 1
+// (June 2007), which states it's extracted directly from AS 1684-2006.
+// Single span, seasoned MGP10 only. null = the standard rates this size as
+// "Not Suitable" for this application — never show a numeric span for it.
+//
+// This superseded the previous hand-estimated MGP10 floor-joist figures above,
+// which were found (2026-08-10) to overstate span at small sizes — the old
+// table let 90x35 pass at 1600mm despite the standard rating it Not Suitable
+// entirely — and understate it at large sizes (240x45 was 4000mm vs the real
+// 4800mm). MGP12/MGP15 floor joists and all rafter/bearer figures above are
+// still the old unverified estimates.
+const VERIFIED_FLOOR_JOIST_MGP10: Record<string, Record<string, number | null>> = {
+  "90x35": { "450": null, "600": null },
+  "90x45": { "450": 1500, "600": 1200 },
+  "120x35": { "450": 1900, "600": 1500 },
+  "120x45": { "450": 2100, "600": 2000 },
+  "140x35": { "450": 2300, "600": 2100 },
+  "140x45": { "450": 2600, "600": 2400 },
+  "190x35": { "450": 3300, "600": 3000 },
+  "190x45": { "450": 3600, "600": 3300 },
+  "240x35": { "450": 4400, "600": 3900 },
+  "240x45": { "450": 4800, "600": 4300 },
+  "290x45": { "450": 5500, "600": 5200 },
+};
+
 const SPACING_OPTIONS = ["450", "600", "900"];
 
 interface SpanResult {
@@ -35,6 +64,8 @@ interface SpanResult {
   nextSizeUp: string | null;
   nextSizeSpan: number | null;
   warnings: string[];
+  verified: boolean;
+  notSuitable: boolean;
 }
 
 interface Props { onBack: () => void }
@@ -47,18 +78,33 @@ const TimberSpanTool = ({ onBack }: Props) => {
   const [span, setSpan] = useState("");
   const [result, setResult] = useState<SpanResult | null>(null);
 
+  // Real AS 1684-2006 data only covers MGP10 floor joists at 450/600mm — see
+  // VERIFIED_FLOOR_JOIST_MGP10. Everything else uses the old estimated table.
+  const usesVerifiedTable = application === "floor-joist" && grade === "MGP10";
   const appData = TIMBER_DATA[application] || {};
   const gradeData = appData[grade] || {};
-  const availableSizes = Object.keys(gradeData);
+  const availableSizes = usesVerifiedTable ? Object.keys(VERIFIED_FLOOR_JOIST_MGP10) : Object.keys(gradeData);
 
   const calculate = () => {
     const inputSpanMm = parseFloat(span) * 1000;
     if (isNaN(inputSpanMm) || inputSpanMm <= 0) return;
 
-    // Adjust for spacing (tables based on 450mm, reduce for 600/900)
-    const spacingFactor = spacing === "450" ? 1.0 : spacing === "600" ? 0.9 : 0.75;
-    const maxSpan = Math.round((gradeData[timberSize] || 0) * spacingFactor);
-    const passes = inputSpanMm <= maxSpan;
+    const verified = usesVerifiedTable && (spacing === "450" || spacing === "600");
+
+    let maxSpan: number;
+    let notSuitable = false;
+    if (verified) {
+      const v = VERIFIED_FLOOR_JOIST_MGP10[timberSize]?.[spacing];
+      notSuitable = v === null || v === undefined;
+      maxSpan = v ?? 0;
+    } else {
+      // Adjust for spacing (tables based on 450mm, reduce for 600/900) — this
+      // flat multiplier is a rough estimate, not verified against a real span
+      // table (real 450→600mm ratios range 0.79-0.95 depending on size/grade).
+      const spacingFactor = spacing === "450" ? 1.0 : spacing === "600" ? 0.9 : 0.75;
+      maxSpan = Math.round((gradeData[timberSize] || 0) * spacingFactor);
+    }
+    const passes = !notSuitable && inputSpanMm <= maxSpan;
 
     // Find next size up
     const idx = availableSizes.indexOf(timberSize);
@@ -66,8 +112,10 @@ const TimberSpanTool = ({ onBack }: Props) => {
     let nextSizeSpan: number | null = null;
     if (!passes && idx < availableSizes.length - 1) {
       for (let i = idx + 1; i < availableSizes.length; i++) {
-        const testSpan = Math.round((gradeData[availableSizes[i]] || 0) * spacingFactor);
-        if (testSpan >= inputSpanMm) {
+        const testSpan = verified
+          ? VERIFIED_FLOOR_JOIST_MGP10[availableSizes[i]]?.[spacing] ?? null
+          : Math.round((gradeData[availableSizes[i]] || 0) * (spacing === "450" ? 1.0 : spacing === "600" ? 0.9 : 0.75));
+        if (testSpan !== null && testSpan >= inputSpanMm) {
           nextSizeUp = availableSizes[i];
           nextSizeSpan = testSpan;
           break;
@@ -76,8 +124,12 @@ const TimberSpanTool = ({ onBack }: Props) => {
     }
 
     const warnings: string[] = [];
-    if (!passes) warnings.push("Span exceeds maximum — increase timber size or reduce spacing.");
+    if (notSuitable) warnings.push("This size is rated Not Suitable for this application at this spacing per AS 1684 — pick a larger size.");
+    else if (!passes) warnings.push("Span exceeds maximum — increase timber size or reduce spacing.");
     if (maxSpan > 0 && inputSpanMm > maxSpan * 0.9 && passes) warnings.push("Span is close to maximum — consider next size up for safety margin.");
+    if (!verified) warnings.push(usesVerifiedTable
+      ? "900mm spacing isn't in the verified AS 1684 table for floor joists — this figure is an unverified estimate."
+      : "This application/grade combination hasn't been verified against a real AS 1684.2 span table yet — treat as indicative only.");
 
     setResult({
       maxSpan,
@@ -87,6 +139,8 @@ const TimberSpanTool = ({ onBack }: Props) => {
       nextSizeUp,
       nextSizeSpan,
       warnings,
+      verified,
+      notSuitable,
     });
   };
 
@@ -94,26 +148,36 @@ const TimberSpanTool = ({ onBack }: Props) => {
     <ToolLayout
       title="Timber Span Calculator"
       subtitle="AS 1684 — Max spans for joists, rafters & bearers"
-      disclaimer="Simplified from AS 1684 span tables. Values assume single span, N2 wind class, sheet roof. Always consult full span tables or engineer for specific loading conditions."
+      disclaimer="Floor joists in MGP10 at 450/600mm spacing are verified against AS 1684-2006 (via TABMA Technical Note 1). Everything else — MGP12/MGP15 floor joists, all rafter/bearer figures, and 900mm floor-joist spacing — is an unverified estimate; treat as indicative only. Always consult full span tables or an engineer for specific loading conditions."
       onBack={onBack}
       onCalculate={calculate}
       result={result ? (
         <>
           <div className={`p-3 rounded-lg mb-3 border ${
-            result.passes ? "bg-primary/5 border-primary/20" : "bg-destructive/5 border-destructive/20"
+            result.notSuitable ? "bg-destructive/5 border-destructive/20"
+              : result.passes ? "bg-primary/5 border-primary/20" : "bg-destructive/5 border-destructive/20"
           }`}>
-            <p className={`text-sm font-extrabold ${result.passes ? "text-primary" : "text-destructive"}`}>
-              {result.passes ? "✅ SPAN OK" : "❌ EXCEEDS MAX SPAN"}
+            <p className={`text-sm font-extrabold ${
+              result.notSuitable ? "text-destructive" : result.passes ? "text-primary" : "text-destructive"
+            }`}>
+              {result.notSuitable ? "❌ NOT SUITABLE FOR THIS USE" : result.passes ? "✅ SPAN OK" : "❌ EXCEEDS MAX SPAN"}
             </p>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Max span: {result.maxSpanFormatted} • Your span: {(result.inputSpan / 1000).toFixed(1)}m
+              {result.notSuitable ? "Pick a different size — see suggestion below" : (
+                <>Max span: {result.maxSpanFormatted} • Your span: {(result.inputSpan / 1000).toFixed(1)}m</>
+              )}
+            </p>
+            <p className="text-[10px] mt-1 font-medium">
+              {result.verified ? "✓ Verified against AS 1684-2006" : "⚠ Unverified estimate — not checked against a real span table"}
             </p>
           </div>
+          {!result.notSuitable && (
           <div className="grid grid-cols-2 gap-4">
             <ResultRow label="Max span" value={result.maxSpanFormatted} variant="primary" />
-            <ResultRow label="Utilisation" value={Math.round((result.inputSpan / result.maxSpan) * 100)} unit="%" 
+            <ResultRow label="Utilisation" value={Math.round((result.inputSpan / result.maxSpan) * 100)} unit="%"
               variant={result.passes ? "default" : "destructive"} size="sm" />
           </div>
+          )}
           {result.nextSizeUp && (
             <div className="mt-3 p-2.5 rounded-lg bg-primary/5 border border-primary/20">
               <p className="text-xs font-bold text-primary">💡 Use {result.nextSizeUp} instead (max {(result.nextSizeSpan! / 1000).toFixed(1)}m)</p>
