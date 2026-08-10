@@ -16,7 +16,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const FROM_EMAIL = "hello@standaid.ai";
 const FROM_NAME = "StandAId";
 const ADMIN_NOTIFY_EMAIL = "hello@standaid.ai";
-const APP_URL = "https://standaid-9mas.vercel.app";
+const APP_URL = "https://app.standaid.ai";
 
 serve(async (req) => {
   if (req.method !== "POST") {

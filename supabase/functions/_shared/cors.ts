@@ -4,6 +4,7 @@ const PRODUCTION_ORIGINS = [
   "https://standaid.com.au",
   "https://standaid.ai",
   "https://www.standaid.ai",
+  "https://app.standaid.ai",
 ];
 
 const ENV_ORIGINS = (Deno.env.get("ALLOWED_ORIGIN") || "")

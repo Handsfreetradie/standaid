@@ -14,8 +14,8 @@ import { getAllowedOrigin } from "../_shared/cors.ts";
 
 const ADMIN_EMAIL = "kyledixonelectrical@gmail.com";
 
-const APP_URL = "https://standaid-9mas.vercel.app";
-const LOGO_URL = "https://standaid-9mas.vercel.app/pwa-192.png";
+const APP_URL = "https://app.standaid.ai";
+const LOGO_URL = "https://app.standaid.ai/pwa-192.png";
 const FROM_EMAIL = "hello@standaid.ai";
 const FROM_NAME = "StandAId";
 

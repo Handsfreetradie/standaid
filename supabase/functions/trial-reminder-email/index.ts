@@ -7,8 +7,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // Mirrors welcome-email's auth/send pattern: DB trigger posts a shared
 // secret, this function verifies it, looks up the user, sends via Resend.
 
-const APP_URL = "https://standaid-9mas.vercel.app";
-const LOGO_URL = "https://standaid-9mas.vercel.app/pwa-192.png";
+const APP_URL = "https://app.standaid.ai";
+const LOGO_URL = "https://app.standaid.ai/pwa-192.png";
 const FROM_EMAIL = "hello@standaid.ai";
 const FROM_NAME = "StandAId";
 
