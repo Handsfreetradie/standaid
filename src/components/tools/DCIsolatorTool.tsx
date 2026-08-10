@@ -6,8 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import ToolLayout from "./ToolLayout";
 import ResultRow from "./ResultRow";
 
-// Universal PV short-circuit sizing factor — Isc can exceed STC under high
-// irradiance; generic engineering practice, not a standard-specific value.
+// PV short-circuit sizing factor — Isc can exceed STC under high irradiance.
+// Confirmed against AS/NZS 5033 by Kyle (2026-08-10).
 const SC_FACTOR = 1.25;
 
 type Location = "rooftop" | "inverter";
