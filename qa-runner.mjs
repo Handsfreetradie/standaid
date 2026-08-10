@@ -141,8 +141,17 @@ function validateResponse(query, apiResponse) {
     issues.push("NEEDS REVIEW: Safety-critical question — no safety warning");
     if (verdict === "PASS") verdict = "NEEDS REVIEW";
   }
-  if (apiResponse.needs_review) {
-    issues.push("NEEDS REVIEW: API flagged needs_review — inspect citation grounding");
+  // needs_review also fires when a question is merely safety-adjacent (by
+  // design — routes safety topics to a human review queue, independent of
+  // whether the answer is right). A real content problem (hallucinated
+  // citation, low grounding) always costs at least one warning-level
+  // validation issue (-0.2 confidence); safety-flagging alone only ever
+  // costs info-level deductions (-0.05 each, max two, floor 0.90). So
+  // confidence_score < 0.85 is the reliable signal of an actual issue —
+  // scoring every needs_review conflated "flagged for a human to
+  // double-check" with "content is wrong".
+  if (apiResponse.needs_review && (apiResponse.confidence_score ?? 1) < 0.85) {
+    issues.push(`NEEDS REVIEW: API confidence ${apiResponse.confidence_score} — inspect citation grounding`);
     if (verdict === "PASS") verdict = "NEEDS REVIEW";
   }
 

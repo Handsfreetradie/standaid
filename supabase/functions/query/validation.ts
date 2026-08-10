@@ -87,9 +87,14 @@ export function validateResponse(input: ValidationInput): ValidationResult {
   };
 }
 
-// Matches "AS/NZS 3000 Clause 2.3.2" or "AS 3000 Clause 2.3.2"
+// Matches "AS/NZS 3000 Clause 2.3.2" or "AS 3000 Clause 2.3.2".
+// The leading digit must not be 0 — real standard numbers never start with
+// "0." (e.g. AS 3000, AS/NZS 3017), but plain English sentences often contain
+// "as low as 0.01 MΩ" or "as 0.5 ohms". Case-insensitive "as" + a decimal
+// like that was matching as a fabricated citation ("as 0.01"), getting
+// flagged hallucinated, and replaced with "the standard" mid-sentence.
 const STANDARD_CLAUSE_REGEX =
-  /(?:AS|AS\/NZS)\s+\d+(?:\.\d+)*(?:\s+(?:Clause|Table|Section|Figure)\s+\d+(?:\.\d+)*)?/gi;
+  /(?:AS|AS\/NZS)\s+[1-9]\d*(?:\.\d+)*(?:\s+(?:Clause|Table|Section|Figure)\s+\d+(?:\.\d+)*)?/gi;
 
 // Matches standalone "Clause 2.3.2" (must have at least one dot to avoid "Clause 2")
 const STANDALONE_CLAUSE_REGEX =
