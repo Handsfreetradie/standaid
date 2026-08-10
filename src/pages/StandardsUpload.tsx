@@ -193,6 +193,9 @@ const StandardsUpload = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: existingStandards } = useStandards();
+  const amendableStandards = (existingStandards || []).filter(
+    (s: any) => !s.amends_standard_id && s.extraction_status === "complete"
+  );
 
   const isPdf = (f: File) =>
     f.type === "application/pdf" || /\.pdf$/i.test(f.name);
@@ -234,7 +237,7 @@ const StandardsUpload = () => {
       toast.error("Please confirm you're licensed to upload this document.");
       return;
     }
-    if (isAmendment && !amendsStandardId) {
+    if (isAmendment && amendableStandards.length > 0 && !amendsStandardId) {
       toast.error("Select which standard this amendment applies to.");
       return;
     }
@@ -614,24 +617,30 @@ const StandardsUpload = () => {
 
         {isAmendment && (
           <div className="mb-6">
-            <Label className="text-sm">Which standard does this amend? *</Label>
-            <Select value={amendsStandardId} onValueChange={setAmendsStandardId}>
-              <SelectTrigger className="h-11 mt-1">
-                <SelectValue placeholder="Select a standard" />
-              </SelectTrigger>
-              <SelectContent>
-                {(existingStandards || [])
-                  .filter((s: any) => !s.amends_standard_id)
-                  .map((s: any) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.title}{s.standard_code ? ` (${s.standard_code})` : ""}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground mt-1">
-              The amendment's changes will take priority over the base standard when the AI answers.
-            </p>
+            {amendableStandards.length > 0 ? (
+              <>
+                <Label className="text-sm">Which standard does this amend? *</Label>
+                <Select value={amendsStandardId} onValueChange={setAmendsStandardId}>
+                  <SelectTrigger className="h-11 mt-1">
+                    <SelectValue placeholder="Select a standard" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {amendableStandards.map((s: any) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.title}{s.standard_code ? ` (${s.standard_code})` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  The amendment's changes will take priority over the base standard when the AI answers.
+                </p>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                You don't have a base standard to link this to yet — it'll be uploaded as its own standard for now. Upload the base standard later and you'll be able to link this as an amendment to it.
+              </p>
+            )}
           </div>
         )}
 
