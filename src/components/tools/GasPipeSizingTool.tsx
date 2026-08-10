@@ -6,7 +6,12 @@ import { Badge } from "@/components/ui/badge";
 import ToolLayout from "./ToolLayout";
 import ResultRow from "./ResultRow";
 
-// AS/NZS 5601 gas pipe sizing — max capacity in MJ/h for natural gas
+// AS/NZS 5601 gas pipe sizing — max capacity in MJ/h for natural gas.
+// NOT independently verified against the standard (checked 2026-08-10): the
+// length columns here (3/6/9/12/15/20/25/30m) don't match the standard's own
+// grid (2/4/6/8/10/12/14/16/18m+ per Table F6/F7), so this can't be a direct
+// transcription — likely an interpolated/independently-derived table. Treat
+// as indicative until checked against a real copy of AS/NZS 5601.1.
 const GAS_PIPE_CAPACITY: Record<string, Record<string, number>> = {
   // Pipe size → max length (m) → MJ/h
   "15": { "3": 275, "6": 194, "9": 158, "12": 137, "15": 122, "20": 106, "25": 95, "30": 86 },
@@ -108,7 +113,7 @@ const GasPipeSizingTool = ({ onBack }: Props) => {
     <ToolLayout
       title="Gas Pipe Sizing"
       subtitle="AS/NZS 5601 — Size gas pipes by load & run"
-      disclaimer="Based on AS/NZS 5601 capacity tables for natural gas at 1.1 kPa. LPG values are approximate conversions. Always verify with the full standard and local gas authority requirements."
+      disclaimer="Modelled on AS/NZS 5601 capacity tables for natural gas at 1.1 kPa, but not independently verified against the standard's actual tables — the length-column grid used here doesn't match the standard's own. LPG values are approximate conversions. Always verify with the full standard and local gas authority requirements."
       onBack={onBack}
       onCalculate={calculate}
       result={result ? (
