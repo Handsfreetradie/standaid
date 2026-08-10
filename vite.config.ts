@@ -23,8 +23,8 @@ export default defineConfig(() => ({
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
       },
       manifest: {
-        name: "StandardsAI",
-        short_name: "StandardsAI",
+        name: "StandAId",
+        short_name: "StandAId",
         description: "AI-powered compliance assistant for trade professionals",
         theme_color: "#D72B2B",
         background_color: "#FFFFFF",
