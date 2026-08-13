@@ -93,8 +93,27 @@ serve(async (req) => {
       }
     }
 
-    // Generate 1-hour signed URL
-    const { data: signedData, error: signError } = await supabase.storage
+    // Generate 1-hour signed URL.
+    //
+    // Signing runs on a SERVICE-ROLE client, deliberately, and deliberately
+    // only after the lookup above has already succeeded — that lookup is the
+    // access check, and it runs on the caller's own JWT so RLS decides what
+    // they may see (own uploads, or a standard shared via an org they're an
+    // active member of). Never move this before the lookup.
+    //
+    // It cannot use the caller's client: storage RLS on the `standards` bucket
+    // is `auth.uid() = (storage.foldername(name))[1]` — user-folder only, with
+    // no org clause — while the `standards` TABLE policy is org-aware. So a
+    // team member opening a standard a colleague uploaded passed the lookup
+    // and then failed at signing, returning 500 "Failed to generate PDF link"
+    // for every citation, figure and table they clicked. Same pattern the
+    // query function already uses to sign figure images.
+    const supabaseAdmin = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+
+    const { data: signedData, error: signError } = await supabaseAdmin.storage
       .from("standards")
       .createSignedUrl(standard.file_path, 3600);
 

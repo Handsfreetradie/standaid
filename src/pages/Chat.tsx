@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import VoiceMode from "@/components/VoiceMode";
 import ChatHistory, { HistoryItem } from "@/components/ChatHistory";
 import { PDFViewerModal } from "@/components/PDFViewerModal";
+import { StandardClipImage } from "@/components/StandardClipImage";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -359,8 +360,12 @@ const Chat = () => {
                     isTyping: false,
                     isComplianceCheck: isComplianceCheck || false,
                     citations: event.citations || [],
-                    figures_referenced: (event.figures_referenced || []).filter((f: ImageRef) => f.image_url || (f.standard_id && f.page_number)),
-                    tables_referenced: (event.tables_referenced || []).filter((t: ImageRef) => t.image_url || (t.standard_id && t.page_number)),
+                    // A standard + page is now the minimum renderable ref: the
+                    // image is cropped live from the PDF, so a stored image_url
+                    // (which only ever existed for some figures) is no longer
+                    // enough on its own — and is no longer used at all.
+                    figures_referenced: (event.figures_referenced || []).filter((f: ImageRef) => f.standard_id && f.page_number),
+                    tables_referenced: (event.tables_referenced || []).filter((t: ImageRef) => t.standard_id && t.page_number),
                     safety_critical: event.safety_critical || false,
                     safety_message: event.safety_message,
                     confidence: event.confidence,
@@ -626,69 +631,37 @@ const Chat = () => {
                     </div>
                   )}
 
-                  {/* Figures */}
+                  {/* Figures — cropped live from the PDF, see StandardClipImage */}
                   {!msg.isTyping && msg.figures_referenced && msg.figures_referenced.length > 0 && (
                     <div className="mt-3 space-y-2">
-                      {msg.figures_referenced.map((fig, idx) =>
-                        fig.image_url ? (
-                          <div key={idx} className="rounded-lg overflow-hidden border border-border">
-                            <img
-                              src={fig.image_url}
-                              alt={fig.caption || `Figure ${fig.figure_number}`}
-                              className="w-full h-auto"
-                              loading="lazy"
-                            />
-                            {(fig.caption || fig.figure_number) && (
-                              <p className="text-[10px] text-muted-foreground px-3 py-1.5 bg-muted/30">
-                                Figure {fig.figure_number}{fig.caption ? ` — ${fig.caption}` : ""}
-                              </p>
-                            )}
-                          </div>
-                        ) : (
-                          <button
-                            key={idx}
-                            onClick={() => setPdfViewer({ clauseNumber: `Figure ${fig.figure_number}`, standardId: fig.standard_id, pageNumber: fig.page_number })}
-                            className="flex items-center gap-2 w-full text-left rounded-lg border border-border px-3 py-2.5 text-xs text-primary hover:bg-primary/5 active:scale-[0.99] transition-all"
-                          >
-                            <FileText className="h-4 w-4 flex-shrink-0" />
-                            <span className="flex-1 font-medium">Open Figure {fig.figure_number}{fig.caption ? ` — ${fig.caption}` : ""}</span>
-                            <span className="text-muted-foreground text-[10px]">p.{fig.page_number}</span>
-                          </button>
-                        )
-                      )}
+                      {msg.figures_referenced.map((fig, idx) => (
+                        <StandardClipImage
+                          key={idx}
+                          standardId={fig.standard_id!}
+                          kind="Figure"
+                          refNumber={fig.figure_number || ""}
+                          caption={fig.caption}
+                          pageNumber={fig.page_number!}
+                          onOpenFull={() => setPdfViewer({ clauseNumber: `Figure ${fig.figure_number}`, standardId: fig.standard_id, pageNumber: fig.page_number })}
+                        />
+                      ))}
                     </div>
                   )}
 
                   {/* Tables */}
                   {!msg.isTyping && msg.tables_referenced && msg.tables_referenced.length > 0 && (
                     <div className="mt-3 space-y-2">
-                      {msg.tables_referenced.map((tbl, idx) =>
-                        tbl.image_url ? (
-                          <div key={idx} className="rounded-lg overflow-hidden border border-border">
-                            <img
-                              src={tbl.image_url}
-                              alt={tbl.caption || `Table ${tbl.table_number}`}
-                              className="w-full h-auto"
-                              loading="lazy"
-                            />
-                            {(tbl.caption || tbl.table_number) && (
-                              <p className="text-[10px] text-muted-foreground px-3 py-1.5 bg-muted/30">
-                                Table {tbl.table_number}{tbl.caption ? ` — ${tbl.caption}` : ""}
-                              </p>
-                            )}
-                          </div>
-                        ) : (
-                          <button
-                            key={idx}
-                            onClick={() => setPdfViewer({ clauseNumber: `Table ${tbl.table_number}`, standardId: tbl.standard_id, pageNumber: tbl.page_number })}
-                            className="flex items-center gap-2 w-full text-left rounded-lg border border-border px-3 py-2.5 text-xs text-primary hover:bg-primary/5 active:scale-[0.99] transition-all"
-                          >
-                            <FileText className="h-4 w-4 flex-shrink-0" />
-                            <span className="flex-1 font-medium">Open Table {tbl.table_number}{tbl.caption ? ` — ${tbl.caption}` : ""}</span>
-                            <span className="text-muted-foreground text-[10px]">p.{tbl.page_number}</span>
-                          </button>
-                        )
-                      )}
+                      {msg.tables_referenced.map((tbl, idx) => (
+                        <StandardClipImage
+                          key={idx}
+                          standardId={tbl.standard_id!}
+                          kind="Table"
+                          refNumber={tbl.table_number || ""}
+                          caption={tbl.caption}
+                          pageNumber={tbl.page_number!}
+                          onOpenFull={() => setPdfViewer({ clauseNumber: `Table ${tbl.table_number}`, standardId: tbl.standard_id, pageNumber: tbl.page_number })}
+                        />
+                      ))}
                     </div>
                   )}
 

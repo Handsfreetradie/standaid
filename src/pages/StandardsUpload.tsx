@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import * as pdfjsLib from "pdfjs-dist";
 import { extractPdfText } from "@/lib/pdf-text";
 import { scanTooLargeForOcr } from "@/lib/scanned-check";
 import {
@@ -95,7 +94,7 @@ const MAX_EXTRACTED_BYTES = 1_400_000;
 type Step = "intro" | "upload" | "naming" | "processing" | "success";
 
 interface ProcessingProgress {
-  stage: "reading" | "uploading" | "extracting" | "sorting" | "chunking" | "storing" | "figures" | "done";
+  stage: "reading" | "uploading" | "extracting" | "sorting" | "chunking" | "storing" | "done";
   percent: number;
   message: string;
 }
@@ -107,106 +106,16 @@ const STAGE_LABELS: Record<string, string> = {
   sorting: "Sorting content into sections…",
   chunking: "AI is chunking sections…",
   storing: "Storing chunks & generating embeddings…",
-  figures: "Extracting figure images…",
   done: "Processing complete!",
 };
 
-async function extractAndUploadFigures(
-  standardId: string,
-  userId: string,
-  file: File,
-  onProgress: (msg: string) => void,
-): Promise<number> {
-  // Fetch figure chunks created by process-standard — these have page numbers
-  const { data: figureChunks } = await supabase
-    .from("standard_chunks")
-    .select("clause_number, clause_title, page_number")
-    .eq("standard_id", standardId)
-    .ilike("clause_number", "FIGURE%")
-    .not("page_number", "is", null);
-
-  if (!figureChunks || figureChunks.length === 0) return 0;
-
-  // Deduplicate by figure_number — keep first occurrence per figure
-  const seen = new Set<string>();
-  const unique = figureChunks.filter((c) => {
-    const num = c.clause_number.replace(/^FIGURE\s+/i, "").trim();
-    if (seen.has(num)) return false;
-    seen.add(num);
-    return true;
-  });
-
-  const buffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
-
-  let uploaded = 0;
-  for (const chunk of unique) {
-    const figureNumber = chunk.clause_number.replace(/^FIGURE\s+/i, "").trim();
-    const pageNum = chunk.page_number as number;
-
-    onProgress(`Extracting Figure ${figureNumber} (${uploaded + 1}/${unique.length})…`);
-
-    try {
-      if (pageNum < 1 || pageNum > pdf.numPages) continue;
-
-      const page = await pdf.getPage(pageNum);
-      const viewport = page.getViewport({ scale: 1.5 });
-
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.round(viewport.width);
-      canvas.height = Math.round(viewport.height);
-      const ctx = canvas.getContext("2d");
-      if (!ctx) continue;
-
-      await page.render({ canvasContext: ctx, viewport }).promise;
-
-      const blob = await new Promise<Blob | null>((resolve) =>
-        canvas.toBlob(resolve, "image/jpeg", 0.88),
-      );
-      if (!blob) continue;
-
-      // Keep under the 5MB bucket limit
-      if (blob.size > 5 * 1024 * 1024) {
-        console.warn(`Figure ${figureNumber} page image exceeds 5MB, skipping`);
-        continue;
-      }
-
-      const safeName = figureNumber.replace(/[^a-zA-Z0-9._-]/g, "_");
-      const storagePath = `${userId}/${standardId}/${safeName}.jpg`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("standard-figures")
-        .upload(storagePath, blob, { contentType: "image/jpeg", upsert: true });
-
-      if (uploadError) {
-        console.warn(`Storage upload failed for Figure ${figureNumber}:`, uploadError.message);
-        continue;
-      }
-
-      const { data: { publicUrl } } = supabase.storage
-        .from("standard-figures")
-        .getPublicUrl(storagePath);
-
-      const { error: insertError } = await supabase.from("standard_figures").insert({
-        standard_id: standardId,
-        user_id: userId,
-        figure_number: figureNumber,
-        caption: chunk.clause_title || null,
-        page_number: pageNum,
-        image_url: publicUrl,
-      });
-
-      if (!insertError) uploaded++;
-    } catch (e) {
-      console.warn(`Failed to extract Figure ${figureNumber}:`, e);
-    }
-  }
-
-  // Per-figure failures are caught above, so this is reached on every path
-  // that got as far as opening the document.
-  pdf.destroy();
-  return uploaded;
-}
+// Figure images used to be captured here: every FIGURE chunk's page was
+// rendered whole to a JPEG and uploaded to the standard-figures bucket. That
+// was removed — the images were uncropped full pages, the pass only ran during
+// an interactive upload (it died if the tab was backgrounded) and never covered
+// tables at all. Chat now crops the figure or table out of the PDF on demand
+// (see StandardClipImage), which needs nothing stored and works retroactively
+// on standards uploaded before this change.
 
 const StandardsUpload = () => {
   const [step, setStep] = useState<Step>("intro");
@@ -216,7 +125,7 @@ const StandardsUpload = () => {
   const [progress, setProgress] = useState<ProcessingProgress>({
     stage: "extracting", percent: 0, message: STAGE_LABELS.extracting,
   });
-  const [result, setResult] = useState<{ totalChunks: number; indexedChunks: number; quality: number; figuresExtracted: number } | null>(null);
+  const [result, setResult] = useState<{ totalChunks: number; indexedChunks: number; quality: number } | null>(null);
   const [licenceConfirmed, setLicenceConfirmed] = useState(false);
   const [canBackground, setCanBackground] = useState(false);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
@@ -448,22 +357,8 @@ const StandardsUpload = () => {
         setProgress({ stage: "storing", percent: 60 + pct * 0.30, message: STAGE_LABELS.storing });
       });
 
-      // Extract figure images from the PDF pages client-side
-      setProgress({ stage: "figures", percent: 92, message: STAGE_LABELS.figures });
-      let figuresExtracted = 0;
-      try {
-        figuresExtracted = await extractAndUploadFigures(
-          standardId,
-          session.user.id,
-          file,
-          (msg) => setProgress({ stage: "figures", percent: 92, message: msg }),
-        );
-      } catch (e) {
-        console.warn("Figure extraction failed (non-fatal):", e);
-      }
-
       setProgress({ stage: "done", percent: 100, message: STAGE_LABELS.done });
-      setResult({ ...pollResult, figuresExtracted });
+      setResult(pollResult);
       queryClient.invalidateQueries({ queryKey: ["standards"] });
       setStep("success");
     } catch (e: any) {
@@ -791,7 +686,7 @@ const StandardsUpload = () => {
 
   // ── PROCESSING ──
   if (step === "processing") {
-    const stages = ["reading", "uploading", "extracting", "sorting", "chunking", "storing", "figures", "done"];
+    const stages = ["reading", "uploading", "extracting", "sorting", "chunking", "storing", "done"];
     const currentIdx = stages.indexOf(progress.stage);
 
     return (
@@ -867,7 +762,7 @@ const StandardsUpload = () => {
 
         {result && (
           <Card className="p-4 mb-6">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3">
               <div className="text-center">
                 <p className="text-2xl font-extrabold text-foreground">{result.totalChunks}</p>
                 <p className="text-xs text-muted-foreground">Clauses</p>
@@ -875,10 +770,6 @@ const StandardsUpload = () => {
               <div className="text-center">
                 <p className="text-2xl font-extrabold text-primary">{result.indexedChunks}</p>
                 <p className="text-xs text-muted-foreground">Indexed</p>
-              </div>
-              <div className="text-center">
-                <p className="text-2xl font-extrabold text-foreground">{result.figuresExtracted}</p>
-                <p className="text-xs text-muted-foreground">Figures</p>
               </div>
             </div>
             {result.quality > 0 && (
