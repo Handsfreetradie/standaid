@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getAllowedOrigin } from "../_shared/cors.ts";
+import { getAllowedOrigin, APP_URL } from "../_shared/cors.ts";
 import { getStripe, priceIdForTier, teamSeatPriceId } from "../_shared/stripe.ts";
 
 // Creates a Stripe Checkout Session for a subscription and returns its URL.
@@ -62,7 +62,12 @@ serve(async (req) => {
       await supabaseAdmin.from("profiles").update({ stripe_customer_id: customerId }).eq("user_id", user.id);
     }
 
-    const appUrl = getAllowedOrigin(origin);
+    // Deliberately NOT getAllowedOrigin(origin) — that's for validating the
+    // request's own Origin header, not for building a redirect URL the
+    // customer will land on after paying. A missing/unmatched Origin would
+    // silently fall back to APP_URL's own default, which is fine, but this
+    // makes the intent explicit and immune to future reordering of that list.
+    const appUrl = APP_URL;
     const isTeam = tier === "business_team";
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",

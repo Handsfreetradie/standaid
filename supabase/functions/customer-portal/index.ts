@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getAllowedOrigin } from "../_shared/cors.ts";
+import { getAllowedOrigin, APP_URL } from "../_shared/cors.ts";
 import { getStripe } from "../_shared/stripe.ts";
 
 // Returns a Stripe Billing Portal URL so the user can manage or cancel their
@@ -36,10 +36,11 @@ serve(async (req) => {
     if (!customerId) return json({ error: "No subscription found" }, 404);
 
     const stripe = getStripe();
-    const appUrl = getAllowedOrigin(origin);
+    // Deliberately NOT getAllowedOrigin(origin) — see create-checkout for why
+    // a real post-action redirect URL must not depend on the CORS fallback.
     const portal = await stripe.billingPortal.sessions.create({
       customer: customerId,
-      return_url: `${appUrl}/profile`,
+      return_url: `${APP_URL}/profile`,
     });
 
     return json({ url: portal.url });

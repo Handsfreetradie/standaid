@@ -55,7 +55,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const signUp = async (email: string, password: string) => {
     const redirectTo = window.location.origin.includes("localhost")
-      ? "https://standaid-9mas.vercel.app"
+      ? "https://app.standaid.ai"
       : window.location.origin;
     const { error } = await supabase.auth.signUp({
       email,
@@ -80,7 +80,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const resendConfirmation = async (email: string) => {
     const redirectTo = window.location.origin.includes("localhost")
-      ? "https://standaid-9mas.vercel.app"
+      ? "https://app.standaid.ai"
       : window.location.origin;
     const { error } = await supabase.auth.resend({
       type: "signup",
@@ -92,7 +92,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const resetPassword = async (email: string) => {
     const origin = window.location.origin.includes("localhost")
-      ? "https://standaid-9mas.vercel.app"
+      ? "https://app.standaid.ai"
       : window.location.origin;
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${origin}/auth`,
