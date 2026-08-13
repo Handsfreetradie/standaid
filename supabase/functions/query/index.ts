@@ -26,7 +26,16 @@ const PROMPT_VERSION = await (async () => {
 // realistic marker length) holds back enough of the stream so the marker
 // can't be split across two forwarded chunks.
 const MARKER_RE = /-{0,3}\s*METADATA\s*-{0,3}/i;
-const MARKER_SAFE_MARGIN = 24;
+// Confirmed live (2026-08-13): the model sometimes drops the "---METADATA---"
+// line entirely and goes straight from prose into the JSON, with nothing for
+// MARKER_RE to catch — so the raw JSON streamed live to the client until the
+// post-stream fallback below stripped it back out on the "done" event (a
+// visible flash-then-vanish of "citations":[...} etc). None of these top-level
+// metadata keys can plausibly appear in normal prose, so matching on the
+// earliest one is a reliable second trigger to stop the live stream even
+// when the marker never shows up.
+const JSON_TAIL_KEY_RE = /"(?:citations|figures_referenced|tables_referenced|safety_critical|confidence|answer_found|clarification_question)"\s*:/;
+const MARKER_SAFE_MARGIN = 40;
 
 // Haiku reranking. RRF orders candidates by cross-channel agreement, but a
 // chunk can rank high on keyword overlap while being tangential to the actual
@@ -1076,15 +1085,25 @@ User's question/context: ${effectiveQuestion}` : "";
 
               if (!pastSeparator) {
                 const markerMatch = accumulated.match(MARKER_RE);
-                if (markerMatch && markerMatch.index !== undefined) {
-                  // Marker found — send any buffered answer text before it
-                  const unsent = accumulated.slice(lastSentIdx, markerMatch.index);
+                let splitIndex: number | undefined = markerMatch?.index;
+                if (splitIndex === undefined) {
+                  // Marker never showed — fall back to detecting the metadata
+                  // JSON's own onset so it still can't leak into the stream.
+                  const keyMatch = accumulated.match(JSON_TAIL_KEY_RE);
+                  if (keyMatch && keyMatch.index !== undefined) {
+                    const braceIdx = accumulated.lastIndexOf("{", keyMatch.index);
+                    splitIndex = braceIdx !== -1 ? braceIdx : keyMatch.index;
+                  }
+                }
+                if (splitIndex !== undefined) {
+                  // Split point found — send any buffered answer text before it
+                  const unsent = accumulated.slice(lastSentIdx, splitIndex);
                   if (unsent.trim()) {
                     await writer.write(encoder.encode(`data: ${JSON.stringify({ token: unsent })}\n\n`));
                   }
                   pastSeparator = true;
                 } else {
-                  // Send up to (length - margin) to avoid splitting the marker across chunks
+                  // Send up to (length - margin) to avoid splitting the marker/JSON-key across chunks
                   const safeEnd = Math.max(lastSentIdx, accumulated.length - MARKER_SAFE_MARGIN);
                   if (safeEnd > lastSentIdx) {
                     const toSend = accumulated.slice(lastSentIdx, safeEnd);
