@@ -996,6 +996,7 @@ export type Database = {
           extraction_quality_score: number | null
           extraction_status: Database["public"]["Enums"]["extraction_status"]
           failed_chunks_count: number
+          failed_chunks_labels: string[]
           file_path: string | null
           file_url: string | null
           id: string
@@ -1015,6 +1016,7 @@ export type Database = {
           extraction_quality_score?: number | null
           extraction_status?: Database["public"]["Enums"]["extraction_status"]
           failed_chunks_count?: number
+          failed_chunks_labels?: string[]
           file_path?: string | null
           file_url?: string | null
           id?: string
@@ -1034,6 +1036,7 @@ export type Database = {
           extraction_quality_score?: number | null
           extraction_status?: Database["public"]["Enums"]["extraction_status"]
           failed_chunks_count?: number
+          failed_chunks_labels?: string[]
           file_path?: string | null
           file_url?: string | null
           id?: string

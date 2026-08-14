@@ -339,18 +339,26 @@ serve(async (req) => {
         .eq("is_indexed", true);
 
       // Chunks that hit the retry cap without ever embedding are permanently
-      // missing from search — surface the count so the UI can tell the user,
-      // instead of silently serving an incomplete document.
-      const { count: failedCount } = await supabaseAdmin
+      // missing from search — surface which ones so the UI can name them,
+      // instead of silently serving an incomplete document or only showing a
+      // bare count. Row-select (not head:true) so count and labels come from
+      // one round trip and can never drift apart.
+      const { data: failedRows } = await supabaseAdmin
         .from("standard_chunks")
-        .select("id", { count: "exact", head: true })
+        .select("clause_number")
         .eq("standard_id", standard_id)
         .is("embedding", null)
         .gte("index_attempts", 3);
+      const failedLabels = (failedRows || []).map((r) => r.clause_number).filter(Boolean) as string[];
 
       await supabaseAdmin
         .from("standards")
-        .update({ extraction_status: "complete", indexed_chunks: indexedCount || 0, failed_chunks_count: failedCount || 0 })
+        .update({
+          extraction_status: "complete",
+          indexed_chunks: indexedCount || 0,
+          failed_chunks_count: failedLabels.length,
+          failed_chunks_labels: failedLabels,
+        })
         .eq("id", standard_id);
 
       await supabaseAdmin

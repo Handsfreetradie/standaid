@@ -725,8 +725,8 @@ const StandardsUpload = () => {
 
         <p className="text-xs text-muted-foreground text-center mt-8">
           {canBackground
-            ? "Large documents take longer — it's safe to leave this running. Note: figure images only finish extracting while this screen stays open."
-            : "This may take a minute depending on document size."}
+            ? "Taking a while? Processing continues on our servers even if you close this page — check your library in a few minutes."
+            : "This may take a minute depending on document size. Larger documents can be safely left to finish in the background."}
         </p>
 
         {canBackground && (

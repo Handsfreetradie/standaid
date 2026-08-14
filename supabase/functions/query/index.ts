@@ -6,6 +6,14 @@ import { validateResponse } from "./validation.ts";
 import { getAllowedOrigin } from "../_shared/cors.ts";
 import { expandQuery, TRADIE_SYNONYMS } from "./synonyms.ts";
 import { logTokenUsage } from "../_shared/log-usage.ts";
+import {
+  extractSignificantTerms,
+  extractExplicitRefs,
+  matchesFailedItem,
+  describeFailedItem,
+  buildKnownGapsContext,
+  type FailedItem,
+} from "./known-gaps.ts";
 
 // Hash of the prompt + synonym logic, computed once per cold start. Cached
 // answers are tagged with this on write and only reused on read if it still
@@ -690,6 +698,18 @@ serve(async (req) => {
       const cn = (c.clause_number || "").toString().trim();
       if (/^\d+(?:\.\d+){1,4}$/.test(cn) && cn.includes(".")) {
         clauseRefs.add(cn.slice(0, cn.lastIndexOf(".")));
+        // Sections conventionally put the core defining rule (dimensions,
+        // zones, ratings) in the section's own ".2" clause (e.g. "6.4.2
+        // Classification of zones"), while deeper device-specific
+        // sub-clauses (6.4.4.6 "Switchboards") just say permitted/not
+        // permitted without repeating the number or the figure it comes
+        // from. A match on the sub-clause alone misses that defining
+        // clause. Confirmed live: a "switchboard 1.2m from a fountain"
+        // question matched 6.4.4.6 but never pulled in 6.4.2, so the
+        // answer couldn't state the actual 2.0 m boundary or cite
+        // Figures 6.20/6.21, which only 6.4.2 references.
+        const segs = cn.split(".");
+        if (segs.length >= 3) clauseRefs.add(`${segs[0]}.${segs[1]}.2`);
       }
     }
     const haveClauseNums = new Set(matchedChunks.map((c: any) => (c.clause_number || "").toString().trim()));
@@ -895,6 +915,46 @@ serve(async (req) => {
       }
     }
 
+    // Known-gaps check — does the question plausibly concern a figure/table
+    // that permanently failed vision processing (3 retries exhausted)? Those
+    // chunks are correctly invisible to normal retrieval (is_indexed stays
+    // false forever), so without this a real, permanent gap in the user's
+    // standard produces either a generic "couldn't find relevant content"
+    // refusal (confirmed live: "show me minimum earth size table" on AS/NZS
+    // 3000) or an answer that just never mentions the thing they asked about.
+    // Scoped by ownershipFilter, not standardIds (derived from matchedChunks)
+    // — standardIds can be empty in exactly the refusal-gate scenario this
+    // is meant to fix, so a narrower scope would miss the case that matters.
+    const { data: failedItemsRaw } = await supabase
+      .from("standard_chunks")
+      .select("standard_id, clause_number, clause_title, page_number")
+      .or(ownershipFilter)
+      .is("embedding", null)
+      .gte("index_attempts", 3)
+      .or("clause_number.ilike.TABLE%,clause_number.ilike.FIGURE%")
+      .limit(200);
+    const knownGapQuestionTerms = extractSignificantTerms(effectiveQuestion);
+    const knownGapExplicitRefs = extractExplicitRefs(effectiveQuestion);
+    const matchedFailedItems: FailedItem[] = (failedItemsRaw || []).filter((i: FailedItem) =>
+      matchesFailedItem(i, knownGapQuestionTerms, knownGapExplicitRefs),
+    );
+    // matchedFailedItems can reference a standard that contributed nothing to
+    // matchedChunks (that's the exact case this feature exists for), so
+    // standardMap may not have it yet — fetch and merge in any that are missing.
+    const missingStdIds = [...new Set(matchedFailedItems.map((i) => i.standard_id))]
+      .filter((id) => !standardMap.has(id));
+    if (missingStdIds.length > 0) {
+      const { data: missingStds } = await supabase
+        .from("standards")
+        .select("id, standard_code, version, title")
+        .in("id", missingStdIds);
+      for (const s of missingStds || []) standardMap.set(s.id, s);
+    }
+    const knownGapStandardLabel = (standardId: string) => {
+      const std = standardMap.get(standardId);
+      return std?.standard_code || std?.title || "your standard";
+    };
+
     // Corrections from past user feedback — injected before Claude answers so it
     // can avoid repeating mistakes flagged on similar questions.
     const correctionsContext = feedbackCorrections.length > 0
@@ -923,7 +983,8 @@ serve(async (req) => {
           const std = standardMap.get(chunk.standard_id);
           return `[Source ${i + 1} — ${std?.standard_code || "Unknown"} ${std?.version || ""} Clause ${chunk.clause_number || "N/A"} (Page ${chunk.page_number || "N/A"})${chunkTag(chunk)}]
 ${chunk.content}`;
-        }).join("\n\n") + tableRowContext + figCaptionContext + correctionsContext
+        }).join("\n\n") + tableRowContext + figCaptionContext + correctionsContext +
+        buildKnownGapsContext(matchedFailedItems, knownGapStandardLabel)
       : null;
 
     // Refusal gate — refuse to fabricate rather than answer from weak context.
@@ -936,6 +997,43 @@ ${chunk.content}`;
     // sailed through to Claude with irrelevant context and got answered from
     // training memory.
     if (contextChunks === null || (!hasExactClauseHit && maxVectorSim < 0.40)) {
+      // A known permanent gap explains this better than the generic refusal —
+      // deterministic and free (no LLM call), and names the real cause instead
+      // of leaving the user to wonder if they phrased it wrong or the standard
+      // isn't uploaded. Bypasses the LLM entirely: matchedFailedItems is a
+      // strict, pre-verified match (see known-gaps.ts), so there's nothing for
+      // a model call to add here. Populates figures_referenced/tables_referenced
+      // in the normal shape so StandardClipImage still renders a live crop —
+      // it reads straight from the PDF and doesn't depend on the server-side
+      // vision transcription that failed.
+      if (matchedFailedItems.length > 0) {
+        const item = matchedFailedItems[0];
+        const { kind, number, sentence } = describeFailedItem(item, knownGapStandardLabel(item.standard_id));
+        const isTable = kind === "Table";
+        const ref = {
+          standard_id: item.standard_id,
+          [isTable ? "table_number" : "figure_number"]: number,
+          caption: item.clause_title,
+          page_number: item.page_number,
+        };
+        const knownGapPayload = {
+          done: true,
+          answer: sentence,
+          answer_found: false,
+          citations: [],
+          figures_referenced: isTable ? [] : [ref],
+          tables_referenced: isTable ? [ref] : [],
+          safety_critical: false,
+          confidence: "low",
+          low_confidence: true,
+          queries_remaining: tier === "free" ? Math.max(0, maxQueries - todayCount) : null,
+        };
+        return new Response(
+          `data: ${JSON.stringify(knownGapPayload)}\n\n`,
+          { headers: { ...corsHeaders, "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } }
+        );
+      }
+
       const noChunksPayload = {
         done: true,
         answer: "I couldn't find relevant content in your uploaded standards for this query. Please check that the relevant standard has been uploaded and fully processed, or try rephrasing your question.",
@@ -1388,14 +1486,35 @@ User's question/context: ${effectiveQuestion}` : "";
           parsedResponse.figures_referenced = (await Promise.all(aiFigures.map(async (f: any) => {
             const hintStdId = resolveStdId(f.standard_code);
             const row = hintStdId ? figMap.get(`${hintStdId}::${f.figure_number}`) : figMapByNum.get(f.figure_number);
+            // The chunk's own page_number is authoritative for WHERE the
+            // figure actually is — it comes straight from the extraction
+            // pipeline and is what StandardClipImage crops against, so it's
+            // never allowed to be second-guessed by a stale standard_figures
+            // row. That row's page_number was captured once, at upload time,
+            // by a browser-side pass that no longer exists (removed in favour
+            // of on-demand crops) — if a standard was ever re-indexed after
+            // that capture, the row is frozen at the old page while the chunk
+            // moved on. Confirmed live: AS3017's standard_figures had four
+            // different figures (3.10, 3.11, 3.12, 3.14) all stuck on
+            // page_number 11, while their real chunk pages were 24/10/25/27 —
+            // exactly the "every figure opens on the same wrong page" bug.
+            const dbHit = hintStdId ? figChunkMap.get(`${hintStdId}::${f.figure_number}`) : figChunkMapByNum.get(f.figure_number);
+            if (dbHit) {
+              const signed = row?.image_url ? await signImageUrl(row.image_url) : null;
+              return { ...f, image_url: signed, caption: f.caption || row?.caption, page_number: dbHit.page_number, standard_id: dbHit.standard_id };
+            }
+            // No chunk at all for this figure — fall back to the row (still
+            // better than nothing) rather than dropping the citation.
             if (row?.image_url) {
               const signed = await signImageUrl(row.image_url);
               return { ...f, image_url: signed, caption: f.caption || row.caption, page_number: row.page_number, standard_id: row.standard_id };
             }
+            // findPageInChunks is scoped to this query's small retrieved-chunk
+            // set and its loose fallback can match a clause that merely
+            // mentions this figure in passing prose, landing on that clause's
+            // page instead of the figure's own — last resort only.
             const pi = findPageInChunks("Figure", f.figure_number, hintStdId ?? undefined);
             if (pi) return { ...f, page_number: pi.page_number, standard_id: pi.standard_id };
-            const dbHit = hintStdId ? figChunkMap.get(`${hintStdId}::${f.figure_number}`) : figChunkMapByNum.get(f.figure_number);
-            if (dbHit) return { ...f, page_number: dbHit.page_number, standard_id: dbHit.standard_id };
             if (hintStdId) return { ...f, standard_id: hintStdId, page_number: null };
             return null;
           }))).filter(Boolean);
@@ -1403,14 +1522,16 @@ User's question/context: ${effectiveQuestion}` : "";
           parsedResponse.tables_referenced = aiTables.map((t: any) => {
             const hintStdId = resolveStdId(t.standard_code);
             const row = hintStdId ? tblMap.get(`${hintStdId}::${t.table_number}`) : tblMapByNum.get(t.table_number);
-            // standard_tables rows carry the authoritative caption page even
-            // when image_url is empty (tables use the PDF page link, not an
-            // image) — prefer that over scanning chunks.
+            // Same fix as figures above, and for the same reason: the chunk's
+            // page_number is authoritative, the standard_tables row's can be
+            // stale from an earlier extraction pass. Still take image_url/
+            // caption from the row when present — those aren't affected by
+            // re-indexing the same way a page number is.
+            const dbHit = hintStdId ? tblChunkMap.get(`${hintStdId}::${t.table_number}`) : tblChunkMapByNum.get(t.table_number);
+            if (dbHit) return { ...t, image_url: row?.image_url || null, caption: t.caption || row?.caption, page_number: dbHit.page_number, standard_id: dbHit.standard_id };
             if (row) return { ...t, image_url: row.image_url || null, caption: t.caption || row.caption, page_number: row.page_number, standard_id: row.standard_id };
             const pi = findPageInChunks("Table", t.table_number, hintStdId ?? undefined);
             if (pi) return { ...t, page_number: pi.page_number, standard_id: pi.standard_id };
-            const dbHit = hintStdId ? tblChunkMap.get(`${hintStdId}::${t.table_number}`) : tblChunkMapByNum.get(t.table_number);
-            if (dbHit) return { ...t, page_number: dbHit.page_number, standard_id: dbHit.standard_id };
             if (hintStdId) return { ...t, standard_id: hintStdId, page_number: null };
             return null;
           }).filter(Boolean);

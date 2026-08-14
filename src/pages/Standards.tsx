@@ -19,6 +19,26 @@ const statusIcon = {
   failed: <AlertCircle className="h-4 w-4 text-destructive" />,
 };
 
+// "TABLE 5.1" -> "Table 5.1" — the raw clause_number as stored, not meant for
+// display as-is.
+function titleCaseLabel(label: string): string {
+  return label.replace(/^(TABLE|FIGURE)\b/i, (m) => m[0].toUpperCase() + m.slice(1).toLowerCase());
+}
+
+// Names the specific figures/tables that permanently failed, rather than a
+// bare count that gives the reader no way to judge if it matters to them.
+// Falls back to the count alone for any standard whose labels haven't been
+// backfilled/recomputed yet (labels array empty but count > 0).
+export function formatFailedLabels(labels: string[] | null | undefined, count: number): string {
+  const list = (labels || []).filter(Boolean);
+  if (list.length === 0) {
+    return `${count} figure${count === 1 ? "" : "s"}/table${count === 1 ? "" : "s"}`;
+  }
+  const shown = list.slice(0, 3).map(titleCaseLabel);
+  const extra = list.length - shown.length;
+  return extra > 0 ? `${shown.join(", ")} and ${extra} more` : shown.join(", ");
+}
+
 const Standards = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [pdfViewer, setPdfViewer] = useState<{ standardId: string; standardCode: string } | null>(null);
@@ -226,7 +246,7 @@ const Standards = () => {
                     {(s.failed_chunks_count || 0) > 0 && (
                       <p className="text-xs text-amber-600 dark:text-amber-500 flex items-center gap-1">
                         <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
-                        {s.failed_chunks_count} figure{s.failed_chunks_count === 1 ? "" : "s"}/table{s.failed_chunks_count === 1 ? "" : "s"} couldn't
+                        {formatFailedLabels(s.failed_chunks_labels, s.failed_chunks_count)} couldn't
                         be processed — the rest of the document is fully searchable.
                       </p>
                     )}
