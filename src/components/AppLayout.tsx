@@ -80,7 +80,7 @@ const AppLayout = () => {
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         {/* Mobile header only */}
         <header
-          className={`md:hidden flex-shrink-0 z-40 px-5 py-3 transition-all duration-300 ${
+          className={`md:hidden flex-shrink-0 z-40 px-5 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] transition-all duration-300 ${
             mounted ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2"
           } ${
             scrolled
