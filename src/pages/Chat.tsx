@@ -468,6 +468,20 @@ const Chat = () => {
     ]);
   }, []);
 
+  // Opens a specific past question/answer when navigated here with one (the
+  // home page's Recent Activity cards) — same restore path as picking one
+  // from the History drawer, just arriving via route state instead of a
+  // click inside this page. Runs once on mount, same pattern as the ?q= and
+  // seedMessage prefill above.
+  useEffect(() => {
+    const openQuery = (location.state as { openQuery?: HistoryItem } | null)?.openQuery;
+    if (openQuery) {
+      openFromHistory(openQuery);
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Top bar — history access */}

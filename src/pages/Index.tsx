@@ -168,7 +168,7 @@ const Index = () => {
               <Card
                 key={q.id}
                 className="flex items-center justify-between p-4 cursor-pointer hover:shadow-sm transition-shadow"
-                onClick={() => navigate("/chat")}
+                onClick={() => navigate("/chat", { state: { openQuery: q } })}
               >
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-foreground truncate">{q.question}</p>

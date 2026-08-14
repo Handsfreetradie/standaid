@@ -88,12 +88,17 @@ export default {
           "0%, 60%, 100%": { transform: "translateY(0)", opacity: "0.35" },
           "30%": { transform: "translateY(-5px)", opacity: "1" },
         },
+        "shield-pulse": {
+          "0%, 100%": { transform: "scale(1)", opacity: "1" },
+          "50%": { transform: "scale(1.08)", opacity: "0.85" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "pulse-red": "pulse-red 2s ease-in-out infinite",
         "thinking-dot": "thinking-dot 1.2s ease-in-out infinite",
+        "shield-pulse": "shield-pulse 1.8s ease-in-out infinite",
       },
     },
   },

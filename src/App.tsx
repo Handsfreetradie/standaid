@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { ProgressProvider } from "@/hooks/useProgress";
 import AppLayout from "./components/AppLayout";
+import { AppLoader } from "./components/AppLoader";
 import Index from "./pages/Index";
 import Standards from "./pages/Standards";
 import Tools from "./pages/Tools";
@@ -58,11 +59,7 @@ class ErrorBoundary extends React.Component<
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
-  if (loading) return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-    </div>
-  );
+  if (loading) return <AppLoader />;
   if (!user) return <Navigate to="/auth" replace />;
   if (!user.email_confirmed_at) {
     return (
@@ -79,7 +76,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function AuthRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
-  if (loading) return null;
+  if (loading) return <AppLoader />;
   if (user) return <Navigate to="/" replace />;
   return <>{children}</>;
 }

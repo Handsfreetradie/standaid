@@ -25,6 +25,33 @@
   <meta property="og:description" content="AI-powered compliance assistant for trade professionals. Upload standards, ask questions, get clause-referenced answers.">
   <meta name="twitter:description" content="AI-powered compliance assistant for trade professionals. Upload standards, ask questions, get clause-referenced answers.">
   <link rel="icon" type="image/png" href="/pwa-192.png">
+
+  <style>
+    /* Covers the gap between first paint and React mounting — same shield
+       icon and pulse the app itself uses once JS is running (App.tsx's
+       AppLoader), kept as plain inline CSS since neither Tailwind nor any
+       app stylesheet is guaranteed loaded yet at this point. Wiped out the
+       instant React calls render() on #root. */
+    #root:empty {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #root:empty::before {
+      content: "";
+      width: 64px;
+      height: 64px;
+      border-radius: 16px;
+      background-image: url("/pwa-192.png");
+      background-size: cover;
+      animation: shield-boot-pulse 1.8s ease-in-out infinite;
+    }
+    @keyframes shield-boot-pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.08); opacity: 0.85; }
+    }
+  </style>
 </head>
 
   <body>
