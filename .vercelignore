@@ -1,10 +1,10 @@
 # Large loose files that don't belong in a Vercel deploy upload — Vite only
 # needs src/, public/, and config files to build. Keeping these out cuts a
 # ~550MB CLI upload down to what git already tracks.
-standaid.zip
-*.pdf
-marketing
-Practice assessments to do
-*.png
+/standaid.zip
+/*.pdf
+/marketing
+/Practice assessments to do
+/*.png
 /supabase
 .claude
