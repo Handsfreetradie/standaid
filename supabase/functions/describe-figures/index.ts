@@ -88,11 +88,18 @@ serve(async (req) => {
       });
     }
 
-    // Only table chunks that carry the transcription placeholder get a vision
-    // pass — reference-only table chunks (no caption found) have no known
-    // page to photograph and embed as-is.
+    // Only chunks that carry their type's placeholder get a vision pass —
+    // reference-only chunks (no caption found) have no known page to
+    // photograph and embed as-is. Figures used to bypass this check entirely
+    // (any FIGURE-prefixed chunk qualified regardless of content), unlike
+    // tables — meaning every reference-only figure (never captioned, only
+    // ever mentioned) got sent to vision anchored to wherever it was
+    // mentioned, permanently failing every time no matter how many retries.
+    // extraction.ts now only emits the figure placeholder when a real
+    // caption was actually found, so this filter can gate on it exactly like
+    // tables always have.
     const workChunks: WorkChunk[] = (figureChunks || []).filter((c: WorkChunk) =>
-      c.clause_number?.toUpperCase().startsWith("FIGURE") ||
+      (c.content || "").includes("visual description will be generated shortly") ||
       (c.content || "").includes("transcription of this table will be generated shortly")
     );
 

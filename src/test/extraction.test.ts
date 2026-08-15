@@ -13,6 +13,7 @@ import {
   buildDocumentMapChunk,
   stripRepeatedPageFurniture,
   findGapPages,
+  looksLikeRealCaption,
 } from "../../supabase/functions/process-standard/extraction";
 
 describe("convertPdfToBase64", () => {
@@ -167,6 +168,124 @@ describe("extractFigureChunks", () => {
     expect(f31[0].page_number).toBe(7);
     expect(f31[0].clause_title).toBe("Zone dimensions for baths");
     expect(chunks.some((c) => c.clause_number === "FIGURE 3.4")).toBe(true);
+  });
+});
+
+// Golden regression suite for the caption-fabrication bug found live against
+// the real AS/NZS 3000 PDF: entries that were never real captions (wrapped
+// sentence fragments, table-body data misread as a caption line) were being
+// treated as real, vision-eligible tables/figures — permanently failing
+// every retry, since the vision model was correctly being asked to find a
+// caption that never existed on that page. Confirmed the exact-match check
+// below resolves every one of the standard's actually-observed permanent
+// failures (7 tables, 5 figures) before this fix shipped.
+describe("looksLikeRealCaption", () => {
+  it("rejects punctuation-only and data-fragment titles", () => {
+    expect(looksLikeRealCaption(".")).toBe(false);
+    expect(looksLikeRealCaption("]")).toBe(false);
+    expect(looksLikeRealCaption(">100>100>100>100>100")).toBe(false);
+    expect(looksLikeRealCaption("11S5 S3 S1")).toBe(false);
+  });
+
+  it("accepts a title with at least one real word", () => {
+    expect(looksLikeRealCaption("Minimum Size of Earthing Conductor")).toBe(true);
+    expect(looksLikeRealCaption("MAXIMUM DEMAND")).toBe(true);
+  });
+});
+
+describe("extractTableChunks — garbage caption guardrail", () => {
+  it("rejects a wrapped sentence fragment as a table caption ('Table 3.1.' alone on a line)", () => {
+    // Real bug: "...are depicted in Table 3.1." wraps so "Table 3.1." lands
+    // alone on its own line, matching the caption pattern with only the
+    // trailing period surviving as "title" — anchored the fake table to this
+    // sentence's page instead of the real heading elsewhere in the document.
+    const doc = [
+      "[PAGE 176]",
+      "Installation methods for typical types of wiring systems are depicted in",
+      "Table 3.1.",
+      "The effect of external influences at the installation shall be considered.",
+    ].join("\n");
+    const chunks = extractTableChunks(doc, "AS/NZS 3000", "2018");
+    const t31 = chunks.find((c) => c.clause_number === "TABLE 3.1");
+    expect(t31).toBeDefined();
+    expect(t31!.clause_title).toBeNull();
+    expect(t31!.content).not.toContain("will be generated shortly");
+  });
+
+  it("rejects table-body data misread as a caption (no real word in the title)", () => {
+    // Real bug: "TABLE 125" doesn't exist anywhere in AS/NZS 3000 — repeated
+    // cell values (">100") got misread as a caption line, fabricating a
+    // table number that was never real.
+    const doc = ["[PAGE 492]", "TABLE 125 >100>100>100>100>100"].join("\n");
+    const chunks = extractTableChunks(doc, "AS/NZS 3000", "2018");
+    const t125 = chunks.find((c) => c.clause_number === "TABLE 125");
+    expect(t125).toBeDefined();
+    expect(t125!.clause_title).toBeNull();
+    expect(t125!.content).not.toContain("will be generated shortly");
+  });
+
+  it("rejects a strength-rating code fragment misread as a table number/caption", () => {
+    // Real bug: appendix pole-strength codes (S20, S21, S24...) inside a
+    // table's own body ran together without spaces and got misread as if
+    // the codes themselves were the table's number and caption, shadowing
+    // the real caption ("Table D5"/"Table D6") elsewhere on the same page.
+    const doc = ["[PAGE 514]", "TABLE S20S 11S5 S3 S1"].join("\n");
+    const chunks = extractTableChunks(doc, "AS/NZS 3000", "2018");
+    const s20s = chunks.find((c) => c.clause_number === "TABLE S20S");
+    expect(s20s).toBeDefined();
+    expect(s20s!.clause_title).toBeNull();
+    expect(s20s!.content).not.toContain("will be generated shortly");
+  });
+
+  it("keeps a bare 'TABLE 5.1' heading as a real caption even with no subtitle found nearby (regression guard)", () => {
+    // A genuine all-caps TABLE heading must stay a real, vision-eligible
+    // caption even when no title text follows it — must not be conflated
+    // with the garbage-title demotion above (an EMPTY title is not the same
+    // failure as a JUNK title, and only the latter should ever be demoted).
+    const doc = ["[PAGE 300]", "TABLE 5.1"].join("\n");
+    const chunks = extractTableChunks(doc, "AS/NZS 3000", "2018");
+    const t51 = chunks.find((c) => c.clause_number === "TABLE 5.1");
+    expect(t51).toBeDefined();
+    expect(t51!.content).toContain("will be generated shortly");
+  });
+});
+
+describe("extractFigureChunks — garbage caption guardrail", () => {
+  it("rejects a wrapped sentence fragment as a figure caption", () => {
+    const doc = [
+      "[PAGE 50]",
+      "The wiring arrangement is shown in",
+      "Figure 4.20.",
+      "Additional notes on installation follow.",
+    ].join("\n");
+    const chunks = extractFigureChunks(doc, "AS/NZS 3000", "2018");
+    const f420 = chunks.find((c) => c.clause_number === "FIGURE 4.20");
+    expect(f420).toBeDefined();
+    expect(f420!.clause_title).toBeNull();
+    expect(f420!.content).not.toContain("will be generated shortly");
+  });
+
+  it("does not queue a reference-only figure (never captioned) for vision", () => {
+    // Real bug: previously EVERY figure got the vision placeholder
+    // unconditionally, regardless of whether a real caption was ever found —
+    // 15 of 123 figures in the real AS/NZS 3000 PDF were never captioned,
+    // only ever mentioned, and were still sent to vision anchored to the
+    // mention's page, permanently failing every time.
+    const doc = ["[PAGE 20]", "See Figure 9.9 for an example switchboard layout."].join("\n");
+    const chunks = extractFigureChunks(doc, "AS/NZS 3000", "2018");
+    const f99 = chunks.find((c) => c.clause_number === "FIGURE 9.9");
+    expect(f99).toBeDefined();
+    expect(f99!.clause_title).toBeNull();
+    expect(f99!.content).not.toContain("will be generated shortly");
+  });
+
+  it("keeps a real captioned figure exactly as before (regression guard)", () => {
+    const doc = ["[PAGE 7]", "Figure 3.1 — Zone dimensions for baths", "diagram content"].join("\n");
+    const chunks = extractFigureChunks(doc, "AS/NZS 3000", "2018");
+    const f31 = chunks.find((c) => c.clause_number === "FIGURE 3.1");
+    expect(f31).toBeDefined();
+    expect(f31!.clause_title).toBe("Zone dimensions for baths");
+    expect(f31!.content).toContain("A visual description will be generated shortly.");
   });
 });
 

@@ -741,6 +741,17 @@ function findNumericHeadingMatch(
   return null;
 }
 
+// Requires at least one real word (3+ letters) — filters out "captions" that
+// are actually sentence-fragment punctuation (".", "]") or table/figure body
+// data that got misread as a caption (">100>100...", "11S5 S3 S1"). Confirmed
+// live against the real AS/NZS 3000 PDF: this exact check catches every one
+// of the standard's actually-observed permanently-failed tables, plus
+// previously-unnoticed bad figures — none of these were ever real captions,
+// so no amount of retrying their vision transcription could ever succeed.
+export function looksLikeRealCaption(title: string): boolean {
+  return /[a-z]{3,}/i.test(title);
+}
+
 export function extractTableChunks(text: string, standardCode: string, version: string): Chunk[] {
   const lines = text.split("\n");
   const pageMarker = /^\[PAGE\s+(\d+)\]/i;
@@ -793,7 +804,19 @@ export function extractTableChunks(text: string, standardCode: string, version: 
     // reference, not a caption — treating it as one anchored table chunks to
     // random prose at the wrong page. Demote it to reference rank.
     if (/^[a-z]/.test(title)) title = "";
-    const effectiveRank = rank === 1 && !title ? 0 : rank;
+    let effectiveRank = rank === 1 && !title ? 0 : rank;
+    // A non-empty "title" that's just punctuation or misread table body data
+    // run together (".", "]", ">100>100...", strength-rating codes like
+    // "S20S3S1" from an appendix table's own cells) is not a real caption
+    // either, whatever rank it was given — demote regardless, so it's never
+    // queued for a vision call asking to find a caption that doesn't exist.
+    // Confirmed live against the real AS/NZS 3000 PDF: every one of the
+    // standard's actually-observed permanently-failed tables had exactly
+    // this shape of "title".
+    if (title && !looksLikeRealCaption(title)) {
+      title = "";
+      effectiveRank = 0;
+    }
     const existing = tables.get(tableNum);
     if (!existing || existing.rank < effectiveRank) {
       tables.set(tableNum, { title, lineIdx: i, rank: effectiveRank });
@@ -934,6 +957,12 @@ export function extractFigureChunks(text: string, standardCode: string, version:
         }
       }
     }
+    // A "caption" that's just punctuation or misread figure/table body data
+    // run together is not a real caption — same check and same reasoning as
+    // extractTableChunks (see looksLikeRealCaption). Treat it as if no
+    // caption was found rather than anchoring a vision call to a page that
+    // was never going to have this figure's real caption on it.
+    if (caption && !looksLikeRealCaption(caption)) caption = "";
     // Prefer the entry that actually has a caption.
     const existing = figures.get(figNum);
     if (!existing || (!existing.caption && caption)) {
@@ -965,10 +994,19 @@ export function extractFigureChunks(text: string, standardCode: string, version:
     const { caption, lineIdx } = figures.get(figNum)!;
     const page = getPage(lineIdx);
     const surrounding = lines.slice(lineIdx + 1, lineIdx + 6).map(l => l.trim()).filter(Boolean).filter(l => !/^\[PAGE\s+\d+\]/i.test(l)).join(" ");
+    // Only queue for vision when a real caption was actually found — mirrors
+    // extractTableChunks' rank>0 gate. A figure that's only ever referenced,
+    // never captioned, has no page a vision call could possibly succeed on;
+    // previously EVERY figure got this placeholder unconditionally (15 of
+    // 123 in the real AS/NZS 3000 PDF had no caption at all and were still
+    // being sent to vision, permanently failing every time).
+    const placeholder = caption
+      ? "\n\nA visual description will be generated shortly."
+      : "";
     chunks.push({
       clause_number: `FIGURE ${figNum}`,
       clause_title: caption || null,
-      content: `${label} Figure ${figNum}${caption ? ` — ${caption}` : ""}\n\nThis figure appears on page ${page} of the standard. A visual description will be generated shortly.\n\nContext: ${surrounding}`,
+      content: `${label} Figure ${figNum}${caption ? ` — ${caption}` : ""}\n\nThis figure appears on page ${page} of the standard.${placeholder}\n\nContext: ${surrounding}`,
       page_number: page,
       chunk_index: 0,
       chunk_type: "figure",
