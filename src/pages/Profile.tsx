@@ -304,9 +304,15 @@ const Profile = () => {
     }
   };
 
-  // Doesn't re-process anything itself — resets the retry counter so the
-  // existing resume-stalled-indexing cron (every 10 min) picks these specific
-  // items back up on its own next run, same as it did the first 3 times.
+  // Triggers a real reprocess-standard run against the stored PDF (not a
+  // counter reset) — the old buggy extraction baked a wrong page/label into
+  // these rows, so retrying against unchanged data just failed identically
+  // every time. Not free: reprocess-standard's own preserveDescribed
+  // carry-forward avoids re-billing already-working tables/figures, but
+  // genuinely new candidates (and OCR, if the standard needs it) cost real
+  // spend. None of reprocess-standard's responses mean "fully done" within
+  // this request — even a quick chunking pass still needs the async embed/
+  // describe steps afterward — so every outcome here is framed as "started".
   const retryFailedStandard = async (standardId: string) => {
     setRetryingStandardId(standardId);
     try {
@@ -314,11 +320,13 @@ const Profile = () => {
         body: { action: "retry", standard_id: standardId },
       });
       if (error) throw error;
-      const n = data?.retried || 0;
-      toast.success(n > 0 ? `Queued ${n} item${n === 1 ? "" : "s"} for retry — check back in ~10 min.` : "Nothing left to retry on this standard.");
-      loadFailedStandards();
+      if (data?.error) {
+        toast.error(data.error);
+      } else {
+        toast.success("Re-processing started — this can take a few minutes for a large standard, longer if it needs OCR. Check back on this list shortly.");
+      }
     } catch (e: any) {
-      toast.error(e?.message || "Couldn't queue a retry.");
+      toast.error(e?.message || "Couldn't start re-processing.");
     } finally {
       setRetryingStandardId(null);
     }
@@ -990,8 +998,9 @@ const Profile = () => {
                         <p className="text-xs text-muted-foreground">
                           Every standard, across every user, with a figure/table that permanently failed
                           processing (3 retries exhausted — invisible to users beyond the amber note on
-                          their own Standards page). Retry resets the counter so the existing background
-                          job picks it up again; it doesn't re-process anything itself.
+                          their own Standards page). Retry re-runs real extraction against the stored PDF —
+                          not free, but already-working tables/figures aren't re-billed, only genuinely new
+                          or changed ones are. Takes a few minutes, longer if the standard needs OCR.
                         </p>
                         {failedStandardsLoading && (
                           <div className="flex items-center justify-center py-6">

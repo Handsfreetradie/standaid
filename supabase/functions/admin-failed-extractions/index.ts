@@ -8,11 +8,18 @@ import { getAllowedOrigin } from "../_shared/cors.ts";
 // Standards page with no one but them ever seeing it. Same auth pattern as
 // admin-users (single hardcoded ADMIN_EMAIL, no app-wide roles table).
 //
-// Also accepts a retry action: resets index_attempts back to 0 for a
-// standard's stuck items (embedding IS NULL AND index_attempts >= 3) so the
-// existing resume-stalled-indexing cron picks them up again within ~10 min.
-// This is the exact mechanism a user-facing "Retry" button would have used —
-// kept here instead, admin-only, per the call to keep end users out of it.
+// Also accepts a retry action: triggers reprocess-standard for that standard,
+// so it goes through the real (now-fixed) extraction pipeline again — not
+// just a counter reset. A plain index_attempts reset was tried first, but it
+// asks the vision model to find a caption on the exact same (page, label) the
+// old buggy extraction stored — which was often simply wrong, so retrying
+// against unchanged data just fails identically every time. Re-running
+// extraction gives it a chance to store the RIGHT (page, label) this time.
+// Not free like the old reset: reprocess-standard's own preserveDescribed
+// carry-forward keeps already-working tables/figures from being re-billed,
+// but genuinely new/changed candidates (including a standard that needs OCR
+// re-run) do cost real API spend. Admin-only, same reasoning as the panel
+// itself — end users don't see or trigger this.
 
 const ADMIN_EMAIL = "kyledixonelectrical@gmail.com";
 
@@ -47,16 +54,17 @@ serve(async (req) => {
       const standardId = body.standard_id;
       if (!standardId || typeof standardId !== "string") return json({ error: "standard_id required" }, 400);
 
-      const { data: retried, error: retryError } = await supabaseAdmin
-        .from("standard_chunks")
-        .update({ index_attempts: 0 })
-        .eq("standard_id", standardId)
-        .is("embedding", null)
-        .gte("index_attempts", 3)
-        .select("id");
-      if (retryError) throw retryError;
+      const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+      const reprocessUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/reprocess-standard`;
+      const res = await fetch(reprocessUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceRoleKey}` },
+        body: JSON.stringify({ standard_id: standardId }),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) return json({ error: result?.error || "Re-processing failed to start." }, res.status);
 
-      return json({ retried: retried?.length || 0 });
+      return json(result);
     }
 
     const { data: failedStandards, error } = await supabaseAdmin
