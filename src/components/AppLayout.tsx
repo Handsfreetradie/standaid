@@ -102,9 +102,7 @@ const AppLayout = () => {
           <Outlet />
         </main>
 
-        <div className="flex-shrink-0 md:hidden">
-          <BottomNav />
-        </div>
+        <BottomNav />
       </div>
     </div>
     </>
