@@ -1853,24 +1853,24 @@ const Learn = () => {
           );
         })}
 
-        {scenarioResult.safety_considerations.length > 0 && (
+        {(scenarioResult.safety_considerations?.length ?? 0) > 0 && (
           <Card className="p-4 mb-4 bg-secondary/50">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Safety Considerations</p>
             <ul className="space-y-1">
-              {scenarioResult.safety_considerations.map((s, i) => (
+              {(scenarioResult.safety_considerations || []).map((s, i) => (
                 <li key={i} className="text-sm text-foreground">• {s}</li>
               ))}
             </ul>
           </Card>
         )}
 
-        {(scenarioResult.testing_steps.length > 0 || scenarioResult.certs_required.length > 0) && (
+        {((scenarioResult.testing_steps?.length ?? 0) > 0 || (scenarioResult.certs_required?.length ?? 0) > 0) && (
           <Card className="p-4 mb-4">
-            {scenarioResult.testing_steps.length > 0 && (
+            {(scenarioResult.testing_steps?.length ?? 0) > 0 && (
               <div className="mb-3">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Testing &amp; Verification</p>
                 <ul className="space-y-2">
-                  {scenarioResult.testing_steps.map((s, i) => {
+                  {(scenarioResult.testing_steps || []).map((s, i) => {
                     const key = `test-${i}`;
                     const done = !!scenarioChecked[key];
                     return (
@@ -1883,11 +1883,11 @@ const Learn = () => {
                 </ul>
               </div>
             )}
-            {scenarioResult.certs_required.length > 0 && (
-              <div className={scenarioResult.testing_steps.length > 0 ? "pt-3 border-t border-border" : ""}>
+            {(scenarioResult.certs_required?.length ?? 0) > 0 && (
+              <div className={(scenarioResult.testing_steps?.length ?? 0) > 0 ? "pt-3 border-t border-border" : ""}>
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Certificates &amp; Notifications</p>
                 <ul className="space-y-2">
-                  {scenarioResult.certs_required.map((s, i) => {
+                  {(scenarioResult.certs_required || []).map((s, i) => {
                     const key = `cert-${i}`;
                     const done = !!scenarioChecked[key];
                     return (
