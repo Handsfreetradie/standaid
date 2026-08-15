@@ -71,8 +71,8 @@ export function ChatHistory({ open, onOpenChange, onSelect }: ChatHistoryProps) 
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-[88vw] sm:w-[400px] p-0 flex flex-col">
-        <SheetHeader className="px-5 py-4 border-b border-border text-left" style={{ paddingTop: `calc(16px + env(safe-area-inset-top, 0px))` }}>
+      <SheetContent side="right" className="w-[88vw] sm:w-[400px] p-0 flex flex-col" style={{ marginTop: `env(safe-area-inset-top, 0px)` }}>
+        <SheetHeader className="px-5 py-4 border-b border-border text-left">
           <SheetTitle className="flex items-center gap-2 text-base">
             <History className="h-4 w-4 text-primary" />
             Recent questions

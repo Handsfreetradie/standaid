@@ -222,7 +222,10 @@ export function PDFViewerModal({ isOpen, onClose: rawOnClose, clauseNumber, stan
       {/* Modal container — sits above bottom nav, stops backdrop clicks via stopPropagation */}
       <div
         className="fixed inset-x-0 top-0 z-[101] flex items-end justify-center sm:items-center"
-        style={{ bottom: `calc(4rem + env(safe-area-inset-bottom, 0px))` }}
+        style={{
+          top: `env(safe-area-inset-top, 0px)`,
+          bottom: `calc(4rem + env(safe-area-inset-bottom, 0px))`
+        }}
         onClick={onClose}
       >
         <div
@@ -230,7 +233,7 @@ export function PDFViewerModal({ isOpen, onClose: rawOnClose, clauseNumber, stan
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0" style={{ paddingTop: `calc(12px + env(safe-area-inset-top, 0px))` }}>
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0">
             <FileText className="h-4 w-4 text-primary flex-shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-foreground truncate">{title}</p>
