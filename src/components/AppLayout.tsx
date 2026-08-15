@@ -30,7 +30,7 @@ const AppLayout = () => {
   return (
     <>
       <ProgressBar />
-      <div className="h-dvh flex overflow-hidden relative" style={{ background: 'linear-gradient(to right, #FFFFFF, #FFE8E8)' }}>
+      <div className="fixed inset-0 flex flex-col overflow-hidden" style={{ background: 'linear-gradient(to right, #FFFFFF, #FFE8E8)' }}>
       {/* SVG Noise texture overlay */}
       <svg className="noise-overlay" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
         <filter id="noise">
@@ -80,7 +80,7 @@ const AppLayout = () => {
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         {/* Mobile header only */}
         <header
-          className={`md:hidden flex-shrink-0 z-40 px-5 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] transition-all duration-300 ${
+          className={`md:hidden flex-shrink-0 z-40 px-5 pb-4 pt-[calc(env(safe-area-inset-top)+1rem)] transition-all duration-300 ${
             mounted ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2"
           } ${
             scrolled
@@ -98,7 +98,7 @@ const AppLayout = () => {
           </button>
         </header>
 
-        <main className="relative z-10 flex-1 overflow-hidden flex flex-col">
+        <main className="relative z-10 flex-1 overflow-y-auto flex flex-col md:overflow-hidden">
           <Outlet />
         </main>
 
