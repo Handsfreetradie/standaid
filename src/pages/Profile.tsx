@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { User, ChevronRight, ChevronDown, Shield, Zap, HelpCircle, LogOut, CreditCard, Bell, Mail, ExternalLink, CheckCircle2, BookOpen, FileText, CalendarDays, Loader2, Users, Gift, UserCog, Image as ImageIcon, X } from "lucide-react";
+import { User, ChevronRight, ChevronDown, Shield, Zap, HelpCircle, LogOut, CreditCard, Bell, Mail, ExternalLink, CheckCircle2, BookOpen, FileText, CalendarDays, Loader2, Users, Gift, UserCog, Image as ImageIcon, X, AlertTriangle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -272,6 +272,57 @@ const Profile = () => {
   };
 
   const formatCost = (n: number) => n < 0.01 && n > 0 ? "<$0.01" : `$${n.toFixed(2)}`;
+
+  type FailedStandardRow = {
+    id: string;
+    title: string;
+    standard_code: string | null;
+    user_id: string;
+    email: string;
+    failed_chunks_count: number;
+    failed_chunks_labels: string[];
+    extraction_quality_score: number | null;
+    total_chunks: number | null;
+    indexed_chunks: number | null;
+    created_at: string;
+  };
+  const [failedStandards, setFailedStandards] = useState<FailedStandardRow[] | null>(null);
+  const [failedStandardsLoading, setFailedStandardsLoading] = useState(false);
+  const [retryingStandardId, setRetryingStandardId] = useState<string | null>(null);
+
+  const loadFailedStandards = async () => {
+    setFailedStandardsLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("admin-failed-extractions", { body: {} });
+      if (error) throw error;
+      setFailedStandards(data?.standards ?? []);
+    } catch (e: any) {
+      console.error("[admin failed extractions] error:", e);
+      toast.error(e?.message || "Couldn't load failed extractions.");
+    } finally {
+      setFailedStandardsLoading(false);
+    }
+  };
+
+  // Doesn't re-process anything itself — resets the retry counter so the
+  // existing resume-stalled-indexing cron (every 10 min) picks these specific
+  // items back up on its own next run, same as it did the first 3 times.
+  const retryFailedStandard = async (standardId: string) => {
+    setRetryingStandardId(standardId);
+    try {
+      const { data, error } = await supabase.functions.invoke("admin-failed-extractions", {
+        body: { action: "retry", standard_id: standardId },
+      });
+      if (error) throw error;
+      const n = data?.retried || 0;
+      toast.success(n > 0 ? `Queued ${n} item${n === 1 ? "" : "s"} for retry — check back in ~10 min.` : "Nothing left to retry on this standard.");
+      loadFailedStandards();
+    } catch (e: any) {
+      toast.error(e?.message || "Couldn't queue a retry.");
+    } finally {
+      setRetryingStandardId(null);
+    }
+  };
 
   const displayName = profile?.display_name || user?.email?.split("@")[0] || "Tradie";
   const tradeLabel = profile?.trade_type
@@ -908,6 +959,91 @@ const Profile = () => {
                         <p className="text-[11px] text-muted-foreground">
                           {adminUsers ? `${adminUsers.length} user${adminUsers.length === 1 ? "" : "s"}` : ""} · showing latest 500
                           {adminTotalCost !== null ? ` · total spend: ${formatCost(adminTotalCost)}` : ""}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Failed Extractions — Kyle only */}
+                {isAdmin && (
+                  <div>
+                    <button
+                      onClick={() => {
+                        togglePanel("failed-extractions");
+                        if (activePanel !== "failed-extractions" && failedStandards === null) loadFailedStandards();
+                      }}
+                      className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-foreground hover:bg-secondary transition-colors min-h-[44px]"
+                    >
+                      <AlertTriangle className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
+                      <div className="flex-1 text-left">
+                        <span className="block">Failed Extractions</span>
+                        <span className="block text-xs text-muted-foreground font-normal mt-0.5">Admin only</span>
+                      </div>
+                      {activePanel === "failed-extractions"
+                        ? <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        : <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      }
+                    </button>
+                    {activePanel === "failed-extractions" && (
+                      <div className="px-3 pb-4 pt-1 space-y-3">
+                        <p className="text-xs text-muted-foreground">
+                          Every standard, across every user, with a figure/table that permanently failed
+                          processing (3 retries exhausted — invisible to users beyond the amber note on
+                          their own Standards page). Retry resets the counter so the existing background
+                          job picks it up again; it doesn't re-process anything itself.
+                        </p>
+                        {failedStandardsLoading && (
+                          <div className="flex items-center justify-center py-6">
+                            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                          </div>
+                        )}
+                        {!failedStandardsLoading && failedStandards && failedStandards.length === 0 && (
+                          <p className="text-xs text-muted-foreground">Nothing outstanding — all clear.</p>
+                        )}
+                        {!failedStandardsLoading && failedStandards && failedStandards.length > 0 && (
+                          <div className="space-y-2">
+                            {failedStandards.map((s) => (
+                              <div key={s.id} className="rounded-lg border border-border p-3 space-y-2">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-semibold text-foreground truncate">
+                                      {s.standard_code || s.title}
+                                    </p>
+                                    <p className="text-[11px] text-muted-foreground truncate" title={s.email}>
+                                      {s.email}
+                                    </p>
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 gap-1.5 text-xs flex-shrink-0"
+                                    disabled={retryingStandardId === s.id}
+                                    onClick={() => retryFailedStandard(s.id)}
+                                  >
+                                    {retryingStandardId === s.id
+                                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      : <RefreshCw className="h-3.5 w-3.5" />}
+                                    Retry
+                                  </Button>
+                                </div>
+                                <p className="text-[11px] text-amber-600 dark:text-amber-500">
+                                  {s.failed_chunks_labels?.length
+                                    ? s.failed_chunks_labels.slice(0, 6).join(", ") + (s.failed_chunks_labels.length > 6 ? ` and ${s.failed_chunks_labels.length - 6} more` : "")
+                                    : `${s.failed_chunks_count} item${s.failed_chunks_count === 1 ? "" : "s"}`}
+                                </p>
+                                <p className="text-[11px] text-muted-foreground">
+                                  {s.indexed_chunks ?? 0}/{s.total_chunks ?? 0} indexed
+                                  {s.extraction_quality_score != null ? ` · ${Math.round(s.extraction_quality_score)}% quality` : ""}
+                                  {" · "}
+                                  {new Date(s.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <p className="text-[11px] text-muted-foreground">
+                          {failedStandards ? `${failedStandards.length} standard${failedStandards.length === 1 ? "" : "s"}` : ""} · showing latest 200
                         </p>
                       </div>
                     )}
