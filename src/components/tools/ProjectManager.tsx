@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Trash2, Plus, ArrowLeft } from "lucide-react";
+import { Trash2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -203,21 +203,12 @@ const ProjectManager = ({ onBack }: Props) => {
     <ToolLayout onBack={() => setSelectedProjectId(null)}>
       <div className="space-y-4">
         {/* Project header */}
-        <div className="flex items-center gap-3 mb-6">
-          <button
-            onClick={() => setSelectedProjectId(null)}
-            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back
-          </button>
-          <div className="flex-1">
-            <h2 className="font-bold text-lg text-foreground">{selectedProject?.name}</h2>
-            <p className="text-xs text-muted-foreground">
-              {selectedProject?.calculations.length || 0} calculation
-              {(selectedProject?.calculations.length || 0) !== 1 ? "s" : ""}
-            </p>
-          </div>
+        <div className="mb-6">
+          <h2 className="font-bold text-lg text-foreground">{selectedProject?.name}</h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            {selectedProject?.calculations.length || 0} calculation
+            {(selectedProject?.calculations.length || 0) !== 1 ? "s" : ""}
+          </p>
         </div>
 
         {/* Calculations list */}
