@@ -255,54 +255,88 @@ serve(async (req) => {
     // Anthropic requires the first message to be from the user
     while (history.length > 0 && history[0].role === "assistant") history.shift();
 
-    // Condense follow-ups into a standalone retrieval question. The old
-    // approach concatenated the last two USER messages — it dragged retrieval
-    // toward stale topics after a subject change, and missed referents that
-    // lived in assistant replies ("what about in a bathroom?").
+    // Condense + translate. Two jobs in one cheap Haiku call, run on EVERY
+    // question (not just follow-ups): (1) resolve the latest question into a
+    // standalone search query using conversation context — the old approach
+    // concatenated the last two USER messages, which dragged retrieval toward
+    // stale topics after a subject change and missed referents that lived in
+    // assistant replies ("what about in a bathroom?"); (2) translate any
+    // tradie slang/jargon in the question into the formal terminology an
+    // AS/NZS clause heading or definition would actually use. (2) replaces
+    // relying solely on the static TRADIE_SYNONYMS list (synonyms.ts) for
+    // this — that list only helps for phrases someone already thought to
+    // type in, so it silently misses anything else, for any trade. Confirmed
+    // live: "earthing of water pipes" has no entry for "water pipe", so
+    // retrieval matched the wrong clause (5.4, a bare heading) instead of the
+    // real one (5.6.2.2 "Conductive water piping") — an AI doing the
+    // translation instead of a fixed list generalises to any trade's
+    // phrasing without needing a list maintained by hand. The static list
+    // still runs too (see expandQuery below) — it's instant and free and
+    // already correct for common terms, so there's no reason to drop it;
+    // this AI step is the generalising safety net behind it.
     let retrievalQuestion = effectiveQuestion;
-    if (history.length > 0) {
+    let aiStandardsTerms = "";
+    try {
+      const condenseController = new AbortController();
+      const condenseTimeout = setTimeout(() => condenseController.abort(), 8000);
       try {
-        const condenseController = new AbortController();
-        const condenseTimeout = setTimeout(() => condenseController.abort(), 8000);
-        try {
-          const condenseRes = await fetch("https://api.anthropic.com/v1/messages", {
-            method: "POST",
-            headers: { "x-api-key": ANTHROPIC_API_KEY, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
-            body: JSON.stringify({
-              model: "claude-haiku-4-5-20251001",
-              max_tokens: 150,
-              messages: [{
-                role: "user",
-                content:
-                  `Conversation so far:\n${history.map((m) => `${m.role}: ${m.content.slice(0, 500)}`).join("\n")}\n\n` +
-                  `Latest question: ${effectiveQuestion}\n\n` +
-                  `Rewrite the latest question as ONE standalone search query for Australian Standards documents, resolving any pronouns or references using the conversation. If it is already standalone, return it unchanged. Output only the query, nothing else.`,
-              }],
-            }),
-            signal: condenseController.signal,
-          });
-          if (condenseRes.ok) {
-            const condenseData = await condenseRes.json();
-            const t = (condenseData.content?.[0]?.text || "").trim();
+        const condenseRes = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "x-api-key": ANTHROPIC_API_KEY, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
+          body: JSON.stringify({
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 150,
+            messages: [{
+              role: "user",
+              content:
+                (history.length > 0
+                  ? `Conversation so far:\n${history.map((m) => `${m.role}: ${m.content.slice(0, 500)}`).join("\n")}\n\n`
+                  : "") +
+                `Latest question: ${effectiveQuestion}\n\n` +
+                `This is a question from an Australian tradie about an Australian Standard (AS/NZS). Do two things:\n` +
+                `1. Rewrite the latest question as ONE standalone search query, resolving any pronouns or references using the conversation above. If it's already standalone, keep it as-is.\n` +
+                `2. If the question uses tradie slang, brand names, or informal terms, list the formal Australian Standards terminology that clause headings or definitions would actually use for the same thing (e.g. "water pipe" -> "equipotential bonding, conductive water piping, extraneous conductive parts"). Leave blank if the question already uses standard terminology or there's nothing to translate.\n\n` +
+                `Respond in exactly this format, nothing else:\n` +
+                `QUERY: <standalone query>\n` +
+                `TERMS: <comma-separated standards terminology, or blank>`,
+            }],
+          }),
+          signal: condenseController.signal,
+        });
+        if (condenseRes.ok) {
+          const condenseData = await condenseRes.json();
+          const raw = (condenseData.content?.[0]?.text || "").trim();
+          const queryMatch = raw.match(/QUERY:\s*(.+?)(?:\n|$)/i);
+          const termsMatch = raw.match(/TERMS:\s*(.*)/i);
+          if (queryMatch) {
+            const t = queryMatch[1].trim();
             if (t && t.length > 2 && t.length < 500) retrievalQuestion = t;
-            if (condenseData.usage) {
-              logTokenUsage(supabase, {
-                userId, kind: "chat_condense", model: "claude-haiku-4-5",
-                usage: {
-                  input_tokens: condenseData.usage.input_tokens ?? 0,
-                  output_tokens: condenseData.usage.output_tokens ?? 0,
-                  cache_read_tokens: condenseData.usage.cache_read_input_tokens ?? 0,
-                  cache_creation_tokens: condenseData.usage.cache_creation_input_tokens ?? 0,
-                },
-              });
-            }
+          } else if (raw && !/TERMS:/i.test(raw) && raw.length > 2 && raw.length < 500) {
+            // Model didn't follow the QUERY:/TERMS: format — safer to use the
+            // whole reply as the query than to silently discard it.
+            retrievalQuestion = raw;
           }
-        } finally {
-          clearTimeout(condenseTimeout);
+          if (termsMatch) {
+            const terms = termsMatch[1].trim();
+            if (terms && terms.length < 300) aiStandardsTerms = terms;
+          }
+          if (condenseData.usage) {
+            logTokenUsage(supabase, {
+              userId, kind: "chat_query_expand", model: "claude-haiku-4-5",
+              usage: {
+                input_tokens: condenseData.usage.input_tokens ?? 0,
+                output_tokens: condenseData.usage.output_tokens ?? 0,
+                cache_read_tokens: condenseData.usage.cache_read_input_tokens ?? 0,
+                cache_creation_tokens: condenseData.usage.cache_creation_input_tokens ?? 0,
+              },
+            });
+          }
         }
-      } catch (e) {
-        console.error("[query] condense failed, using raw question:", e);
+      } finally {
+        clearTimeout(condenseTimeout);
       }
+    } catch (e) {
+      console.error("[query] condense/translate failed, using raw question:", e);
     }
 
     // Vision pre-pass: when a photo is uploaded, get a fast description of what it
@@ -361,7 +395,7 @@ serve(async (req) => {
     const imageBoost = hasImage && !imageDescription && (!question || question.trim().length < 40)
       ? "installation compliance requirements wiring rules clearance"
       : "";
-    const retrievalQuery = [retrievalQuestion, imageDescription, imageBoost]
+    const retrievalQuery = [retrievalQuestion, imageDescription, imageBoost, aiStandardsTerms]
       .filter(Boolean)
       .join(" ");
 
@@ -1279,7 +1313,7 @@ User's question/context: ${effectiveQuestion}` : "";
         // one as the point everything already-parsed (citations/
         // tables_referenced below) makes redundant, and cut there rather
         // than show broken JSON to the user.
-        const LEAKED_JSON_MARKER = /"(?:standard_code|clause_number|table_number|figure_number|relevant_text)"\s*:/;
+        const LEAKED_JSON_MARKER = /"(?:standard_code|standard_version|clause_number|table_number|figure_number|relevant_text)"\s*:/;
         function sanitizeAnswerText(text: string): string {
           const m = text.match(LEAKED_JSON_MARKER);
           if (!m || m.index === undefined) return text;
