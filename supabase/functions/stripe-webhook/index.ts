@@ -90,9 +90,18 @@ serve(async (req) => {
           .then(r => r.data?.display_name)) || user.email.split("@")[0];
 
         // Send confirmation email asynchronously
-        supabaseAdmin.functions.invoke("subscription-confirmation-email", {
-          body: { email: user.email, displayName, tier: paidTier },
-        }).catch(e => console.error("[stripe-webhook] email send failed:", e));
+        const supabaseUrl = Deno.env.get("SUPABASE_URL");
+        const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+        if (supabaseUrl && serviceRoleKey) {
+          fetch(`${supabaseUrl}/functions/v1/subscription-confirmation-email`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${serviceRoleKey}`,
+            },
+            body: JSON.stringify({ email: user.email, displayName, tier: paidTier }),
+          }).catch(e => console.error("[stripe-webhook] email send failed:", e));
+        }
       }
     }
 
