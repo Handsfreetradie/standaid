@@ -2,11 +2,10 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getAllowedOrigin } from "../_shared/cors.ts";
 
-// Free-tier trade calculators (Tools.tsx) were completely unlimited — this
-// caps free users to 1 use per calculator per day, reusing the same atomic
-// rate-limit RPC the chat/audit/OCR features already use
-// (check_and_record_ai_usage, supabase/migrations/20260704000003_atomic_ai_rate_limit.sql),
-// namespaced under kind = "tool:<tool_id>" so it can't collide with those.
+// Free-tier trade calculators (Tools.tsx): 3 total uses per day across all
+// calculators, reusing the same atomic rate-limit RPC the chat/capstone features
+// use (check_and_record_ai_usage, supabase/migrations/20260704000003_atomic_ai_rate_limit.sql).
+// Uses kind = "tools_total" to enforce a shared daily budget.
 // Pro/business users always pass without touching the usage table.
 
 serve(async (req) => {
@@ -36,12 +35,13 @@ serve(async (req) => {
     const { tool_id } = await req.json();
     if (typeof tool_id !== "string" || !tool_id) return json({ error: "tool_id is required" }, 400);
 
-    const { data: profile } = await supabase.from("profiles").select("subscription_tier").eq("user_id", user.id).single();
+    const { data: profile } = await supabase.from("profiles").select("subscription_tier").eq("id", user.id).single();
     const tier = profile?.subscription_tier || "free";
     if (tier === "pro" || tier === "business") return json({ allowed: true });
 
+    // Free tier: 3 total calculator uses per day across all tools
     const { data: used } = await supabase.rpc("check_and_record_ai_usage", {
-      p_user_id: user.id, p_kind: `tool:${tool_id}`, p_max: 1, p_window_seconds: 86400,
+      p_user_id: user.id, p_kind: "tools_total", p_max: 3, p_window_seconds: 86400,
     });
     return json({ allowed: !(typeof used === "number" && used < 0) });
   } catch (e) {

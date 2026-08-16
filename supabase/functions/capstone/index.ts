@@ -481,6 +481,20 @@ serve(async (req) => {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return unauthorised();
 
+    // Fetch subscription tier for rate limit enforcement
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("subscription_tier")
+      .eq("id", user.id)
+      .single();
+    if (profileError || !profile) {
+      console.error("[capstone] profile fetch failed:", profileError);
+      return new Response(JSON.stringify({ error: "Could not verify your account" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const tier = profile.subscription_tier as "free" | "pro" | "business";
+
     const { action, standardId, topic, difficulty, questionCount, examId, questionId, questionIds, userAnswer, imageBase64, chunkId, examTopics, examPdfText, sectionFilter: rawSectionFilter, userClauseRef, practiceQuestionId, scenarioText } = await req.json();
     const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
     if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
@@ -507,8 +521,22 @@ serve(async (req) => {
     // Atomic: the RPC records usage under an advisory lock, so concurrent
     // requests can't race past the cap. Recorded at the gate (not post-call),
     // so this replaces the old scattered capstone_usage inserts.
+    // ── TIER GATES — Block free tier from premium features ──
+    if (tier === "free") {
+      if (action === "analyze_photo") {
+        return new Response(JSON.stringify({
+          error: "Photo analysis is a Pro feature. Upgrade to Pro to analyse your handwritten work.",
+        }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      if (action === "scenario_walkthrough") {
+        return new Response(JSON.stringify({
+          error: "Scenario walkthroughs are a Pro feature. Upgrade to Pro to work through real job situations.",
+        }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
+
     // Validate photo input before the rate-limit gate so a rejected upload
-    // doesn't burn one of the user's hourly AI credits.
+    // doesn't burn one of the user's daily AI credits.
     if (action === "analyze_photo") {
       if (!imageBase64) throw new Error("No image provided");
       if (imageBase64.length > 5_000_000) {
@@ -519,7 +547,7 @@ serve(async (req) => {
     }
 
     // Validate before the rate-limit gate so a rejected scenario doesn't
-    // burn one of the user's hourly AI credits.
+    // burn one of the user's daily AI credits.
     if (action === "scenario_walkthrough") {
       if (!standardId) throw new Error("Select a standard first");
       if (typeof scenarioText !== "string" || !scenarioText.trim()) {
@@ -539,6 +567,11 @@ serve(async (req) => {
     // rather than charging a slot for every exam start.
     const AI_ACTIONS = ["generate_questions", "analyze_photo", "explain_chunk", "generate_study_guide", "generate_short_answer", "generate_calculation", "grade_calculation", "grade_short_answer", "exam_prep", "scenario_walkthrough"];
     const enforceAiRateLimit = async (): Promise<Response | null> => {
+      // Tier-based limits: free = 5/day, pro/business = 1000/day (effectively unlimited)
+      const limits = tier === "free"
+        ? { max: 5, window: 86400, desc: "5 per day" }
+        : { max: 1000, window: 86400, desc: "per day" };
+
       // check_and_record_ai_usage is locked to service_role (migration
       // 20260706000001) — the user-scoped client would get permission denied.
       const serviceClient = createClient(
@@ -548,8 +581,8 @@ serve(async (req) => {
       const { data: used, error: rlError } = await serviceClient.rpc("check_and_record_ai_usage", {
         p_user_id: user.id,
         p_kind: "capstone",
-        p_max: 20,
-        p_window_seconds: 3600,
+        p_max: limits.max,
+        p_window_seconds: limits.window,
       });
       if (rlError) {
         console.error("[capstone] rate-limit RPC failed:", rlError);
@@ -558,8 +591,9 @@ serve(async (req) => {
         });
       }
       if (typeof used === "number" && used < 0) {
+        const tier_label = tier === "free" ? "Free tier" : "Pro";
         return new Response(JSON.stringify({
-          error: "Hourly limit reached. You can make 20 AI requests per hour. Please try again later.",
+          error: `Daily limit reached. ${tier_label} accounts can make ${limits.desc} capstone AI requests. Please try again tomorrow.`,
         }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       return null;
@@ -648,7 +682,7 @@ Write questions and explanations in plain Australian English. Each explanation m
 
     // ── ANALYZE PHOTO OF HANDWRITTEN WORK ──
     if (action === "analyze_photo") {
-      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 20);
+      const chunks = await getChunksWithRecovery(supabase, standardId, authHeader, 50);
 
       if (!chunks?.length) throw new Error("No content found for this standard");
 
@@ -666,6 +700,13 @@ If any word, number, or symbol is not clearly legible, write [unclear] — do NO
 Misreading a number (e.g. reading "2.5" as "25") gives dangerously wrong feedback on a real exam.
 Only evaluate content you can clearly and confidently read.
 
+USING YOUR KNOWLEDGE:
+You know ${standard?.standard_code || standard?.title} well. Use that knowledge to identify:
+- Calculation errors (wrong formula application, arithmetic mistakes)
+- Missing steps or omitted safety checks
+- Incorrect clause interpretations
+Then cite the relevant clause number from the standard content provided. If you identify an error but the specific clause isn't in the provided content, note it and suggest the apprentice verify with their supervisor or the standard itself.
+
 Respond in this exact format:
 
 **What I can read:**
@@ -673,7 +714,7 @@ Transcribe the handwritten text word-for-word. Mark anything uncertain as [uncle
 
 **Feedback:**
 Only comment on content you clearly transcribed above — never on [unclear] sections.
-Reference specific clause numbers from the standard content provided.
+Reference specific clause numbers from the standard content provided, or acknowledge if a gap should be checked against the full standard.
 Max 4 bullet points. Be direct and honest about what is correct vs what needs work.
 ${APPRENTICE_STYLE}`,
             },
@@ -1364,7 +1405,7 @@ Feedback rules: 2-4 short sentences in plain Australian English, written directl
       // so a gap in the selected standard can be pointed at the right one
       // instead of a flat "not covered".
       const { primaryChunks: chunks, otherChunks } = await fetchScenarioContext(
-        supabase, standardId, scenarioText, OPENAI_API_KEY, 40, user.id, sectionFilter
+        supabase, standardId, scenarioText, OPENAI_API_KEY, 80, user.id, sectionFilter
       );
       if (!chunks?.length) throw new Error("No content found for this standard");
 
@@ -1387,11 +1428,14 @@ Break the scenario down into decision points. At each point, explain the correct
 
 If the scenario involves something an apprentice should NOT be doing unsupervised (live work, mains work, isolating a switchboard alone, etc.), say so clearly in supervision_warning and explain why — leave supervision_warning as an empty string otherwise.
 
-Do not use any formula, table value, clause number, or standard reference from your own general knowledge — never guess one, and never cite a nearby or plausible-sounding clause number as a stand-in for one you can't find. Every standard_reference must be a clause number that literally appears in the content provided, quoting it exactly.
+USING YOUR KNOWLEDGE:
+You know ${primaryLabel} well. Use that knowledge to identify all the safety-critical requirements and decision points for this scenario — including ones the apprentice didn't explicitly mention (e.g. isolation switches for a new installation, earthing and bonding checks, testing sequences). Then cite the relevant clause numbers from the STANDARD CONTENT provided below.
+
 For each decision point:
-- If ${primaryLabel}'s content (STANDARD CONTENT below) covers it: cite that clause in standard_reference, leave source_standard empty.
-- Else if one of the OTHER STANDARDS blocks covers it: set standard_reference to that clause number and source_standard to that standard's name, and say plainly in correct_approach that this is covered in that other standard, not ${primaryLabel} — name it so the apprentice knows to check that copy instead.
-- Else (not covered anywhere provided): leave standard_reference and source_standard both as empty strings, and say plainly in correct_approach that it isn't confirmed against any of their uploaded standards, so the apprentice knows to verify it with their supervisor rather than treating the answer as sourced.
+- If you find the relevant clause in STANDARD CONTENT: cite that clause number exactly in standard_reference, leave source_standard empty.
+- Else if you find it in the OTHER STANDARDS: cite that clause and set source_standard to that standard's name.
+- Else (you know it applies but it's not in any provided content): leave standard_reference empty, mark source_standard as empty, and note in correct_approach that the apprentice should verify this with their supervisor or the full standard.
+Never invent or guess clause numbers — only cite ones that literally appear in the provided content.
 
 This app also has built-in calculators. If — and only if — a decision point is something one of these calculators actually solves (e.g. picking a cable size, checking voltage drop, sizing a conduit), set suggested_tool to that tool's exact id from this list; otherwise leave it as an empty string. Never invent an id that isn't in this list:
 ${TOOL_CATALOG.map((t) => `- ${t.id}: ${t.title} — ${t.hint}`).join("\n")}
