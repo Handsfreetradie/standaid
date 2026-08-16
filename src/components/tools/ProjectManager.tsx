@@ -10,6 +10,7 @@ interface CalcResult {
   id: string;
   toolId: string;
   toolName: string;
+  label: string;
   timestamp: Date;
   inputs: Record<string, any>;
   result: Record<string, any>;
@@ -227,15 +228,15 @@ const ProjectManager = ({ onBack }: Props) => {
               <Card key={calc.id} className="p-4">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="font-bold text-foreground text-sm">
-                        {calc.toolName}
-                      </h3>
+                    <h3 className="font-bold text-foreground text-sm mb-1">
+                      {calc.label}
+                    </h3>
+                    <div className="flex items-center gap-2 mb-2">
                       <Badge variant="secondary" className="text-xs">
-                        {calc.toolId}
+                        {calc.toolName}
                       </Badge>
                     </div>
-                    <p className="text-sm text-foreground mb-2">{calc.summary}</p>
+                    <p className="text-xs text-muted-foreground mb-2">{calc.summary}</p>
                     <p className="text-xs text-muted-foreground">
                       Added {new Date(calc.timestamp).toLocaleDateString()}
                       {" "}

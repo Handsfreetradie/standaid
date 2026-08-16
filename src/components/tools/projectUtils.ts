@@ -2,6 +2,7 @@ interface CalcResult {
   id: string;
   toolId: string;
   toolName: string;
+  label: string;
   timestamp: Date;
   inputs: Record<string, any>;
   result: Record<string, any>;
@@ -24,7 +25,8 @@ export const saveCalculationToProject = (
   toolName: string,
   inputs: Record<string, any>,
   result: Record<string, any>,
-  summary: string
+  summary: string,
+  label: string = ""
 ): void => {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -61,6 +63,7 @@ export const saveCalculationToProject = (
       id: `calc-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       toolId,
       toolName,
+      label: label || summary,
       timestamp: new Date(),
       inputs,
       result,

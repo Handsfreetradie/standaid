@@ -474,7 +474,7 @@ const VoltageDropTool = ({ onBack }: Props) => {
       <AddToProjectModal
         isOpen={showProjectModal}
         onClose={() => setShowProjectModal(false)}
-        onSave={(projectId, projectName) => {
+        onSave={(projectId, projectName, calcLabel) => {
           saveCalculationToProject(
             projectId,
             projectName,
@@ -496,7 +496,8 @@ const VoltageDropTool = ({ onBack }: Props) => {
               circuits,
             },
             result,
-            `${cableSize} mm² ${material} — ${loadValue}${loadMode === "kw" ? " kW" : " A"} over ${length} m: ${result?.vdPercent.toFixed(2)}% VD`
+            `${cableSize} mm² ${material} — ${loadValue}${loadMode === "kw" ? " kW" : " A"} over ${length} m: ${result?.vdPercent.toFixed(2)}% VD`,
+            calcLabel
           );
           setShowProjectModal(false);
         }}

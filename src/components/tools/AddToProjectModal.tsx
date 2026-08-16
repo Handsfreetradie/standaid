@@ -15,7 +15,7 @@ interface Project {
 interface AddToProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (projectId: string, projectName: string) => void;
+  onSave: (projectId: string, projectName: string, calcLabel: string) => void;
   calculationSummary: string;
 }
 
@@ -31,6 +31,7 @@ const AddToProjectModal = ({
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [showNewProjectForm, setShowNewProjectForm] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
+  const [calcLabel, setCalcLabel] = useState("");
 
   // Load projects from localStorage
   useEffect(() => {
@@ -57,13 +58,14 @@ const AddToProjectModal = ({
   const handleSave = () => {
     if (showNewProjectForm) {
       if (!newProjectName.trim()) return;
-      onSave("new", newProjectName);
+      onSave("new", newProjectName, calcLabel.trim());
     } else if (selectedProjectId) {
       const project = projects.find((p) => p.id === selectedProjectId);
-      onSave(selectedProjectId, project?.name || "");
+      onSave(selectedProjectId, project?.name || "", calcLabel.trim());
     }
     setSelectedProjectId(null);
     setNewProjectName("");
+    setCalcLabel("");
     setShowNewProjectForm(false);
     onClose();
   };
@@ -75,6 +77,18 @@ const AddToProjectModal = ({
       <Card className="w-full max-w-md p-6 max-h-[80vh] overflow-y-auto">
         <h2 className="font-bold text-lg text-foreground mb-2">Add to Project</h2>
         <p className="text-xs text-muted-foreground mb-4">{calculationSummary}</p>
+
+        {/* Label input */}
+        <div className="mb-4">
+          <label className="text-xs font-medium text-foreground mb-1 block">
+            Label (optional)
+          </label>
+          <Input
+            placeholder="e.g. 'Main Feed Cable', 'Subboard 1'"
+            value={calcLabel}
+            onChange={(e) => setCalcLabel(e.target.value)}
+          />
+        </div>
 
         <div className="space-y-4">
           {/* New project form */}
