@@ -78,6 +78,24 @@ serve(async (req) => {
       .update({ subscription_tier: accessTier })
       .eq("user_id", userId);
 
+    // Send confirmation email if upgrading to paid plan
+    if (active && paidTier && (sub.status === "active" || sub.status === "trialing")) {
+      const { data: user } = await supabaseAdmin.auth.admin.getUserById(userId);
+      if (user?.email) {
+        const displayName = (await supabaseAdmin
+          .from("profiles")
+          .select("display_name")
+          .eq("user_id", userId)
+          .single()
+          .then(r => r.data?.display_name)) || user.email.split("@")[0];
+
+        // Send confirmation email asynchronously
+        supabaseAdmin.functions.invoke("subscription-confirmation-email", {
+          body: { email: user.email, displayName, tier: paidTier },
+        }).catch(e => console.error("[stripe-webhook] email send failed:", e));
+      }
+    }
+
     console.log(`[stripe-webhook] ${userId} → ${accessTier} (sub ${sub.status})`);
 
     // Team subscriptions additionally own an `organizations` row — seat_limit

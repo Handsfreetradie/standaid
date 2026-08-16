@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { User, ChevronRight, ChevronDown, Shield, Zap, HelpCircle, LogOut, CreditCard, Bell, Mail, ExternalLink, CheckCircle2, BookOpen, FileText, CalendarDays, Loader2, Users, Gift, UserCog, Image as ImageIcon, X, AlertTriangle, RefreshCw } from "lucide-react";
+import { User, ChevronRight, ChevronDown, Shield, Zap, HelpCircle, LogOut, CreditCard, Bell, Mail, ExternalLink, CheckCircle2, BookOpen, FileText, CalendarDays, Loader2, Users, Gift, UserCog, Image as ImageIcon, X, AlertTriangle, RefreshCw, Trash2, Receipt } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -677,16 +677,28 @@ const Profile = () => {
                       </div>
                       {isPro && trialDaysLeft === null ? (
                         <>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="w-full gap-1.5"
-                            disabled={billingBusy}
-                            onClick={openPortal}
-                          >
-                            {billingBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
-                            Manage Subscription
-                          </Button>
+                          <div className="space-y-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="w-full gap-1.5"
+                              disabled={billingBusy}
+                              onClick={openPortal}
+                            >
+                              {billingBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Receipt className="h-3.5 w-3.5" />}
+                              View Invoices & Receipts
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="w-full gap-1.5"
+                              disabled={billingBusy}
+                              onClick={openPortal}
+                            >
+                              {billingBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                              Cancel Subscription
+                            </Button>
+                          </div>
                           {org && (
                             <Button
                               size="sm"
@@ -709,6 +721,12 @@ const Profile = () => {
                           {trialDaysLeft !== null ? "Keep Pro — subscribe now" : "Upgrade to Pro — $19.99/mo"}
                         </Button>
                       )}
+                      <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-3 space-y-1.5">
+                        <p className="text-xs font-medium text-amber-900 dark:text-amber-100">Monthly Billing</p>
+                        <p className="text-xs text-amber-800 dark:text-amber-200 leading-relaxed">
+                          Your subscription renews automatically each month. You can view past invoices, update your payment method, or cancel anytime in the buttons above.
+                        </p>
+                      </div>
                       <p className="text-xs text-muted-foreground leading-relaxed">
                         Questions about billing? Contact us at{" "}
                         <a href="mailto:hello@standaid.ai" className="text-primary underline">
