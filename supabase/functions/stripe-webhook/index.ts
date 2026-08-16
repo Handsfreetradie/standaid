@@ -166,7 +166,19 @@ serve(async (req) => {
               </table>
 
               <p style="margin:28px 0 0;padding-top:28px;border-top:1px solid #f0f0f0;font-size:13px;color:#888;line-height:1.6;">
-                <strong>Billing:</strong> Your subscription renews automatically each month. You can view, download, or cancel your subscription anytime in your StandAId profile under "Subscription & Billing".
+                <strong>Billing:</strong> Your subscription renews automatically each month. You can view invoices, update payment details, or cancel anytime in your StandAId profile under "Subscription & Billing".
+              </p>
+
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0 0;padding-top:24px;border-top:1px solid #f0f0f0;">
+                <tr>
+                  <td align="center">
+                    <a href="https://app.standaid.ai/profile" style="display:inline-block;background:#f5f5f5;color:#666;text-decoration:none;font-size:13px;font-weight:600;padding:12px 28px;border:1px solid #e0e0e0;border-radius:8px;letter-spacing:0.3px;">Manage Subscription</a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:16px 0 0;font-size:12px;color:#999;text-align:center;line-height:1.6;">
+                To cancel your subscription or make changes, visit your profile settings.
               </p>
             </td>
           </tr>
