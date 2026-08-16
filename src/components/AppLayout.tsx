@@ -30,7 +30,7 @@ const AppLayout = () => {
   return (
     <>
       <ProgressBar />
-      <div className="fixed inset-0 flex flex-col overflow-hidden" style={{ background: 'linear-gradient(to right, #FFFFFF, #FFE8E8)' }}>
+      <div className="fixed inset-0 flex overflow-hidden" style={{ background: 'linear-gradient(to right, #FFFFFF, #FFE8E8)' }}>
       {/* SVG Noise texture overlay */}
       <svg className="noise-overlay" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
         <filter id="noise">
@@ -43,7 +43,7 @@ const AppLayout = () => {
       <div className="dot-grid-overlay" />
 
       {/* Sidebar — desktop only */}
-      <aside className="hidden md:flex flex-col min-h-full w-56 flex-shrink-0 border-r border-border bg-white/80 backdrop-blur-sm z-40 relative">
+      <aside className="hidden md:flex flex-col w-56 flex-shrink-0 border-r border-border bg-white/80 backdrop-blur-sm z-40 relative">
         <div className="px-5 py-5 border-b border-border flex-shrink-0">
           <button onClick={() => navigate("/")} className="text-left">
             <h1 className="text-[24px] font-bold tracking-[-0.02em] leading-tight">
