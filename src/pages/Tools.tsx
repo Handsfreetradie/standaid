@@ -28,10 +28,13 @@ import FaultLoopTool from "@/components/tools/FaultLoopTool";
 import PVStringSizingTool from "@/components/tools/PVStringSizingTool";
 import DCIsolatorTool from "@/components/tools/DCIsolatorTool";
 import BatteryComplianceTool from "@/components/tools/BatteryComplianceTool";
+import ProjectManager from "@/components/tools/ProjectManager";
 
-type ToolMode = "menu" | "earth-conductor" | "voltage-drop" | "concrete-volume" | "pipe-sizing" | "cable-sizer" | "conduit-fill" | "max-demand" | "brick-calc" | "timber-span" | "roof-pitch" | "heat-load" | "duct-sizing" | "gas-pipe" | "drainage-fall" | "backflow" | "steel-lintel" | "stair-compliance" | "stormwater" | "ventilation" | "fault-loop" | "pv-string" | "dc-isolator" | "battery-check";
+type ToolMode = "menu" | "earth-conductor" | "voltage-drop" | "concrete-volume" | "pipe-sizing" | "cable-sizer" | "conduit-fill" | "max-demand" | "brick-calc" | "timber-span" | "roof-pitch" | "heat-load" | "duct-sizing" | "gas-pipe" | "drainage-fall" | "backflow" | "steel-lintel" | "stair-compliance" | "stormwater" | "ventilation" | "fault-loop" | "pv-string" | "dc-isolator" | "battery-check" | "projects";
 
 const TOOLS: { id: ToolMode; title: string; desc: string; category: string }[] = [
+  // Project Management
+  { id: "projects", title: "Projects", desc: "Create & manage calculation jobs", category: "Management" },
   // Electrical
   { id: "voltage-drop", title: "Voltage Drop", desc: "AC/DC, full cable spec & derating", category: "Electrical" },
   { id: "cable-sizer", title: "Cable Sizer", desc: "Auto-select cable by load, run & conditions", category: "Electrical" },
@@ -64,6 +67,7 @@ const TOOLS: { id: ToolMode; title: string; desc: string; category: string }[] =
 
 
 const TOOL_COMPONENTS: Record<string, React.FC<{ onBack: () => void }>> = {
+  "projects": ProjectManager,
   "voltage-drop": VoltageDropTool,
   "earth-conductor": EarthConductorTool,
   "cable-sizer": CableSizerTool,
