@@ -98,7 +98,7 @@ const AppLayout = () => {
           </button>
         </header>
 
-        <main className="relative z-10 flex-1 overflow-y-auto flex flex-col">
+        <main className="relative z-10 flex-1 overflow-y-auto flex flex-col md:overflow-hidden">
           <Outlet />
         </main>
 
