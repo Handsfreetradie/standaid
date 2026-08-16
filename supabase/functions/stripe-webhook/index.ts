@@ -81,18 +81,17 @@ serve(async (req) => {
       .eq("user_id", userId);
 
     // Send confirmation email if upgrading to paid plan
-    console.log(`[stripe-webhook] Email check: active=${active}, paidTier=${paidTier}, statusCheck=${sub.status === "active" || sub.status === "trialing"}`);
     if (active && paidTier && (sub.status === "active" || sub.status === "trialing")) {
-      console.log(`[stripe-webhook] Email conditions met, fetching user ${userId}`);
-      const { data: user } = await supabaseAdmin.auth.admin.getUserById(userId);
-      console.log(`[stripe-webhook] User email: ${user?.email}`);
-      if (user?.email) {
+      const { data } = await supabaseAdmin.auth.admin.getUserById(userId);
+      const userEmail = data?.user?.email;
+      console.log(`[stripe-webhook] Email send attempt: email=${userEmail}`);
+      if (userEmail) {
         const displayName = (await supabaseAdmin
           .from("profiles")
           .select("display_name")
           .eq("user_id", userId)
           .single()
-          .then(r => r.data?.display_name)) || user.email.split("@")[0];
+          .then(r => r.data?.display_name)) || userEmail.split("@")[0];
 
         // Send receipt email via Resend
         const resendKey = Deno.env.get("RESEND_API_KEY");
@@ -191,12 +190,12 @@ serve(async (req) => {
             },
             body: JSON.stringify({
               from: `StandAId <hello@standaid.ai>`,
-              to: user.email,
+              to: userEmail,
               subject: `Welcome to ${tierName} Plan — StandAId`,
               html: htmlEmail,
             }),
           }).then(r => r.json()).then(result => {
-            console.log(`[stripe-webhook] Sent receipt to ${user.email}:`, result.id ?? result.error);
+            console.log(`[stripe-webhook] Sent receipt to ${userEmail}:`, result.id ?? result.error);
           }).catch(e => console.error("[stripe-webhook] email send failed:", e));
         }
       }
