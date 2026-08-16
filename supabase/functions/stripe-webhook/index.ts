@@ -61,6 +61,8 @@ serve(async (req) => {
     const accessTier = active && paidTier ? paidTier : "free";
     const quantity = sub.items.data[0]?.quantity ?? 1;
 
+    console.log(`[stripe-webhook] Processing: priceId=${priceId}, paidTier=${paidTier}, active=${active}, status=${sub.status}, userId=${userId}`);
+
     await supabaseAdmin.from("subscriptions").upsert({
       user_id: userId,
       stripe_customer_id: customerId,
@@ -79,8 +81,11 @@ serve(async (req) => {
       .eq("user_id", userId);
 
     // Send confirmation email if upgrading to paid plan
+    console.log(`[stripe-webhook] Email check: active=${active}, paidTier=${paidTier}, statusCheck=${sub.status === "active" || sub.status === "trialing"}`);
     if (active && paidTier && (sub.status === "active" || sub.status === "trialing")) {
+      console.log(`[stripe-webhook] Email conditions met, fetching user ${userId}`);
       const { data: user } = await supabaseAdmin.auth.admin.getUserById(userId);
+      console.log(`[stripe-webhook] User email: ${user?.email}`);
       if (user?.email) {
         const displayName = (await supabaseAdmin
           .from("profiles")
