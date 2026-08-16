@@ -32,26 +32,14 @@ const SCANNED_DOC_RATIO = 0.85;
 // real standards (AS 3008 Parts 1/2 at 10.2MB) a hair over it.
 const AI_EXTRACTION_SIZE_LIMIT = 25 * 1024 * 1024;
 
-// pdf-lib's page-slicing (used above this page count) drops the embedded
-// page images of scanned documents entirely — the model receives near-blank
-// pages (~220 chars/page came back for AS 3017's scans; AS 3008 Part 2's 148
-// pages came back "blank/unreadable" outright). Whole-document mode doesn't
-// have this problem since it sends the real file via the Files API, but was
-// capped at Claude's 100-page-per-request limit for a <1M-token context
-// window. claude-sonnet-4-6 (the model used below) gets a 1M-token context
-// window BY DEFAULT — no beta header, standard pricing — which raises that
-// limit to 600 pages (docs.claude.com/en/docs/build-with-claude/pdf-support).
-// 600 covers nearly every real standard here (AS 3008 Part 2's 148 pages
-// included) — the rare document over 600 pages (e.g. the 611-page Wiring
-// Rules) still falls back to the slicing path and hits the same bug, which
-// remains a separate, smaller-scope problem.
+// This is Claude's actual page limit for a single PDF document block on a
+// 1M-token-context model (docs.claude.com/en/docs/build-with-claude/pdf-support)
+// — not a tunable knob. A document over this (e.g. the 611-page Wiring Rules)
+// can't be sent as one PDF at all; it's split into consecutive ≤600-page
+// PARTS instead (see extractTextWithAI below), each uploaded and OCR'd as its
+// own self-contained whole document, then joined with page numbers corrected
+// back to the real document afterwards.
 const WHOLE_DOC_MAX_PAGES = 600;
-
-// Pages per OCR call. A dense standards page transcribes to ~600-1000 output
-// tokens; 15 pages blew straight past the 8k max_tokens and later pages of
-// every batch were silently cut off mid-sentence. 6 pages leaves headroom,
-// and stop_reason is checked to catch truncation.
-const PAGES_PER_AI_BATCH = 6;
 
 // Anthropic Files API: upload the PDF once per OCR window and reference it by
 // ID in every batch call instead of re-sending megabytes of base64 each time.
@@ -114,9 +102,9 @@ async function deleteFilesApiFile(fileId: string, apiKey: string): Promise<void>
   }
 }
 
-// Copy a page range into a fresh PDF so each OCR call only carries the pages it
-// needs. Sending the whole document per batch both re-uploads megabytes every
-// call and hits the API's 100-page-per-document limit on full standards.
+// Copy a page range into a fresh PDF. Used once per PART (≤600 pages) when a
+// document exceeds WHOLE_DOC_MAX_PAGES — not per OCR batch — since a document
+// within the limit is sent completely untouched (see extractTextWithAI).
 async function slicePdfPages(srcDoc: PDFDocument, startPage: number, endPage: number): Promise<Uint8Array | null> {
   try {
     const out = await PDFDocument.create();
@@ -133,90 +121,79 @@ async function slicePdfPages(srcDoc: PDFDocument, startPage: number, endPage: nu
   }
 }
 
-// Batched page-by-page AI OCR — slices PAGES_PER_AI_BATCH pages per call so
-// long documents are never truncated. Reads the PDF visually so special characters
-// like Ω are transcribed correctly rather than corrupted by font encoding.
-// Stops at `deadline` and returns what it has — partial text either passes the
-// quality gate or gets rejected there with a clear message.
-// Returns the transcribed text plus resume state: `nextPage` is the first
-// page NOT yet transcribed (null when the whole document is done). The
-// caller persists partial text + nextPage and retriggers itself — a scanned
-// 60-page standard takes ~10 batches, far more than one function window.
-async function extractTextWithAI(
-  fileBytes: Uint8Array,
+type PartOcrResult = {
+  text: string;
+  // "complete": every batch in this part finished — caller moves to the next
+  // part. "paused": the deadline was hit — caller stops entirely and resumes
+  // here next invocation. "stopped": the model returned near-nothing for a
+  // batch (blank/failed pages) — caller gives up on this part but still
+  // tries any remaining parts, since they're independent files.
+  status: "complete" | "paused" | "stopped";
+  nextPage: number | null; // LOCAL page number (1-based within this call's byte range); only set when status === "paused"
+  fileId: string | null;
+};
+
+// Runs the whole-document OCR loop against a byte range that is a complete,
+// self-contained document as far as the model and Files API are concerned —
+// every page number here is LOCAL (1..localTotalPages), never the real
+// document's page number. The caller (extractTextWithAI) offsets these back
+// when this byte range is a slice of a larger document.
+//
+// `hasAnyTextYet` tells this call whether an EARLIER part in the same
+// invocation already produced real text — if so, a failure on this part's
+// very first batch is treated as a pause (so already-gathered text isn't
+// thrown away), not a hard failure.
+async function runWholeDocBatchOcr(
+  docBytes: Uint8Array,
+  localTotalPages: number,
   anthropicApiKey: string,
-  totalPages = 0,
-  deadline = Number.POSITIVE_INFINITY,
-  startPage = 1,
+  deadline: number,
+  localStartPage: number,
+  hasAnyTextYet: boolean,
   usageLogger?: { supabaseAdmin: any; userId: string; standardId: string },
-): Promise<{ text: string; nextPage: number | null; totalPages: number }> {
-  let srcDoc: PDFDocument | null = null;
-  try {
-    srcDoc = await PDFDocument.load(fileBytes, { ignoreEncryption: true });
-    if (totalPages === 0) totalPages = srcDoc.getPageCount();
-  } catch (e) {
-    console.warn("pdf-lib could not load document — OCR will send the whole file per batch:", e);
+  logLabel?: string,
+): Promise<PartOcrResult> {
+  // Files API first (any byte size, and this is always page-limit-eligible
+  // by construction — every part is ≤ WHOLE_DOC_MAX_PAGES); base64 fallback
+  // keeps the old 25MB cap.
+  const wholeDocEligible = localTotalPages > 0 && localTotalPages <= WHOLE_DOC_MAX_PAGES;
+  const fileId = wholeDocEligible ? await uploadPdfToFilesApi(docBytes, anthropicApiKey, deadline) : null;
+  if (!fileId && docBytes.length > 25 * 1024 * 1024) {
+    throw new Error("This PDF is too big to OCR without the Files API — try again shortly.");
   }
+  const docBase64 = !fileId ? convertPdfToBase64(docBytes) : null;
 
-  // Whole-document mode for PDFs within API limits (≤100 pages): pdf-lib
-  // page slicing drops the page images of scanned documents entirely — the
-  // model received near-blank pages (~220 chars/page came back for AS 3017's
-  // scans). Sending the complete file preserves the scans; the prompt limits
-  // which pages each call transcribes. Bigger page windows + a bigger output
-  // budget keep the call count down since input is the whole doc each time.
-  // Files API first (any byte size); base64 fallback keeps the old 25MB cap.
-  const wholeDocEligible = totalPages > 0 && totalPages <= WHOLE_DOC_MAX_PAGES;
-  const fileId = wholeDocEligible ? await uploadPdfToFilesApi(fileBytes, anthropicApiKey, deadline) : null;
-  const useWholeDoc = fileId !== null || (wholeDocEligible && fileBytes.length <= 25 * 1024 * 1024);
-  const pagesPerBatch = useWholeDoc ? 12 : PAGES_PER_AI_BATCH;
-  const maxTokensPerBatch = useWholeDoc ? 16000 : 8000;
+  const pagesPerBatch = 12;
+  const maxTokensPerBatch = 16000;
 
-  const firstBatch = Math.floor((startPage - 1) / pagesPerBatch);
-  const batchCount = totalPages > 0
-    ? Math.ceil(totalPages / pagesPerBatch)
+  const firstBatch = Math.floor((localStartPage - 1) / pagesPerBatch);
+  const batchCount = localTotalPages > 0
+    ? Math.ceil(localTotalPages / pagesPerBatch)
     : firstBatch + 1; // unknown page count — try single call
 
-  const wholeDocBase64 = ((useWholeDoc && !fileId) || !srcDoc) ? convertPdfToBase64(fileBytes) : null;
-
+  const label = logLabel ? ` ${logLabel}` : "";
   let fullText = "";
-  let nextPage: number | null = null;
 
   for (let batch = firstBatch; batch < batchCount; batch++) {
     if (Date.now() > deadline) {
-      nextPage = batch * pagesPerBatch + 1;
-      console.warn(`AI OCR pausing at batch ${batch}/${batchCount} (page ${nextPage}) — time budget reached, will resume`);
-      break;
+      console.warn(`AI OCR${label} pausing at batch ${batch}/${batchCount} — time budget reached, will resume`);
+      return { text: fullText, status: "paused", nextPage: batch * pagesPerBatch + 1, fileId };
     }
 
     const startPage = batch * pagesPerBatch + 1;
-    const endPage = totalPages > 0
-      ? Math.min((batch + 1) * pagesPerBatch, totalPages)
-      : 9999;
+    const endPage = localTotalPages > 0 ? Math.min((batch + 1) * pagesPerBatch, localTotalPages) : 9999;
 
-    let docSource: Record<string, unknown>;
-    let prompt: string;
+    const docSource = fileId
+      ? { type: "file", file_id: fileId }
+      : { type: "base64", media_type: "application/pdf", data: docBase64 ?? convertPdfToBase64(docBytes) };
+    const prompt = localTotalPages > 0
+      ? `This is an Australian/New Zealand technical Standards document. ` +
+        `Transcribe ONLY pages ${startPage} to ${endPage} of the document (counting from the first page of the file as page 1) completely and accurately. ` +
+        `Insert [PAGE N] at the start of each transcribed page, numbering from ${startPage}. ` + transcriptionRules
+      : `This is an Australian/New Zealand technical Standards document. Transcribe ALL content completely and accurately. ` +
+        `Insert [PAGE N] markers between pages. ` + transcriptionRules;
 
-    const sliced = !useWholeDoc && srcDoc && totalPages > 0 ? await slicePdfPages(srcDoc, startPage, endPage) : null;
-    if (sliced) {
-      docSource = { type: "base64", media_type: "application/pdf", data: convertPdfToBase64(sliced) };
-      prompt =
-        `This document contains pages ${startPage} to ${endPage} of an Australian/New Zealand technical Standards document. ` +
-        `Transcribe ALL pages completely and accurately. ` +
-        `Insert [PAGE N] at the start of each page using the ORIGINAL page numbers — the first page here is page ${startPage}. ` +
-        transcriptionRules;
-    } else {
-      docSource = fileId
-        ? { type: "file", file_id: fileId }
-        : { type: "base64", media_type: "application/pdf", data: wholeDocBase64 ?? convertPdfToBase64(fileBytes) };
-      prompt = totalPages > 0
-        ? `This is an Australian/New Zealand technical Standards document. ` +
-          `Transcribe ONLY pages ${startPage} to ${endPage} of the document (counting from the first page of the file as page 1) completely and accurately. ` +
-          `Insert [PAGE N] at the start of each transcribed page, numbering from ${startPage}. ` + transcriptionRules
-        : `This is an Australian/New Zealand technical Standards document. Transcribe ALL content completely and accurately. ` +
-          `Insert [PAGE N] markers between pages. ` + transcriptionRules;
-    }
-
-    console.log(`AI OCR batch ${batch + 1}/${batchCount}: pages ${startPage}–${endPage}${sliced ? " (sliced)" : fileId ? " (whole doc via file)" : " (whole doc)"}`);
+    console.log(`AI OCR${label} batch ${batch + 1}/${batchCount}: pages ${startPage}–${endPage}${fileId ? " (whole doc via file)" : " (whole doc)"}`);
 
     let completionResponse: Response;
     try {
@@ -235,9 +212,8 @@ async function extractTextWithAI(
           messages: [{
             role: "user",
             content: [
-              // cache_control: batches 2..N send the IDENTICAL document (whole-
-              // doc mode) — caching it cuts input cost ~90% for every batch
-              // after the first. No-op for the sliced path (unique doc per call).
+              // cache_control: batches 2..N send the IDENTICAL document —
+              // caching it cuts input cost ~90% for every batch after the first.
               { type: "document", source: docSource, cache_control: { type: "ephemeral" } },
               { type: "text", text: prompt },
             ],
@@ -249,26 +225,24 @@ async function extractTextWithAI(
       // same recovery as an HTTP-level failure: pause and let resume retry
       // this exact batch, rather than let the whole function hang until the
       // platform kills it with no checkpoint written.
-      console.warn(`AI OCR batch ${batch + 1} fetch failed/timed out:`, e);
-      if (batch === firstBatch && fullText.length === 0) {
+      console.warn(`AI OCR${label} batch ${batch + 1} fetch failed/timed out:`, e);
+      if (batch === firstBatch && fullText.length === 0 && !hasAnyTextYet) {
         if (fileId) await deleteFilesApiFile(fileId, anthropicApiKey);
         throw new Error("AI extraction failed: request timed out before a response was received.");
       }
-      nextPage = batch * pagesPerBatch + 1;
-      break;
+      return { text: fullText, status: "paused", nextPage: batch * pagesPerBatch + 1, fileId };
     }
 
     if (!completionResponse.ok) {
       const errText = await completionResponse.text();
-      console.error(`AI OCR batch ${batch + 1} failed:`, completionResponse.status, errText);
-      if (batch === firstBatch && fullText.length === 0) {
+      console.error(`AI OCR${label} batch ${batch + 1} failed:`, completionResponse.status, errText);
+      if (batch === firstBatch && fullText.length === 0 && !hasAnyTextYet) {
         if (fileId) await deleteFilesApiFile(fileId, anthropicApiKey);
         throw new Error(`AI extraction failed: ${completionResponse.status}`);
       }
       // Transient failure mid-document — pause here and let the resume
       // retry this batch, instead of shipping a silently truncated document.
-      nextPage = batch * pagesPerBatch + 1;
-      break;
+      return { text: fullText, status: "paused", nextPage: batch * pagesPerBatch + 1, fileId };
     }
 
     const data = await completionResponse.json();
@@ -285,22 +259,115 @@ async function extractTextWithAI(
     }
     const batchText: string = data.content?.[0]?.text || "";
     if (data.stop_reason === "max_tokens") {
-      console.warn(`AI OCR batch ${batch + 1} hit max_tokens — output may have lost the tail of page ${endPage}`);
+      console.warn(`AI OCR${label} batch ${batch + 1} hit max_tokens — output may have lost the tail of page ${endPage}`);
     }
     if (batchText.length < 50) {
-      console.warn(`AI OCR batch ${batch + 1} returned very little text — stopping`);
-      nextPage = null; // nothing more to get (blank/failed pages are caught by the failure gate)
-      break;
+      console.warn(`AI OCR${label} batch ${batch + 1} returned very little text — stopping`);
+      return { text: fullText, status: "stopped", nextPage: null, fileId };
     }
 
     fullText += (fullText ? "\n\n" : "") + batchText;
-    console.log(`Batch ${batch + 1} extracted: ${batchText.length} chars`);
+    console.log(`${logLabel ? `${logLabel} ` : ""}Batch ${batch + 1} extracted: ${batchText.length} chars`);
   }
 
-  // Each OCR window uploads its own copy, so delete it on the way out. A
-  // crashed window can orphan one file at Anthropic — harmless, storage is
+  return { text: fullText, status: "complete", nextPage: null, fileId };
+}
+
+// Reads the PDF visually so special characters like Ω are transcribed
+// correctly rather than corrupted by font encoding. Stops at `deadline` and
+// returns what it has — partial text either passes the quality gate or gets
+// rejected there with a clear message.
+// Returns the transcribed text plus resume state: `nextPage` is the first
+// page NOT yet transcribed, in the FULL document's page numbering (null when
+// the whole document is done). The caller persists partial text + nextPage
+// and retriggers itself — a scanned 60-page standard takes ~10 batches, far
+// more than one function window.
+//
+// Documents within WHOLE_DOC_MAX_PAGES are sent completely untouched, in one
+// piece, exactly as before. A document over that limit is split into
+// consecutive ≤WHOLE_DOC_MAX_PAGES-page PARTS — each pdf-lib-sliced out ONCE
+// and OCR'd as its own self-contained document (its own pages numbered
+// 1..N — no special "what's the real page number" prompting). The [PAGE N]
+// markers in every part after the first are then shifted up by that part's
+// offset in plain code before the parts are joined. This replaces slicing
+// every individual 6-page batch (~100 pdf-lib rebuilds for a 611-page
+// document): pdf-lib's page copy can drop embedded page images on scanned
+// documents, so cutting the rebuild count from ~100 down to 2 for a document
+// this size meaningfully lowers (without eliminating) the odds of hitting
+// that on any given page.
+async function extractTextWithAI(
+  fileBytes: Uint8Array,
+  anthropicApiKey: string,
+  totalPages = 0,
+  deadline = Number.POSITIVE_INFINITY,
+  startPage = 1,
+  usageLogger?: { supabaseAdmin: any; userId: string; standardId: string },
+): Promise<{ text: string; nextPage: number | null; totalPages: number }> {
+  let srcDoc: PDFDocument | null = null;
+  try {
+    srcDoc = await PDFDocument.load(fileBytes, { ignoreEncryption: true });
+    if (totalPages === 0) totalPages = srcDoc.getPageCount();
+  } catch (e) {
+    console.warn("pdf-lib could not load document — OCR will send the whole file as a single part:", e);
+  }
+
+  const canSplitIntoParts = !!srcDoc && totalPages > 0;
+  const numParts = canSplitIntoParts ? Math.ceil(totalPages / WHOLE_DOC_MAX_PAGES) : 1;
+  const startPart = canSplitIntoParts ? Math.floor((startPage - 1) / WHOLE_DOC_MAX_PAGES) : 0;
+
+  let fullText = "";
+  let nextPage: number | null = null;
+  const uploadedFileIds: string[] = [];
+
+  for (let part = startPart; part < numParts; part++) {
+    const partStart = canSplitIntoParts ? part * WHOLE_DOC_MAX_PAGES + 1 : 1;
+    const partEnd = canSplitIntoParts ? Math.min((part + 1) * WHOLE_DOC_MAX_PAGES, totalPages) : 0;
+    const partTotalPages = canSplitIntoParts ? (partEnd - partStart + 1) : 0;
+    const offset = partStart - 1; // added to every LOCAL page number this part reports
+
+    // Only rebuild via pdf-lib when the document needs more than one part —
+    // the common case (≤ WHOLE_DOC_MAX_PAGES pages) sends the real,
+    // untouched file, exactly as before.
+    let partBytes = fileBytes;
+    if (numParts > 1 && srcDoc) {
+      const slicedPart = await slicePdfPages(srcDoc, partStart, partEnd);
+      if (!slicedPart) break; // slicing failed — stop with whatever we have; the outer failure gate catches a too-short result
+      partBytes = slicedPart;
+    }
+
+    const localStartPage = part === startPart ? Math.max(1, startPage - offset) : 1;
+
+    const result = await runWholeDocBatchOcr(
+      partBytes,
+      partTotalPages,
+      anthropicApiKey,
+      deadline,
+      localStartPage,
+      fullText.length > 0,
+      usageLogger,
+      numParts > 1 ? `part ${part + 1}/${numParts}` : undefined,
+    );
+
+    if (result.fileId) uploadedFileIds.push(result.fileId);
+
+    const shiftedText = offset > 0
+      ? result.text.replace(/\[PAGE\s+(\d+)\]/gi, (_m, n) => `[PAGE ${parseInt(n, 10) + offset}]`)
+      : result.text;
+    fullText += (fullText ? "\n\n" : "") + shiftedText;
+
+    if (result.status === "paused") {
+      nextPage = (result.nextPage as number) + offset;
+      break;
+    }
+    // "stopped": give up on this part but still try any remaining parts —
+    // they're independent files, so one part's blank pages don't imply the
+    // next part has the same problem. "complete": just move on.
+  }
+
+  // Each part uploads its own copy, so delete them all on the way out. A
+  // crashed window can orphan a file at Anthropic — harmless, storage is
   // free — but the normal path stays tidy.
-  if (fileId) await deleteFilesApiFile(fileId, anthropicApiKey);
+  for (const id of uploadedFileIds) await deleteFilesApiFile(id, anthropicApiKey);
 
   console.log(`AI OCR run: ${fullText.length} chars, nextPage=${nextPage ?? "done"}`);
   return { text: fullText, nextPage, totalPages };
