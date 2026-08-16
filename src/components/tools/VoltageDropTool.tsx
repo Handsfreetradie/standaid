@@ -3,9 +3,12 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import ToolLayout from "./ToolLayout";
 import ResultRow from "./ResultRow";
 import WorkingTable, { WorkingStep } from "./WorkingTable";
+import AddToProjectModal from "./AddToProjectModal";
+import { saveCalculationToProject } from "./projectUtils";
 import {
   SystemType, PhaseType, CableMaterial,
   CABLE_TYPES, CURRENT_CAPACITY,
@@ -51,6 +54,7 @@ const VoltageDropTool = ({ onBack }: Props) => {
   const [installMethod, setInstallMethod] = useState("clipped-direct");
   const [circuits, setCircuits] = useState("1");
   const [result, setResult] = useState<VdResult | null>(null);
+  const [showProjectModal, setShowProjectModal] = useState(false);
 
   const ct = CABLE_TYPES[cableType];
   const availableSizes = useMemo(() => getAvailableSizes(cableType, material), [cableType, material]);
@@ -286,6 +290,15 @@ const VoltageDropTool = ({ onBack }: Props) => {
           ))}
 
           <WorkingTable steps={workingSteps} />
+
+          {/* Add to Project Button */}
+          <Button
+            onClick={() => setShowProjectModal(true)}
+            variant="outline"
+            className="w-full mt-4"
+          >
+            Add to Project
+          </Button>
         </>
       ) : undefined}
       advancedInputs={
@@ -456,6 +469,39 @@ const VoltageDropTool = ({ onBack }: Props) => {
           ))}
         </div>
       </div>
+
+      {/* Add to Project Modal */}
+      <AddToProjectModal
+        isOpen={showProjectModal}
+        onClose={() => setShowProjectModal(false)}
+        onSave={(projectId, projectName) => {
+          saveCalculationToProject(
+            projectId,
+            projectName,
+            "voltage-drop",
+            "Voltage Drop",
+            {
+              system,
+              phase,
+              material,
+              cableType,
+              cableSize,
+              loadMode,
+              loadValue,
+              length,
+              voltage,
+              powerFactor,
+              ambientTemp,
+              installMethod,
+              circuits,
+            },
+            result,
+            `${cableSize} mm² ${material} — ${loadValue}${loadMode === "kw" ? " kW" : " A"} over ${length} m: ${result?.vdPercent.toFixed(2)}% VD`
+          );
+          setShowProjectModal(false);
+        }}
+        calculationSummary={`Voltage Drop: ${result?.vdPercent.toFixed(2)}% (${result?.vdVolts.toFixed(2)}V)`}
+      />
     </ToolLayout>
   );
 };
