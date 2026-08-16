@@ -543,7 +543,7 @@ serve(async (req) => {
           // waitUntil so the edge runtime keeps this isolate alive to finish
           // the writes instead of freezing it the instant the response
           // above is sent — mirrors the miss-path logging below.
-          EdgeRuntime.waitUntil((async () => {
+          (globalThis as any).EdgeRuntime?.waitUntil?.((async () => {
             await supabase.rpc("bump_question_cache_hit", { p_id: cacheHit.id });
             const { data: queryRecord } = await supabase.from("queries").insert({
               user_id: userId,
@@ -892,7 +892,7 @@ serve(async (req) => {
     // matched standards' definitions clauses for the question's key terms.
     if (standardIds.length > 0) {
       const stop = new Set(["what","which","where","does","the","and","for","are","can","how","with","from","that","this","when","must","need","should","installation","standard","standards","requirement","requirements","allowed","required","between","there"]);
-      const terms = [...new Set(effectiveQuestion.toLowerCase().match(/\b[a-z][a-z-]{3,}\b/g) || [])]
+      const terms = [...new Set<string>(effectiveQuestion.toLowerCase().match(/\b[a-z][a-z-]{3,}\b/g) || [])]
         .filter((w) => !stop.has(w)).slice(0, 6);
       if (terms.length > 0) {
         const orTerms = terms.map((t) => `content.ilike.%${t}%`).join(",");
@@ -1846,7 +1846,7 @@ User's question/context: ${effectiveQuestion}` : "";
         // Non-blocking DB logging, wrapped in waitUntil so the edge runtime
         // keeps this isolate alive to finish the writes instead of freezing
         // it the instant writer.close() below finishes the response.
-        EdgeRuntime.waitUntil((async () => {
+        (globalThis as any).EdgeRuntime?.waitUntil?.((async () => {
           await supabase.from("query_log").insert({
             id: queryId,
             user_id: userId,
