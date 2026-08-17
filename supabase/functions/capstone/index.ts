@@ -484,12 +484,12 @@ serve(async (req) => {
     // Fetch subscription tier for rate limit enforcement
     // If profile missing, default to free tier
     let tier: "free" | "pro" | "business" = "free";
-    const { data: profile, error: profileError } = await supabase
+    const { data: profile } = await supabase
       .from("profiles")
       .select("subscription_tier")
       .eq("id", user.id)
-      .single();
-    if (!profileError && profile?.subscription_tier) {
+      .maybeSingle();
+    if (profile?.subscription_tier) {
       tier = profile.subscription_tier;
     }
 
