@@ -5,6 +5,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { Trash2, Plus } from "lucide-react";
 import ToolLayout from "./ToolLayout";
+import AddToProjectModal from "./AddToProjectModal";
+import { saveCalculationToProject } from "./projectUtils";
 import ResultRow from "./ResultRow";
 import WorkingTable, { WorkingStep } from "./WorkingTable";
 import { CONDUIT_SIZES, CABLE_OD, CONDUIT_FILL_RATIOS } from "./electricalData";
@@ -37,6 +39,7 @@ const ConduitFillTool = ({ onBack }: Props) => {
     { id: nextId++, cableType: "V-90 (single core)", cableSize: "2.5", quantity: 3 },
   ]);
   const [result, setResult] = useState<FillResult | null>(null);
+  const [showProjectModal, setShowProjectModal] = useState(false);
 
   const addCable = () => {
     setCables([...cables, { id: nextId++, cableType: "V-90 (single core)", cableSize: "2.5", quantity: 1 }]);
@@ -181,6 +184,15 @@ const ConduitFillTool = ({ onBack }: Props) => {
           ))}
 
           <WorkingTable steps={workingSteps} />
+        <div className="mt-4 pt-4 border-t">
+            <button
+              onClick={() => setShowProjectModal(true)}
+              className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm font-medium"
+            >
+              Add to Project
+            </button>
+          </div>
+
         </>
       ) : undefined}
       advancedInputs={undefined}
@@ -239,7 +251,26 @@ const ConduitFillTool = ({ onBack }: Props) => {
           </div>
         ))}
       </div>
-    </ToolLayout>
+
+      <AddToProjectModal
+        isOpen={showProjectModal}
+        onClose={() => setShowProjectModal(false)}
+        onSave={(projectId, projectName, calcLabel) => {
+          saveCalculationToProject(
+            projectId,
+            projectName,
+            "conduit-fill",
+            "Conduit Fill",
+            {}, // Inputs - populate based on tool state
+            result,
+            `Conduit Fill calculation`,
+            calcLabel
+          );
+          setShowProjectModal(false);
+        }}
+        calculationSummary={result ? `Conduit Fill` : ''}
+      />
+        </ToolLayout>
   );
 };
 

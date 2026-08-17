@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { Label } from "@/components/ui/label";
+import { Label, Button } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import ToolLayout from "./ToolLayout";
+import AddToProjectModal from "./AddToProjectModal";
+import { saveCalculationToProject } from "./projectUtils";
 import ResultRow from "./ResultRow";
 
 type ShapeType = "rectangular" | "circular" | "triangular";
@@ -46,6 +48,7 @@ const ConcreteVolumeTool = ({ onBack }: Props) => {
   const [rebarLevel, setRebarLevel] = useState("none");
   const [quantity, setQuantity] = useState("1");
   const [result, setResult] = useState<ConResult | null>(null);
+  const [showProjectModal, setShowProjectModal] = useState(false);
 
   const calculate = () => {
     const d = parseFloat(depth);
@@ -126,6 +129,15 @@ const ConcreteVolumeTool = ({ onBack }: Props) => {
           {result.warnings.map((w, i) => (
             <p key={i} className="text-xs text-destructive mt-2 font-medium">⚠️ {w}</p>
           ))}
+        <div className="mt-4 pt-4 border-t">
+            <button
+              onClick={() => setShowProjectModal(true)}
+              className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm font-medium"
+            >
+              Add to Project
+            </button>
+          </div>
+
         </>
       ) : undefined}
       advancedInputs={
@@ -223,7 +235,26 @@ const ConcreteVolumeTool = ({ onBack }: Props) => {
           ))}
         </div>
       </div>
-    </ToolLayout>
+
+      <AddToProjectModal
+        isOpen={showProjectModal}
+        onClose={() => setShowProjectModal(false)}
+        onSave={(projectId, projectName, calcLabel) => {
+          saveCalculationToProject(
+            projectId,
+            projectName,
+            "concrete-volume",
+            "Concrete Volume",
+            {}, // Inputs - populate based on tool state
+            result,
+            `Concrete Volume calculation`,
+            calcLabel
+          );
+          setShowProjectModal(false);
+        }}
+        calculationSummary={result ? `Concrete Volume` : ''}
+      />
+        </ToolLayout>
   );
 };
 

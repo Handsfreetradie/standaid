@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { Label } from "@/components/ui/label";
+import { Label, Button } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import ToolLayout from "./ToolLayout";
+import AddToProjectModal from "./AddToProjectModal";
+import { saveCalculationToProject } from "./projectUtils";
 import ResultRow from "./ResultRow";
 
 type LoadCase = "masonry" | "single" | "two";
@@ -61,6 +63,7 @@ const SteelLintelTool = ({ onBack }: Props) => {
   const [loadCase, setLoadCase] = useState<LoadCase>("masonry");
   const [opening, setOpening] = useState("");
   const [result, setResult] = useState<LintelResult | null>(null);
+  const [showProjectModal, setShowProjectModal] = useState(false);
 
   const calculate = () => {
     const openingMm = parseFloat(opening);
@@ -116,6 +119,14 @@ const SteelLintelTool = ({ onBack }: Props) => {
               💡 Galvanised lintels in exposure zones near the coast may need duplex/stainless coating —
               check the manufacturer's durability requirements.
             </p>
+            <div className="mt-4 pt-4 border-t">
+              <button
+                onClick={() => setShowProjectModal(true)}
+                className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm font-medium"
+              >
+                Add to Project
+              </button>
+            </div>
           </>
         ) : (
           <p className="text-xs text-destructive font-medium">
@@ -141,7 +152,26 @@ const SteelLintelTool = ({ onBack }: Props) => {
           value={opening} onChange={(e) => { setOpening(e.target.value); setResult(null); }} />
         <p className="text-[10px] text-muted-foreground mt-0.5">Valid range: 600–3000 mm</p>
       </div>
-    </ToolLayout>
+
+      <AddToProjectModal
+        isOpen={showProjectModal}
+        onClose={() => setShowProjectModal(false)}
+        onSave={(projectId, projectName, calcLabel) => {
+          saveCalculationToProject(
+            projectId,
+            projectName,
+            "steel-lintel",
+            "Steel Lintel",
+            {}, // Inputs - populate based on tool state
+            result,
+            `Steel Lintel calculation`,
+            calcLabel
+          );
+          setShowProjectModal(false);
+        }}
+        calculationSummary={result ? `Steel Lintel` : ''}
+      />
+        </ToolLayout>
   );
 };
 

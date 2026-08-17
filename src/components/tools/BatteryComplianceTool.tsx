@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { Label } from "@/components/ui/label";
+import { Label, Button } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import ToolLayout from "./ToolLayout";
+import AddToProjectModal from "./AddToProjectModal";
+import { saveCalculationToProject } from "./projectUtils";
 import ResultRow from "./ResultRow";
 
 // Location screening categories reflecting AS/NZS 5139's structure as supplied
@@ -66,6 +68,7 @@ const BatteryComplianceTool = ({ onBack }: Props) => {
   const [surface, setSurface] = useState<Surface>("non-combustible");
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showProjectModal, setShowProjectModal] = useState(false);
 
   const calculate = () => {
     setError(null);
@@ -189,6 +192,16 @@ const BatteryComplianceTool = ({ onBack }: Props) => {
             </>
           )}
 
+        <div className="mt-4 pt-4 border-t">
+            <button
+              onClick={() => setShowProjectModal(true)}
+              className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm font-medium"
+            >
+              Add to Project
+            </button>
+          </div>
+
+
         </>
       ) : undefined}
     >
@@ -233,7 +246,26 @@ const BatteryComplianceTool = ({ onBack }: Props) => {
           ))}
         </div>
       </div>
-    </ToolLayout>
+
+      <AddToProjectModal
+        isOpen={showProjectModal}
+        onClose={() => setShowProjectModal(false)}
+        onSave={(projectId, projectName, calcLabel) => {
+          saveCalculationToProject(
+            projectId,
+            projectName,
+            "battery-check",
+            "Battery Compliance",
+            {}, // Inputs - populate based on tool state
+            result,
+            `Battery Compliance calculation`,
+            calcLabel
+          );
+          setShowProjectModal(false);
+        }}
+        calculationSummary={result ? `Battery Compliance` : ''}
+      />
+        </ToolLayout>
   );
 };
 

@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { Label } from "@/components/ui/label";
+import { Label, Button } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import ToolLayout from "./ToolLayout";
+import AddToProjectModal from "./AddToProjectModal";
+import { saveCalculationToProject } from "./projectUtils";
 import ResultRow from "./ResultRow";
 
 const BRICK_TYPES: Record<string, { label: string; perM2: number; mortarKgPerM2: number }> = {
@@ -32,6 +34,7 @@ const BrickCalculatorTool = ({ onBack }: Props) => {
   const [openings, setOpenings] = useState("0");
   const [wasteFactor, setWasteFactor] = useState("10");
   const [result, setResult] = useState<BrickResult | null>(null);
+  const [showProjectModal, setShowProjectModal] = useState(false);
 
   const calculate = () => {
     const L = parseFloat(wallLength);
@@ -81,6 +84,15 @@ const BrickCalculatorTool = ({ onBack }: Props) => {
           {result.warnings.map((w, i) => (
             <p key={i} className="text-xs text-destructive mt-2 font-medium">⚠️ {w}</p>
           ))}
+        <div className="mt-4 pt-4 border-t">
+            <button
+              onClick={() => setShowProjectModal(true)}
+              className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm font-medium"
+            >
+              Add to Project
+            </button>
+          </div>
+
         </>
       ) : undefined}
       advancedInputs={
@@ -129,7 +141,26 @@ const BrickCalculatorTool = ({ onBack }: Props) => {
             value={wallHeight} onChange={(e) => setWallHeight(e.target.value)} />
         </div>
       </div>
-    </ToolLayout>
+
+      <AddToProjectModal
+        isOpen={showProjectModal}
+        onClose={() => setShowProjectModal(false)}
+        onSave={(projectId, projectName, calcLabel) => {
+          saveCalculationToProject(
+            projectId,
+            projectName,
+            "brick-calc",
+            "Brick Calculator",
+            {}, // Inputs - populate based on tool state
+            result,
+            `Brick Calculator calculation`,
+            calcLabel
+          );
+          setShowProjectModal(false);
+        }}
+        calculationSummary={result ? `Brick Calculator` : ''}
+      />
+        </ToolLayout>
   );
 };
 

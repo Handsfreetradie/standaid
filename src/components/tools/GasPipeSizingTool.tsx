@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { Label } from "@/components/ui/label";
+import { Label, Button } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import ToolLayout from "./ToolLayout";
+import AddToProjectModal from "./AddToProjectModal";
+import { saveCalculationToProject } from "./projectUtils";
 import ResultRow from "./ResultRow";
 
 // AS/NZS 5601 gas pipe sizing — max capacity in MJ/h for natural gas.
@@ -54,6 +56,7 @@ const GasPipeSizingTool = ({ onBack }: Props) => {
   const [useAppliances, setUseAppliances] = useState(false);
   const [selectedAppliances, setSelectedAppliances] = useState<string[]>([]);
   const [result, setResult] = useState<GasResult | null>(null);
+  const [showProjectModal, setShowProjectModal] = useState(false);
 
   const toggleAppliance = (key: string) => {
     setSelectedAppliances(prev =>
@@ -133,6 +136,15 @@ const GasPipeSizingTool = ({ onBack }: Props) => {
           {result.warnings.map((w, i) => (
             <p key={i} className="text-xs text-destructive mt-2 font-medium">⚠️ {w}</p>
           ))}
+        <div className="mt-4 pt-4 border-t">
+            <button
+              onClick={() => setShowProjectModal(true)}
+              className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm font-medium"
+            >
+              Add to Project
+            </button>
+          </div>
+
         </>
       ) : undefined}
     >
@@ -194,7 +206,26 @@ const GasPipeSizingTool = ({ onBack }: Props) => {
             value={totalLoadMjh} onChange={(e) => setTotalLoadMjh(e.target.value)} />
         </div>
       )}
-    </ToolLayout>
+
+      <AddToProjectModal
+        isOpen={showProjectModal}
+        onClose={() => setShowProjectModal(false)}
+        onSave={(projectId, projectName, calcLabel) => {
+          saveCalculationToProject(
+            projectId,
+            projectName,
+            "gas-pipe",
+            "Gas Pipe Sizing",
+            {}, // Inputs - populate based on tool state
+            result,
+            `Gas Pipe Sizing calculation`,
+            calcLabel
+          );
+          setShowProjectModal(false);
+        }}
+        calculationSummary={result ? `Gas Pipe Sizing` : ''}
+      />
+        </ToolLayout>
   );
 };
 

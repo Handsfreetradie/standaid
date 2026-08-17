@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { Label } from "@/components/ui/label";
+import { Label, Button } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import ToolLayout from "./ToolLayout";
+import AddToProjectModal from "./AddToProjectModal";
+import { saveCalculationToProject } from "./projectUtils";
 import ResultRow from "./ResultRow";
 
 // Pipe sizes by material (nominal bore in mm)
@@ -56,6 +58,7 @@ const PipeSizingTool = ({ onBack }: Props) => {
   const [pressureClass, setPressureClass] = useState("PN9");
   const [fittingsAllowance, setFittingsAllowance] = useState("10");
   const [result, setResult] = useState<PipeResult | null>(null);
+  const [showProjectModal, setShowProjectModal] = useState(false);
 
   const maxVelocity = application === "custom"
     ? parseFloat(customVelocity) || 1.5
@@ -145,6 +148,15 @@ const PipeSizingTool = ({ onBack }: Props) => {
           {result.warnings.map((w, i) => (
             <p key={i} className="text-xs text-destructive mt-2 font-medium">⚠️ {w}</p>
           ))}
+        <div className="mt-4 pt-4 border-t">
+            <button
+              onClick={() => setShowProjectModal(true)}
+              className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm font-medium"
+            >
+              Add to Project
+            </button>
+          </div>
+
         </>
       ) : undefined}
       advancedInputs={
@@ -228,7 +240,26 @@ const PipeSizingTool = ({ onBack }: Props) => {
           </div>
         </div>
       </div>
-    </ToolLayout>
+
+      <AddToProjectModal
+        isOpen={showProjectModal}
+        onClose={() => setShowProjectModal(false)}
+        onSave={(projectId, projectName, calcLabel) => {
+          saveCalculationToProject(
+            projectId,
+            projectName,
+            "pipe-sizing",
+            "Pipe Sizing",
+            {}, // Inputs - populate based on tool state
+            result,
+            `Pipe Sizing calculation`,
+            calcLabel
+          );
+          setShowProjectModal(false);
+        }}
+        calculationSummary={result ? `Pipe Sizing` : ''}
+      />
+        </ToolLayout>
   );
 };
 

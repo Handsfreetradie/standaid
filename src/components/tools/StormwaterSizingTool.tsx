@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { Label } from "@/components/ui/label";
+import { Label, Button } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import ToolLayout from "./ToolLayout";
+import AddToProjectModal from "./AddToProjectModal";
+import { saveCalculationToProject } from "./projectUtils";
 import ResultRow from "./ResultRow";
 
 // Indicative 5-minute duration, 5% AEP (1-in-20 ARI) rainfall intensities compiled by lead
@@ -65,6 +67,7 @@ const StormwaterSizingTool = ({ onBack }: Props) => {
   const [area, setArea] = useState("");
   const [downpipeType, setDownpipeType] = useState("100 mm round");
   const [result, setResult] = useState<StormwaterResult | null>(null);
+  const [showProjectModal, setShowProjectModal] = useState(false);
 
   const handleLocationChange = (value: string) => {
     setLocation(value);
@@ -144,6 +147,15 @@ const StormwaterSizingTool = ({ onBack }: Props) => {
               ⚠️ Consider splitting the roof into separate gutter runs.
             </p>
           )}
+        <div className="mt-4 pt-4 border-t">
+            <button
+              onClick={() => setShowProjectModal(true)}
+              className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm font-medium"
+            >
+              Add to Project
+            </button>
+          </div>
+
         </>
       ) : undefined}
     >
@@ -183,7 +195,26 @@ const StormwaterSizingTool = ({ onBack }: Props) => {
           </SelectContent>
         </Select>
       </div>
-    </ToolLayout>
+
+      <AddToProjectModal
+        isOpen={showProjectModal}
+        onClose={() => setShowProjectModal(false)}
+        onSave={(projectId, projectName, calcLabel) => {
+          saveCalculationToProject(
+            projectId,
+            projectName,
+            "stormwater",
+            "Stormwater Sizing",
+            {}, // Inputs - populate based on tool state
+            result,
+            `Stormwater Sizing calculation`,
+            calcLabel
+          );
+          setShowProjectModal(false);
+        }}
+        calculationSummary={result ? `Stormwater Sizing` : ''}
+      />
+        </ToolLayout>
   );
 };
 

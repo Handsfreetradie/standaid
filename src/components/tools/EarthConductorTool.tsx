@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { Label } from "@/components/ui/label";
+import { Label, Button } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import ToolLayout from "./ToolLayout";
+import AddToProjectModal from "./AddToProjectModal";
+import { saveCalculationToProject } from "./projectUtils";
 import ResultRow from "./ResultRow";
 import WorkingTable, { WorkingStep } from "./WorkingTable";
 
@@ -45,6 +47,7 @@ const EarthConductorTool = ({ onBack }: Props) => {
   const [activeSize, setActiveSize] = useState("2.5");
   const [activeMaterial, setActiveMaterial] = useState<"copper" | "aluminium">("copper");
   const [result, setResult] = useState<EarthRow | null>(null);
+  const [showProjectModal, setShowProjectModal] = useState(false);
 
   const rows = activeMaterial === "copper"
     ? TABLE_5_1
@@ -115,6 +118,15 @@ const EarthConductorTool = ({ onBack }: Props) => {
           )}
 
           <WorkingTable steps={workingSteps} />
+        <div className="mt-4 pt-4 border-t">
+            <button
+              onClick={() => setShowProjectModal(true)}
+              className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm font-medium"
+            >
+              Add to Project
+            </button>
+          </div>
+
         </>
       ) : undefined}
     >
@@ -142,7 +154,26 @@ const EarthConductorTool = ({ onBack }: Props) => {
           Largest active conductor of the circuit supplying the equipment
         </p>
       </div>
-    </ToolLayout>
+
+      <AddToProjectModal
+        isOpen={showProjectModal}
+        onClose={() => setShowProjectModal(false)}
+        onSave={(projectId, projectName, calcLabel) => {
+          saveCalculationToProject(
+            projectId,
+            projectName,
+            "earth-conductor",
+            "Earth Conductor",
+            {}, // Inputs - populate based on tool state
+            result,
+            `Earth Conductor calculation`,
+            calcLabel
+          );
+          setShowProjectModal(false);
+        }}
+        calculationSummary={result ? `Earth Conductor` : ''}
+      />
+        </ToolLayout>
   );
 };
 

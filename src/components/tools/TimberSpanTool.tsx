@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { Label } from "@/components/ui/label";
+import { Label, Button } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import ToolLayout from "./ToolLayout";
+import AddToProjectModal from "./AddToProjectModal";
+import { saveCalculationToProject } from "./projectUtils";
 import ResultRow from "./ResultRow";
 
 // Simplified AS 1684 span tables — max span in mm for common scenarios.
@@ -77,6 +79,7 @@ const TimberSpanTool = ({ onBack }: Props) => {
   const [spacing, setSpacing] = useState("450");
   const [span, setSpan] = useState("");
   const [result, setResult] = useState<SpanResult | null>(null);
+  const [showProjectModal, setShowProjectModal] = useState(false);
 
   // Real AS 1684-2006 data only covers MGP10 floor joists at 450/600mm — see
   // VERIFIED_FLOOR_JOIST_MGP10. Everything else uses the old estimated table.
@@ -186,6 +189,15 @@ const TimberSpanTool = ({ onBack }: Props) => {
           {result.warnings.map((w, i) => (
             <p key={i} className="text-xs text-destructive mt-2 font-medium">⚠️ {w}</p>
           ))}
+        <div className="mt-4 pt-4 border-t">
+            <button
+              onClick={() => setShowProjectModal(true)}
+              className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm font-medium"
+            >
+              Add to Project
+            </button>
+          </div>
+
         </>
       ) : undefined}
     >
@@ -241,7 +253,26 @@ const TimberSpanTool = ({ onBack }: Props) => {
         <Input type="number" inputMode="decimal" className="h-11 mt-1" placeholder="e.g. 3.6"
           value={span} onChange={(e) => setSpan(e.target.value)} />
       </div>
-    </ToolLayout>
+
+      <AddToProjectModal
+        isOpen={showProjectModal}
+        onClose={() => setShowProjectModal(false)}
+        onSave={(projectId, projectName, calcLabel) => {
+          saveCalculationToProject(
+            projectId,
+            projectName,
+            "timber-span",
+            "Timber Span",
+            {}, // Inputs - populate based on tool state
+            result,
+            `Timber Span calculation`,
+            calcLabel
+          );
+          setShowProjectModal(false);
+        }}
+        calculationSummary={result ? `Timber Span` : ''}
+      />
+        </ToolLayout>
   );
 };
 

@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { Label } from "@/components/ui/label";
+import { Label, Button } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import ToolLayout from "./ToolLayout";
+import AddToProjectModal from "./AddToProjectModal";
+import { saveCalculationToProject } from "./projectUtils";
 import ResultRow from "./ResultRow";
 
 type Hazard = "low" | "medium" | "high";
@@ -68,6 +70,7 @@ const BackflowPreventionTool = ({ onBack }: Props) => {
   const [hazard, setHazard] = useState<Hazard>("low");
   const [protection, setProtection] = useState<Protection>("containment");
   const [result, setResult] = useState<DeviceResult | null>(null);
+  const [showProjectModal, setShowProjectModal] = useState(false);
 
   const handleConnectionTypeChange = (value: string) => {
     setConnectionType(value);
@@ -141,6 +144,15 @@ const BackflowPreventionTool = ({ onBack }: Props) => {
               protection may still be required at the fixture by the local network utility.
             </p>
           )}
+        <div className="mt-4 pt-4 border-t">
+            <button
+              onClick={() => setShowProjectModal(true)}
+              className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm font-medium"
+            >
+              Add to Project
+            </button>
+          </div>
+
         </>
       ) : undefined}
     >
@@ -183,7 +195,26 @@ const BackflowPreventionTool = ({ onBack }: Props) => {
           </SelectContent>
         </Select>
       </div>
-    </ToolLayout>
+
+      <AddToProjectModal
+        isOpen={showProjectModal}
+        onClose={() => setShowProjectModal(false)}
+        onSave={(projectId, projectName, calcLabel) => {
+          saveCalculationToProject(
+            projectId,
+            projectName,
+            "backflow",
+            "Backflow Prevention",
+            {}, // Inputs - populate based on tool state
+            result,
+            `Backflow Prevention calculation`,
+            calcLabel
+          );
+          setShowProjectModal(false);
+        }}
+        calculationSummary={result ? `Backflow Prevention` : ''}
+      />
+        </ToolLayout>
   );
 };
 

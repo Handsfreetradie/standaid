@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { Label } from "@/components/ui/label";
+import { Label, Button } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import ToolLayout from "./ToolLayout";
+import AddToProjectModal from "./AddToProjectModal";
+import { saveCalculationToProject } from "./projectUtils";
 import ResultRow from "./ResultRow";
 
 // Pure datasheet physics — no AS/NZS 5033/4777 values are embedded here.
@@ -58,6 +60,7 @@ const PVStringSizingTool = ({ onBack }: Props) => {
   const [dcLimit, setDcLimit] = useState("");
 
   const [result, setResult] = useState<PVResult | null>(null);
+  const [showProjectModal, setShowProjectModal] = useState(false);
 
   const clearResult = () => setResult(null);
 
@@ -191,6 +194,15 @@ const PVStringSizingTool = ({ onBack }: Props) => {
             💡 Datasheet maths only — array cabling, isolation, earthing and signage requirements come from
             AS/NZS 5033: check your uploaded copy.
           </p>
+        <div className="mt-4 pt-4 border-t">
+            <button
+              onClick={() => setShowProjectModal(true)}
+              className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm font-medium"
+            >
+              Add to Project
+            </button>
+          </div>
+
         </>
       ) : undefined}
       advancedInputs={
@@ -290,7 +302,26 @@ const PVStringSizingTool = ({ onBack }: Props) => {
           value={panelsPerString} onChange={(e) => { setPanelsPerString(e.target.value); clearResult(); }} />
         <p className="text-[10px] text-muted-foreground mt-0.5">Valid range 1–40</p>
       </div>
-    </ToolLayout>
+
+      <AddToProjectModal
+        isOpen={showProjectModal}
+        onClose={() => setShowProjectModal(false)}
+        onSave={(projectId, projectName, calcLabel) => {
+          saveCalculationToProject(
+            projectId,
+            projectName,
+            "pv-string",
+            "PV String Sizing",
+            {}, // Inputs - populate based on tool state
+            result,
+            `PV String Sizing calculation`,
+            calcLabel
+          );
+          setShowProjectModal(false);
+        }}
+        calculationSummary={result ? `PV String Sizing` : ''}
+      />
+        </ToolLayout>
   );
 };
 

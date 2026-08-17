@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { Label } from "@/components/ui/label";
+import { Label, Button } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import ToolLayout from "./ToolLayout";
+import AddToProjectModal from "./AddToProjectModal";
+import { saveCalculationToProject } from "./projectUtils";
 import ResultRow from "./ResultRow";
 
 interface RoofResult {
@@ -26,6 +28,7 @@ const RoofPitchTool = ({ onBack }: Props) => {
   const [roofLength, setRoofLength] = useState("");
   const [sheetWidth, setSheetWidth] = useState("762"); // standard corrugated
   const [result, setResult] = useState<RoofResult | null>(null);
+  const [showProjectModal, setShowProjectModal] = useState(false);
 
   const calculate = () => {
     const warnings: string[] = [];
@@ -101,6 +104,15 @@ const RoofPitchTool = ({ onBack }: Props) => {
           {result.warnings.map((w, i) => (
             <p key={i} className="text-xs text-destructive mt-2 font-medium">⚠️ {w}</p>
           ))}
+        <div className="mt-4 pt-4 border-t">
+            <button
+              onClick={() => setShowProjectModal(true)}
+              className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm font-medium"
+            >
+              Add to Project
+            </button>
+          </div>
+
         </>
       ) : undefined}
     >
@@ -141,7 +153,26 @@ const RoofPitchTool = ({ onBack }: Props) => {
           value={roofLength} onChange={(e) => setRoofLength(e.target.value)} />
         <p className="text-[10px] text-muted-foreground mt-0.5">For area & sheet estimates</p>
       </div>
-    </ToolLayout>
+
+      <AddToProjectModal
+        isOpen={showProjectModal}
+        onClose={() => setShowProjectModal(false)}
+        onSave={(projectId, projectName, calcLabel) => {
+          saveCalculationToProject(
+            projectId,
+            projectName,
+            "roof-pitch",
+            "Roof Pitch",
+            {}, // Inputs - populate based on tool state
+            result,
+            `Roof Pitch calculation`,
+            calcLabel
+          );
+          setShowProjectModal(false);
+        }}
+        calculationSummary={result ? `Roof Pitch` : ''}
+      />
+        </ToolLayout>
   );
 };
 

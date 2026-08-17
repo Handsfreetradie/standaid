@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { Label } from "@/components/ui/label";
+import { Label, Button } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import ToolLayout from "./ToolLayout";
+import AddToProjectModal from "./AddToProjectModal";
+import { saveCalculationToProject } from "./projectUtils";
 import ResultRow from "./ResultRow";
 
 // PV short-circuit sizing factor — Isc can exceed STC under high irradiance.
@@ -33,6 +35,7 @@ const DCIsolatorTool = ({ onBack }: Props) => {
   const [parallelStrings, setParallelStrings] = useState("1");
   const [location, setLocation] = useState<Location>("rooftop");
   const [result, setResult] = useState<IsolatorResult | null>(null);
+  const [showProjectModal, setShowProjectModal] = useState(false);
 
   const calculate = () => {
     const voltage = parseFloat(arrayMaxVoltage);
@@ -106,6 +109,15 @@ const DCIsolatorTool = ({ onBack }: Props) => {
               <p className="text-xs text-muted-foreground">💡 Inverter: CEC-approved list and DNSP (network) pre-approval per AS/NZS 4777</p>
             </div>
           </div>
+        <div className="mt-4 pt-4 border-t">
+            <button
+              onClick={() => setShowProjectModal(true)}
+              className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm font-medium"
+            >
+              Add to Project
+            </button>
+          </div>
+
         </>
       ) : undefined}
     >
@@ -145,7 +157,26 @@ const DCIsolatorTool = ({ onBack }: Props) => {
           ))}
         </div>
       </div>
-    </ToolLayout>
+
+      <AddToProjectModal
+        isOpen={showProjectModal}
+        onClose={() => setShowProjectModal(false)}
+        onSave={(projectId, projectName, calcLabel) => {
+          saveCalculationToProject(
+            projectId,
+            projectName,
+            "dc-isolator",
+            "DC Isolator",
+            {}, // Inputs - populate based on tool state
+            result,
+            `DC Isolator calculation`,
+            calcLabel
+          );
+          setShowProjectModal(false);
+        }}
+        calculationSummary={result ? `DC Isolator` : ''}
+      />
+        </ToolLayout>
   );
 };
 

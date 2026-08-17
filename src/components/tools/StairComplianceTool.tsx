@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { Label } from "@/components/ui/label";
+import { Label, Button } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import ToolLayout from "./ToolLayout";
+import AddToProjectModal from "./AddToProjectModal";
+import { saveCalculationToProject } from "./projectUtils";
 import ResultRow from "./ResultRow";
 
 // NCC riser / going / 2R+G limits.
@@ -83,6 +85,7 @@ const StairComplianceTool = ({ onBack }: Props) => {
   const [totalRise, setTotalRise] = useState("");
   const [totalRun, setTotalRun] = useState("");
   const [result, setResult] = useState<StairResult | null>(null);
+  const [showProjectModal, setShowProjectModal] = useState(false);
 
   const calculate = () => {
     const rise = parseFloat(totalRise);
@@ -223,6 +226,15 @@ const StairComplianceTool = ({ onBack }: Props) => {
           <p className="text-xs text-muted-foreground mt-3">
             💡 Risers and goings must be uniform through the flight; check landing, headroom (2000 mm min) and handrail requirements separately.
           </p>
+        <div className="mt-4 pt-4 border-t">
+            <button
+              onClick={() => setShowProjectModal(true)}
+              className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors text-sm font-medium"
+            >
+              Add to Project
+            </button>
+          </div>
+
         </>
       ) : undefined}
     >
@@ -265,7 +277,26 @@ const StairComplianceTool = ({ onBack }: Props) => {
         />
         <p className="text-[10px] text-muted-foreground mt-0.5">Available horizontal run — leave blank to use a comfortable default going</p>
       </div>
-    </ToolLayout>
+
+      <AddToProjectModal
+        isOpen={showProjectModal}
+        onClose={() => setShowProjectModal(false)}
+        onSave={(projectId, projectName, calcLabel) => {
+          saveCalculationToProject(
+            projectId,
+            projectName,
+            "stair-compliance",
+            "Stair Compliance",
+            {}, // Inputs - populate based on tool state
+            result,
+            `Stair Compliance calculation`,
+            calcLabel
+          );
+          setShowProjectModal(false);
+        }}
+        calculationSummary={result ? `Stair Compliance` : ''}
+      />
+        </ToolLayout>
   );
 };
 
