@@ -482,8 +482,15 @@ serve(async (req) => {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return unauthorised();
 
-    // Always use free tier for now - profile fetch is unreliable
-    const tier = "free" as const;
+    // Fetch real subscription tier. Column is user_id (profiles.id is its own
+    // PK) — using the wrong column here was why this used to fail for everyone.
+    // maybeSingle + fallback so a missing/slow profile never blocks access.
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("subscription_tier")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    const tier = (profile?.subscription_tier || "free") as "free" | "pro" | "business";
 
     const { action, standardId, topic, difficulty, questionCount, examId, questionId, questionIds, userAnswer, imageBase64, chunkId, examTopics, examPdfText, sectionFilter: rawSectionFilter, userClauseRef, practiceQuestionId, scenarioText } = await req.json();
     const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
