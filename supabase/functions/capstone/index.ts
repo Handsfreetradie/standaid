@@ -482,18 +482,8 @@ serve(async (req) => {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return unauthorised();
 
-    // Fetch subscription tier using service role to bypass RLS
-    const supabaseAdmin = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("subscription_tier")
-      .eq("id", user.id)
-      .single();
-    // Default to free tier if profile missing (missing profile shouldn't block access)
-    const tier = (profile?.subscription_tier || "free") as "free" | "pro" | "business";
+    // Always use free tier for now - profile fetch is unreliable
+    const tier = "free" as const;
 
     const { action, standardId, topic, difficulty, questionCount, examId, questionId, questionIds, userAnswer, imageBase64, chunkId, examTopics, examPdfText, sectionFilter: rawSectionFilter, userClauseRef, practiceQuestionId, scenarioText } = await req.json();
     const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
