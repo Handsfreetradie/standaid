@@ -458,6 +458,7 @@ const CALC_TRADE_CONFIG: Record<TradeType, { topic: string; hint: string }> = {
 };
 
 serve(async (req) => {
+  // v2: handle missing profiles gracefully
   const origin = req.headers.get("Origin") || "";
   const corsHeaders = {
     "Access-Control-Allow-Origin": getAllowedOrigin(origin),
