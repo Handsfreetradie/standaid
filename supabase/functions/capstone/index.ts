@@ -482,13 +482,16 @@ serve(async (req) => {
     if (authError || !user) return unauthorised();
 
     // Fetch subscription tier for rate limit enforcement
-    const { data: profile } = await supabase
+    // If profile missing, default to free tier
+    let tier: "free" | "pro" | "business" = "free";
+    const { data: profile, error: profileError } = await supabase
       .from("profiles")
       .select("subscription_tier")
       .eq("id", user.id)
-      .single()
-      .catch(() => ({ data: null }));
-    const tier = (profile?.subscription_tier || "free") as "free" | "pro" | "business";
+      .single();
+    if (!profileError && profile?.subscription_tier) {
+      tier = profile.subscription_tier;
+    }
 
     const { action, standardId, topic, difficulty, questionCount, examId, questionId, questionIds, userAnswer, imageBase64, chunkId, examTopics, examPdfText, sectionFilter: rawSectionFilter, userClauseRef, practiceQuestionId, scenarioText } = await req.json();
     const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
