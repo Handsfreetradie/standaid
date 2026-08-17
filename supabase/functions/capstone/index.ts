@@ -482,15 +482,19 @@ serve(async (req) => {
     if (authError || !user) return unauthorised();
 
     // Fetch subscription tier for rate limit enforcement
-    // If profile missing, default to free tier
+    // If profile missing, default to free tier — don't let this block the user
     let tier: "free" | "pro" | "business" = "free";
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("subscription_tier")
-      .eq("id", user.id)
-      .maybeSingle();
-    if (profile?.subscription_tier) {
-      tier = profile.subscription_tier;
+    try {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("subscription_tier")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (profile?.subscription_tier) {
+        tier = profile.subscription_tier;
+      }
+    } catch (e) {
+      console.warn("[capstone] profile fetch error (non-blocking):", e);
     }
 
     const { action, standardId, topic, difficulty, questionCount, examId, questionId, questionIds, userAnswer, imageBase64, chunkId, examTopics, examPdfText, sectionFilter: rawSectionFilter, userClauseRef, practiceQuestionId, scenarioText } = await req.json();
