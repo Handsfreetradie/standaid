@@ -113,6 +113,34 @@ const updateSavedExam = (patch: Partial<SavedExam>) => {
   } catch { /* storage unavailable — resume just won't be offered */ }
 };
 
+// Untimed practice quiz snapshot, kept in sessionStorage so tapping "Ask AI
+// Tutor" mid-quiz (which navigates away to /chat) doesn't lose the questions
+// already generated and force a fresh — token-costing — regeneration.
+interface SavedQuiz {
+  standardId: string;
+  questions: Question[];
+  currentQ: number;
+  score: { correct: number; total: number };
+}
+
+const QUIZ_STORAGE_KEY = "standaid-active-quiz";
+
+const readSavedQuiz = (): SavedQuiz | null => {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(QUIZ_STORAGE_KEY) || "null");
+    if (saved?.questions?.length) return saved;
+  } catch { /* corrupted entry — fall through and clear */ }
+  sessionStorage.removeItem(QUIZ_STORAGE_KEY);
+  return null;
+};
+
+const updateSavedQuiz = (patch: Partial<SavedQuiz>) => {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(QUIZ_STORAGE_KEY) || "null");
+    if (saved?.questions) sessionStorage.setItem(QUIZ_STORAGE_KEY, JSON.stringify({ ...saved, ...patch }));
+  } catch { /* storage unavailable — resume just won't be offered */ }
+};
+
 const formatTimeLeft = (seconds: number) => {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
@@ -206,6 +234,7 @@ const Learn = () => {
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [answered, setAnswered] = useState(false);
   const [score, setScore] = useState({ correct: 0, total: 0 });
+  const [resumableQuiz, setResumableQuiz] = useState<SavedQuiz | null>(null);
 
   // Exam state
   const [examId, setExamId] = useState<string | null>(null);
@@ -259,6 +288,7 @@ const Learn = () => {
   useEffect(() => {
     setResumableExam(readSavedExam());
     setResumableScenario(readSavedScenario());
+    setResumableQuiz(readSavedQuiz());
   }, []);
 
   // Countdown for the mock exam — auto-submits when time runs out.
@@ -460,6 +490,13 @@ const Learn = () => {
       setScore({ correct: 0, total: 0 });
       setSelectedAnswer(null);
       setAnswered(false);
+      setResumableQuiz(null);
+      try {
+        sessionStorage.setItem(QUIZ_STORAGE_KEY, JSON.stringify({
+          standardId: selectedStandard, questions: data.questions,
+          currentQ: 0, score: { correct: 0, total: 0 },
+        } satisfies SavedQuiz));
+      } catch { /* storage unavailable — resume just won't be offered */ }
       setMode("quiz");
     } catch (e: any) {
       toast.error(e.message || "Failed to generate questions");
@@ -487,18 +524,22 @@ const Learn = () => {
       if (res.error || res.data?.error) {
         toast.error("Couldn't save that answer — check your internet connection. It may not count in your final score.");
       }
+    } else {
+      updateSavedQuiz({ currentQ, score: newScore });
     }
   };
 
   const nextQuestion = () => {
     if (currentQ < questions.length - 1) {
       if (examId) updateSavedExam({ currentQ: currentQ + 1 });
+      else updateSavedQuiz({ currentQ: currentQ + 1 });
       setCurrentQ((c) => c + 1);
       setSelectedAnswer(null);
       setAnswered(false);
     } else if (examId) {
       completeExam();
     } else {
+      sessionStorage.removeItem(QUIZ_STORAGE_KEY);
       setMode("menu");
     }
   };
@@ -591,6 +632,19 @@ const Learn = () => {
     setExamTimeLeft(Math.max(0, Math.ceil((saved.endsAt - Date.now()) / 1000)));
     setResumableExam(null);
     setMode("exam-active");
+  };
+
+  const resumeQuiz = () => {
+    const saved = readSavedQuiz();
+    if (!saved) { setResumableQuiz(null); toast.error("That practice quiz has expired — start a fresh one."); return; }
+    setSelectedStandard(saved.standardId);
+    setQuestions(saved.questions);
+    setCurrentQ(saved.currentQ);
+    setScore(saved.score);
+    setSelectedAnswer(null);
+    setAnswered(false);
+    setResumableQuiz(null);
+    setMode("quiz");
   };
 
   const completeExam = async () => {
@@ -975,6 +1029,27 @@ const Learn = () => {
             <p className="text-sm text-muted-foreground">Study, practice, and ace your exams</p>
           </div>
         </div>
+
+        {resumableQuiz && (
+          <Card className="p-4 mb-4 border-primary/40 bg-primary/5">
+            <div className="flex items-center gap-2 mb-1">
+              <Clock className="h-4 w-4 text-primary" />
+              <p className="text-sm font-bold text-foreground">Practice quiz in progress</p>
+            </div>
+            <p className="text-xs text-muted-foreground mb-3">
+              You're on question {resumableQuiz.currentQ + 1} of {resumableQuiz.questions.length}.
+            </p>
+            <div className="flex gap-2">
+              <Button onClick={resumeQuiz} size="sm" className="h-9 font-bold">Resume Quiz</Button>
+              <Button
+                onClick={() => { sessionStorage.removeItem(QUIZ_STORAGE_KEY); setResumableQuiz(null); }}
+                size="sm" variant="outline" className="h-9"
+              >
+                Discard
+              </Button>
+            </div>
+          </Card>
+        )}
 
         {resumableExam && (
           <Card className="p-4 mb-4 border-primary/40 bg-primary/5">

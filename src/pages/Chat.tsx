@@ -214,6 +214,10 @@ const Chat = () => {
   const [voiceMode, setVoiceMode] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [pdfViewer, setPdfViewer] = useState<{ clauseNumber: string; standardCode?: string; standardId?: string; pageNumber?: number } | null>(null);
+  // Full exam-question context from Learn's "Ask AI Tutor" button — held back
+  // from the input box and silently folded into the user's own first message
+  // instead, so the visible chat bubble stays short and natural.
+  const [seedContext, setSeedContext] = useState<string | null>(null);
   const { session } = useAuth();
   const { data: profile } = useProfile();
   const location = useLocation();
@@ -237,7 +241,12 @@ const Chat = () => {
     }
     const seedMessage = (location.state as { seedMessage?: string } | null)?.seedMessage;
     if (seedMessage) {
-      setInput(seedMessage);
+      setSeedContext(seedMessage);
+      setMessages([{
+        id: crypto.randomUUID(),
+        role: "ai",
+        content: "What would you like to know about this question? I can explain why the answer's right, walk through the calculation, or point you to the exact clause — just ask.",
+      }]);
       navigate(location.pathname, { replace: true, state: {} });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -418,9 +427,13 @@ const Chat = () => {
     setInput("");
     setPendingImage(null);
     setIsLoading(true);
+    // Fold in the exam-question context (if any) so the AI has full detail
+    // without it ever appearing in the user's own chat bubble above.
+    const queryForAI = seedContext ? `${seedContext}\n\nMy question: ${effectiveQuestion}` : effectiveQuestion;
+    setSeedContext(null);
 
     try {
-      await runQuery(effectiveQuestion, img?.base64, isComplianceCheck);
+      await runQuery(queryForAI, img?.base64, isComplianceCheck);
     } catch (e: any) {
       console.error("Query error:", e);
     } finally {
