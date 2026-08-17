@@ -482,18 +482,13 @@ serve(async (req) => {
     if (authError || !user) return unauthorised();
 
     // Fetch subscription tier for rate limit enforcement
-    const { data: profile, error: profileError } = await supabase
+    const { data: profile } = await supabase
       .from("profiles")
       .select("subscription_tier")
       .eq("id", user.id)
-      .single();
-    if (profileError || !profile) {
-      console.error("[capstone] profile fetch failed:", profileError);
-      return new Response(JSON.stringify({ error: "Could not verify your account" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const tier = profile.subscription_tier as "free" | "pro" | "business";
+      .single()
+      .catch(() => ({ data: null }));
+    const tier = (profile?.subscription_tier || "free") as "free" | "pro" | "business";
 
     const { action, standardId, topic, difficulty, questionCount, examId, questionId, questionIds, userAnswer, imageBase64, chunkId, examTopics, examPdfText, sectionFilter: rawSectionFilter, userClauseRef, practiceQuestionId, scenarioText } = await req.json();
     const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
