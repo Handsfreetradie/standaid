@@ -78,6 +78,30 @@ export async function extractPageBase64(srcDoc: PDFDocument, pageNumber: number)
   }
 }
 
+// Extract a small consecutive page RANGE as one mini-PDF, for callers that
+// need a few pages of surrounding context in a single vision call (e.g.
+// recover-failed-chunks re-reading the page either side of a mis-anchored
+// table caption) rather than one call per page.
+export async function extractPageRangeBase64(
+  srcDoc: PDFDocument,
+  startPage: number,
+  endPage: number,
+): Promise<string | null> {
+  try {
+    const total = srcDoc.getPageCount();
+    const first = Math.min(Math.max(startPage - 1, 0), total - 1);
+    const last = Math.min(Math.max(endPage - 1, 0), total - 1);
+    const indices = Array.from({ length: last - first + 1 }, (_, i) => first + i);
+    const out = await PDFDocument.create();
+    const pages = await out.copyPages(srcDoc, indices);
+    for (const pg of pages) out.addPage(pg);
+    return toBase64(await out.save());
+  } catch (e) {
+    console.warn(`Could not extract pages ${startPage}-${endPage}:`, e);
+    return null;
+  }
+}
+
 export function buildPrompt(
   isTable: boolean,
   standardLabel: string,

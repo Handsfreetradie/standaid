@@ -54,17 +54,29 @@ serve(async (req) => {
       const standardId = body.standard_id;
       if (!standardId || typeof standardId !== "string") return json({ error: "standard_id required" }, 400);
 
+      const { data: standardRow, error: standardLookupError } = await supabaseAdmin
+        .from("standards")
+        .select("user_id")
+        .eq("id", standardId)
+        .single();
+      if (standardLookupError || !standardRow) return json({ error: "Standard not found" }, 404);
+
       const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-      const reprocessUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/reprocess-standard`;
-      const res = await fetch(reprocessUrl, {
+      // Targeted fix first: re-reads just the pages around each failed
+      // table/figure and re-runs the caption-detection logic there — a few
+      // pages of vision input per failed item, not the whole document. Only
+      // an item that's still failed afterward (or wasn't a table/figure
+      // caption failure at all) needs the full reprocess-standard fallback.
+      const recoverUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/recover-failed-chunks`;
+      const recoverRes = await fetch(recoverUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${serviceRoleKey}` },
-        body: JSON.stringify({ standard_id: standardId }),
+        body: JSON.stringify({ standard_id: standardId, user_id: standardRow.user_id }),
       });
-      const result = await res.json().catch(() => ({}));
-      if (!res.ok) return json({ error: result?.error || "Re-processing failed to start." }, res.status);
+      const recoverResult = await recoverRes.json().catch(() => ({}));
+      if (!recoverRes.ok) return json({ error: recoverResult?.error || "Targeted recovery failed to start." }, recoverRes.status);
 
-      return json(result);
+      return json(recoverResult);
     }
 
     const { data: failedStandards, error } = await supabaseAdmin

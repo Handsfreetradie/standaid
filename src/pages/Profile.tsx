@@ -304,15 +304,12 @@ const Profile = () => {
     }
   };
 
-  // Triggers a real reprocess-standard run against the stored PDF (not a
-  // counter reset) — the old buggy extraction baked a wrong page/label into
-  // these rows, so retrying against unchanged data just failed identically
-  // every time. Not free: reprocess-standard's own preserveDescribed
-  // carry-forward avoids re-billing already-working tables/figures, but
-  // genuinely new candidates (and OCR, if the standard needs it) cost real
-  // spend. None of reprocess-standard's responses mean "fully done" within
-  // this request — even a quick chunking pass still needs the async embed/
-  // describe steps afterward — so every outcome here is framed as "started".
+  // Targeted fix, not a full reprocess: re-reads just the couple of pages
+  // around each permanently-failed table/figure and re-runs the (fixed)
+  // caption-detection logic there — a few pages of vision input per failed
+  // item instead of the whole document. Runs synchronously and returns the
+  // actual outcome (fixed / correctly-removed-as-not-a-real-caption / still
+  // failed) in this one request — no separate "check back later" step.
   const retryFailedStandard = async (standardId: string) => {
     setRetryingStandardId(standardId);
     try {
@@ -323,10 +320,18 @@ const Profile = () => {
       if (data?.error) {
         toast.error(data.error);
       } else {
-        toast.success("Re-processing started — this can take a few minutes for a large standard, longer if it needs OCR. Check back on this list shortly.");
+        const fixed = data?.fixed ?? 0;
+        const removed = data?.removed_as_false_match ?? 0;
+        const stillFailed = data?.still_failed ?? 0;
+        const parts = [];
+        if (fixed) parts.push(`${fixed} fixed`);
+        if (removed) parts.push(`${removed} weren't real captions and were cleared`);
+        if (stillFailed) parts.push(`${stillFailed} still failed`);
+        toast.success(parts.length ? parts.join(", ") : "No failed tables/figures left to fix.");
+        loadFailedStandards();
       }
     } catch (e: any) {
-      toast.error(e?.message || "Couldn't start re-processing.");
+      toast.error(e?.message || "Couldn't run targeted recovery.");
     } finally {
       setRetryingStandardId(null);
     }
@@ -1016,9 +1021,10 @@ const Profile = () => {
                         <p className="text-xs text-muted-foreground">
                           Every standard, across every user, with a figure/table that permanently failed
                           processing (3 retries exhausted — invisible to users beyond the amber note on
-                          their own Standards page). Retry re-runs real extraction against the stored PDF —
-                          not free, but already-working tables/figures aren't re-billed, only genuinely new
-                          or changed ones are. Takes a few minutes, longer if the standard needs OCR.
+                          their own Standards page). Retry re-reads just the pages around each failed
+                          item and re-checks whether it's a real table/figure — not free, but a few pages
+                          of vision input per failed item, not the whole document. Runs in seconds and
+                          reports what happened directly.
                         </p>
                         {failedStandardsLoading && (
                           <div className="flex items-center justify-center py-6">

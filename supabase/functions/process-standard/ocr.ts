@@ -121,14 +121,23 @@ async function slicePdfPages(srcDoc: PDFDocument, startPage: number, endPage: nu
   }
 }
 
+// Anthropic's PDF page-count limit (WHOLE_DOC_MAX_PAGES) and its 1M-token
+// context limit are independent caps — a part can be legal by page count and
+// still blow the token budget on an image/table-dense document. Detected
+// live on AS/NZS 3000: 600 pages of that document alone came to 1,252,317
+// tokens. The API's error message is specific and stable enough to match on.
+const PROMPT_TOO_LONG_PATTERN = /prompt is too long/i;
+
 type PartOcrResult = {
   text: string;
   // "complete": every batch in this part finished — caller moves to the next
   // part. "paused": the deadline was hit — caller stops entirely and resumes
   // here next invocation. "stopped": the model returned near-nothing for a
   // batch (blank/failed pages) — caller gives up on this part but still
-  // tries any remaining parts, since they're independent files.
-  status: "complete" | "paused" | "stopped";
+  // tries any remaining parts, since they're independent files. "too_large":
+  // this part's page range exceeds the 1M-token limit regardless of page
+  // count — caller must split the range smaller and retry, not just resume.
+  status: "complete" | "paused" | "stopped" | "too_large";
   nextPage: number | null; // LOCAL page number (1-based within this call's byte range); only set when status === "paused"
   fileId: string | null;
 };
@@ -236,6 +245,14 @@ async function runWholeDocBatchOcr(
     if (!completionResponse.ok) {
       const errText = await completionResponse.text();
       console.error(`AI OCR${label} batch ${batch + 1} failed:`, completionResponse.status, errText);
+      if (completionResponse.status === 400 && PROMPT_TOO_LONG_PATTERN.test(errText)) {
+        // Not a transient failure — this exact page range will fail on every
+        // retry, no matter how many times. The document itself is sent
+        // identically on every batch within a part, so this always surfaces
+        // on the very first batch. Caller re-slices smaller and retries.
+        if (fileId) await deleteFilesApiFile(fileId, anthropicApiKey);
+        return { text: "", status: "too_large", nextPage: null, fileId: null };
+      }
       if (batch === firstBatch && fullText.length === 0 && !hasAnyTextYet) {
         if (fileId) await deleteFilesApiFile(fileId, anthropicApiKey);
         throw new Error(`AI extraction failed: ${completionResponse.status}`);
@@ -285,12 +302,18 @@ async function runWholeDocBatchOcr(
 //
 // Documents within WHOLE_DOC_MAX_PAGES are sent completely untouched, in one
 // piece, exactly as before. A document over that limit is split into
-// consecutive ≤WHOLE_DOC_MAX_PAGES-page PARTS — each pdf-lib-sliced out ONCE
+// consecutive ≤WHOLE_DOC_MAX_PAGES-page ranges — each pdf-lib-sliced out ONCE
 // and OCR'd as its own self-contained document (its own pages numbered
 // 1..N — no special "what's the real page number" prompting). The [PAGE N]
-// markers in every part after the first are then shifted up by that part's
-// offset in plain code before the parts are joined. This replaces slicing
-// every individual 6-page batch (~100 pdf-lib rebuilds for a 611-page
+// markers in every range after the first are then shifted up by that
+// range's offset in plain code before the ranges are joined. If a range
+// still exceeds Claude's 1M-token limit despite being within the page-count
+// limit — confirmed live on AS/NZS 3000, where 600 pages alone came to
+// 1,252,317 tokens — it's split in half and retried (see PROMPT_TOO_LONG_PATTERN
+// in runWholeDocBatchOcr), so the actual part size adapts to how
+// image/table-dense the document is instead of assuming page count alone is
+// a safe proxy for token count. This replaces slicing every individual
+// 6-page batch (~100 pdf-lib rebuilds for a 611-page
 // document): pdf-lib's page copy can drop embedded page images on scanned
 // documents, so cutting the rebuild count from ~100 down to 2 for a document
 // this size meaningfully lowers (without eliminating) the odds of hitting
@@ -313,55 +336,96 @@ async function extractTextWithAI(
 
   const canSplitIntoParts = !!srcDoc && totalPages > 0;
   const numParts = canSplitIntoParts ? Math.ceil(totalPages / WHOLE_DOC_MAX_PAGES) : 1;
-  const startPart = canSplitIntoParts ? Math.floor((startPage - 1) / WHOLE_DOC_MAX_PAGES) : 0;
+
+  // A work QUEUE rather than a fixed loop, because a range can turn out to
+  // exceed the 1M-token limit even within the WHOLE_DOC_MAX_PAGES page cap
+  // (page count and token count are independent limits) — when that happens
+  // the range is split in half and both halves are pushed back onto the
+  // front of the queue, in order, and retried immediately. This resolves
+  // fast (each "too large" attempt fails before any real OCR work, on the
+  // very first batch) so it fully settles within one invocation, before any
+  // pause-worthy state exists — a resumed invocation simply rediscovers the
+  // same split by re-running this same deterministic process.
+  type PageRange = { start: number; end: number };
+  const queue: PageRange[] = canSplitIntoParts
+    ? Array.from({ length: numParts }, (_, i) => ({
+        start: i * WHOLE_DOC_MAX_PAGES + 1,
+        end: Math.min((i + 1) * WHOLE_DOC_MAX_PAGES, totalPages),
+      }))
+    : [{ start: 1, end: totalPages || 0 }];
 
   let fullText = "";
   let nextPage: number | null = null;
   const uploadedFileIds: string[] = [];
+  let partsSoFar = 0;
+  // Broader than "do we have real text yet": also true once we've learned
+  // something worth keeping — e.g. that the first 600 pages are too large.
+  // A big range's first real batch can itself take longer than one
+  // invocation's time budget just to get a response (reading ~300+ pages of
+  // dense content before the model can even start replying) — confirmed
+  // live: the post-split 300-page range timed out on its very first batch.
+  // Without this, that timeout would hit the "nothing achieved, hard-fail"
+  // path and throw away the already-learned split, forcing every retry to
+  // re-discover it from scratch and burn another wasted 600-page attempt.
+  // With it, the timeout instead pauses and resumes with a fresh full time
+  // budget, picking up exactly where it left off.
+  let hasMadeProgress = false;
 
-  for (let part = startPart; part < numParts; part++) {
-    const partStart = canSplitIntoParts ? part * WHOLE_DOC_MAX_PAGES + 1 : 1;
-    const partEnd = canSplitIntoParts ? Math.min((part + 1) * WHOLE_DOC_MAX_PAGES, totalPages) : 0;
-    const partTotalPages = canSplitIntoParts ? (partEnd - partStart + 1) : 0;
-    const offset = partStart - 1; // added to every LOCAL page number this part reports
+  while (queue.length > 0) {
+    const range = queue.shift()!;
+    if (canSplitIntoParts && range.end < startPage) continue; // fully covered by an earlier resume
 
-    // Only rebuild via pdf-lib when the document needs more than one part —
-    // the common case (≤ WHOLE_DOC_MAX_PAGES pages) sends the real,
-    // untouched file, exactly as before.
-    let partBytes = fileBytes;
-    if (numParts > 1 && srcDoc) {
-      const slicedPart = await slicePdfPages(srcDoc, partStart, partEnd);
-      if (!slicedPart) break; // slicing failed — stop with whatever we have; the outer failure gate catches a too-short result
-      partBytes = slicedPart;
+    const offset = range.start - 1; // added to every LOCAL page number this range reports
+    const rangeTotalPages = range.end - range.start + 1;
+    const isWholeUntouchedFile = range.start === 1 && range.end === totalPages;
+
+    // Only rebuild via pdf-lib when sending a genuine sub-range — the common
+    // case (≤ WHOLE_DOC_MAX_PAGES pages, one range covering the whole
+    // document) sends the real, untouched file, exactly as before.
+    let rangeBytes = fileBytes;
+    if (!isWholeUntouchedFile && srcDoc) {
+      const sliced = await slicePdfPages(srcDoc, range.start, range.end);
+      if (!sliced) break; // slicing failed — stop with whatever we have; the outer failure gate catches a too-short result
+      rangeBytes = sliced;
     }
 
-    const localStartPage = part === startPart ? Math.max(1, startPage - offset) : 1;
+    const localStartPage = Math.max(1, startPage - offset);
+    partsSoFar++;
 
     const result = await runWholeDocBatchOcr(
-      partBytes,
-      partTotalPages,
+      rangeBytes,
+      rangeTotalPages,
       anthropicApiKey,
       deadline,
       localStartPage,
-      fullText.length > 0,
+      hasMadeProgress,
       usageLogger,
-      numParts > 1 ? `part ${part + 1}/${numParts}` : undefined,
+      numParts > 1 || partsSoFar > 1 ? `range ${range.start}-${range.end}` : undefined,
     );
 
     if (result.fileId) uploadedFileIds.push(result.fileId);
+
+    if (result.status === "too_large") {
+      hasMadeProgress = true;
+      if (rangeTotalPages <= 1) break; // can't split a single page any further — the failure gate below catches this
+      const mid = range.start + Math.floor((rangeTotalPages - 1) / 2);
+      queue.unshift({ start: range.start, end: mid }, { start: mid + 1, end: range.end });
+      continue;
+    }
 
     const shiftedText = offset > 0
       ? result.text.replace(/\[PAGE\s+(\d+)\]/gi, (_m, n) => `[PAGE ${parseInt(n, 10) + offset}]`)
       : result.text;
     fullText += (fullText ? "\n\n" : "") + shiftedText;
+    if (shiftedText) hasMadeProgress = true;
 
     if (result.status === "paused") {
       nextPage = (result.nextPage as number) + offset;
       break;
     }
-    // "stopped": give up on this part but still try any remaining parts —
-    // they're independent files, so one part's blank pages don't imply the
-    // next part has the same problem. "complete": just move on.
+    // "stopped": give up on this range but still try any remaining ones —
+    // they're independent files, so one range's blank pages don't imply the
+    // next has the same problem. "complete": just move on to the next range.
   }
 
   // Each part uploads its own copy, so delete them all on the way out. A
