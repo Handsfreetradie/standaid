@@ -482,8 +482,12 @@ serve(async (req) => {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return unauthorised();
 
-    // Fetch subscription tier for rate limit enforcement
-    const { data: profile, error: profileError } = await supabase
+    // Fetch subscription tier using service role to bypass RLS
+    const supabaseAdmin = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
+    const { data: profile } = await supabaseAdmin
       .from("profiles")
       .select("subscription_tier")
       .eq("id", user.id)
