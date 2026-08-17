@@ -947,40 +947,40 @@ const Profile = () => {
                         )}
                         {!adminUsersLoading && adminUsers && adminUsers.length > 0 && (
                           <div className="overflow-x-auto rounded-lg border border-border">
-                            <table className="w-full text-xs">
+                            <table className="w-full text-[11px]">
                               <thead>
                                 <tr className="bg-muted/50 text-left text-muted-foreground">
-                                  <th className="px-3 py-2 font-medium">Email</th>
-                                  <th className="px-3 py-2 font-medium">Signed up</th>
-                                  <th className="px-3 py-2 font-medium">Status</th>
-                                  <th className="px-3 py-2 font-medium">Tier</th>
-                                  <th className="px-3 py-2 font-medium text-right">Queries</th>
-                                  <th className="px-3 py-2 font-medium text-right">Cost</th>
+                                  <th className="px-2 py-2 font-medium">Email</th>
+                                  <th className="px-2 py-2 font-medium whitespace-nowrap">Signed up</th>
+                                  <th className="px-2 py-2 font-medium">Status</th>
+                                  <th className="px-2 py-2 font-medium">Tier</th>
+                                  <th className="px-2 py-2 font-medium text-right">Queries</th>
+                                  <th className="px-2 py-2 font-medium text-right">Cost</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {[...adminUsers].sort((a, b) => b.total_cost_usd - a.total_cost_usd).map((u) => (
                                   <tr key={u.user_id} className="border-t border-border">
-                                    <td className="px-3 py-2 max-w-[160px] truncate" title={u.email ?? ""}>
+                                    <td className="px-2 py-1.5 max-w-[140px] truncate text-[10px]" title={u.email ?? ""}>
                                       {u.email || u.display_name || "—"}
                                     </td>
-                                    <td className="px-3 py-2 whitespace-nowrap">
-                                      {new Date(u.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}
+                                    <td className="px-2 py-1.5 whitespace-nowrap text-[10px]">
+                                      {new Date(u.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}
                                     </td>
-                                    <td className="px-3 py-2 whitespace-nowrap">
+                                    <td className="px-2 py-1.5 whitespace-nowrap">
                                       {u.email_confirmed ? (
-                                        <Badge className="bg-green-600/15 text-green-700 dark:text-green-400 text-[11px] px-1.5 py-0 font-normal">
-                                          Confirmed
+                                        <Badge className="bg-green-600/15 text-green-700 dark:text-green-400 text-[10px] px-1 py-0 font-normal">
+                                          ✓
                                         </Badge>
                                       ) : (
-                                        <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-400 text-[11px] px-1.5 py-0 font-normal">
-                                          Pending
+                                        <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-400 text-[10px] px-1 py-0 font-normal">
+                                          ⏳
                                         </Badge>
                                       )}
                                     </td>
-                                    <td className="px-3 py-2 capitalize">{u.subscription_tier || "free"}</td>
-                                    <td className="px-3 py-2 text-right">{u.query_count}</td>
-                                    <td className="px-3 py-2 text-right font-semibold">{formatCost(u.total_cost_usd)}</td>
+                                    <td className="px-2 py-1.5 capitalize text-[10px]">{u.subscription_tier || "free"}</td>
+                                    <td className="px-2 py-1.5 text-right text-[10px]">{u.query_count}</td>
+                                    <td className="px-2 py-1.5 text-right font-semibold text-[10px]">{formatCost(u.total_cost_usd)}</td>
                                   </tr>
                                 ))}
                               </tbody>
