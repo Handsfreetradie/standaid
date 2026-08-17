@@ -19,6 +19,8 @@ export function useProfile() {
       return data;
     },
     enabled: !!user,
+    staleTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 10,
   });
 }
 
@@ -56,6 +58,8 @@ export function useStandards() {
       return data || [];
     },
     enabled: !!user,
+    staleTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 10,
   });
 }
 
@@ -86,6 +90,8 @@ export function useOrganization() {
       return null;
     },
     enabled: !!user,
+    staleTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 10,
   });
 }
 
@@ -103,6 +109,8 @@ export function useOrganizationMembers(organizationId: string | undefined) {
       return data || [];
     },
     enabled: !!organizationId,
+    staleTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 10,
   });
 }
 
@@ -164,5 +172,7 @@ export function useQueries() {
       return data || [];
     },
     enabled: !!user,
+    staleTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 10,
   });
 }
