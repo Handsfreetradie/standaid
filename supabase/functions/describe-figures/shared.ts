@@ -113,14 +113,16 @@ export function buildPrompt(
   return isTable
     ? `This page is from ${std}. ` +
         `TABLE ${refNumber}${caption ? ` — ${caption}` : ""} appears on this page.\n\n` +
-        `Transcribe that table COMPLETELY as a GitHub-flavoured markdown table:\n` +
-        `- Keep the header rows exactly as printed, including units (mm², A, V, °C, m).\n` +
-        `- Transcribe EVERY visible row and column — never summarise, skip rows, or round values.\n` +
-        `- Copy every number exactly as printed, including decimal points.\n` +
-        `- Include any notes printed below the table, after the table.\n` +
+        `Transcribe that table COMPLETELY and ACCURATELY as a GitHub-flavoured markdown table:\n` +
+        `- Identify and include ALL columns, including narrow or rotated headers.\n` +
+        `- Keep the header rows EXACTLY as printed, with units unchanged (mm², A, V, °C, m, Ω, °, %, dB, MHz).\n` +
+        `- Transcribe EVERY visible row and column — never summarise, skip rows, collapse rows, or round values.\n` +
+        `- Copy every number EXACTLY as printed: decimals, leading zeros, ranges (e.g. "2.5–3.0"), everything.\n` +
+        `- If a cell shows symbols or abbreviations (e.g. "S20S", "NA", ">100"), transcribe exactly as shown.\n` +
+        `- Include any notes, footnotes, or source text printed below the table, after the table.\n` +
         `- If the table clearly continues on another page, transcribe what is visible and end with: (table continues on next page)\n` +
         `- If the table is not actually on this page, reply with exactly: TABLE NOT ON PAGE\n\n` +
-        `Output ONLY the markdown table and its notes — no commentary.`
+        `Output ONLY the markdown table and its notes — no commentary, no corrections, no summaries.`
     : `You are helping Australian tradies understand diagrams from ${std}.\n\n` +
         `Figure ${refNumber}${caption ? ` — ${caption}` : ""} is on page ${page} of this document.\n\n` +
         `Describe this diagram for a tradie on the job:\n` +

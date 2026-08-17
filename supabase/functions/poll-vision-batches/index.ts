@@ -173,40 +173,54 @@ serve(async (req) => {
             });
           }
 
-          // ── Tail: mis-anchored caption — try page+1 synchronously ────────
+          // ── Tail: mis-anchored caption — search ±2 pages ──────────────────────
+          // Dense electrical tables sometimes anchor to the wrong page; search
+          // a wider range instead of just page+1.
           if (item.isTable && (!text || text.length < 20 || text.includes("TABLE NOT ON PAGE"))) {
             const doc = await getSrcDoc();
-            const retryBase64 = doc ? await extractPageBase64(doc, item.page + 1) : null;
+            const retryPages = [
+              item.page - 2, item.page - 1, // before
+              item.page + 1, item.page + 2, // after
+            ];
             text = "";
-            if (retryBase64) {
-              const retryPrompt = buildPrompt(true, standardLabel, item.refNumber, item.caption, item.page + 1);
+            usedPage = item.page;
+
+            for (const tryPage of retryPages) {
+              if (tryPage < 1 || (doc && tryPage > doc.getPageCount())) continue;
+              const retryBase64 = doc ? await extractPageBase64(doc, tryPage) : null;
+              if (!retryBase64) continue;
+
+              const retryPrompt = buildPrompt(true, standardLabel, item.refNumber, item.caption, tryPage);
               const retryRes = await fetch("https://api.anthropic.com/v1/messages", {
                 method: "POST",
                 headers: { ...anthropicHeaders, "Content-Type": "application/json" },
                 body: JSON.stringify(buildVisionParams(retryBase64, retryPrompt, true)),
               });
-              if (retryRes.ok) {
-                const retryData = await retryRes.json();
-                if (retryData.usage) {
-                  logTokenUsage(supabaseAdmin, {
-                    userId: job.user_id, kind: "figure_desc_retry", model: "claude-sonnet-4-6", refId: job.standard_id,
-                    usage: {
-                      input_tokens: retryData.usage.input_tokens ?? 0,
-                      output_tokens: retryData.usage.output_tokens ?? 0,
-                      cache_read_tokens: retryData.usage.cache_read_input_tokens ?? 0,
-                      cache_creation_tokens: retryData.usage.cache_creation_input_tokens ?? 0,
-                    },
-                  });
-                }
-                const retryText: string = retryData.content?.[0]?.text || "";
-                if (retryText && retryText.length >= 20 && !retryText.includes("TABLE NOT ON PAGE")) {
-                  text = retryText;
-                  usedPage = item.page + 1;
-                }
+              if (!retryRes.ok) continue;
+
+              const retryData = await retryRes.json();
+              if (retryData.usage) {
+                logTokenUsage(supabaseAdmin, {
+                  userId: job.user_id, kind: "figure_desc_retry", model: "claude-sonnet-4-6", refId: job.standard_id,
+                  usage: {
+                    input_tokens: retryData.usage.input_tokens ?? 0,
+                    output_tokens: retryData.usage.output_tokens ?? 0,
+                    cache_read_tokens: retryData.usage.cache_read_input_tokens ?? 0,
+                    cache_creation_tokens: retryData.usage.cache_creation_input_tokens ?? 0,
+                  },
+                });
+              }
+              const retryText: string = retryData.content?.[0]?.text || "";
+              if (retryText && retryText.length >= 20 && !retryText.includes("TABLE NOT ON PAGE")) {
+                text = retryText;
+                usedPage = tryPage;
+                console.log(`Table ${item.refNumber}: found on page ${tryPage} (anchor was ${item.page})`);
+                break;
               }
             }
+
             if (!text) {
-              console.warn(`Table ${item.refNumber}: no usable output on page ${item.page} or ${item.page + 1}, skipping`);
+              console.warn(`Table ${item.refNumber}: no usable output on pages ${item.page - 2} to ${item.page + 2}, skipping`);
               await bumpAttempts(supabaseAdmin, item.chunk_id, attempts);
               continue;
             }
