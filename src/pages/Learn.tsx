@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useProfile } from "@/hooks/useData";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -220,6 +221,8 @@ const ScrollPage = ({ children }: { children: React.ReactNode }) => (
 const Learn = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { data: profile } = useProfile();
+  const isFreeTier = (profile?.subscription_tier || "free") === "free";
   const [mode, setMode] = useState<Mode>("menu");
   const [standards, setStandards] = useState<any[]>([]);
   const [selectedStandard, setSelectedStandard] = useState("");
@@ -866,6 +869,12 @@ const Learn = () => {
     });
 
   const handlePhotoUpload = () => {
+    if (isFreeTier) {
+      toast.error("Photo analysis is a Pro feature.", {
+        action: { label: "Upgrade", onClick: () => navigate("/profile") },
+      });
+      return;
+    }
     if (!selectedStandard) {
       toast.error("Please select a standard before uploading a photo.");
       return;
@@ -1180,14 +1189,26 @@ const Learn = () => {
 
           <Card
             className="p-4 cursor-pointer hover:border-primary/50 transition-colors"
-            onClick={() => { if (!selectedStandard) { toast.error("Select a standard first"); return; } setScenarioText(""); setScenarioResult(null); setMode("scenario"); }}
+            onClick={() => {
+              if (isFreeTier) {
+                toast.error("Scenario walkthroughs are a Pro feature.", {
+                  action: { label: "Upgrade", onClick: () => navigate("/profile") },
+                });
+                return;
+              }
+              if (!selectedStandard) { toast.error("Select a standard first"); return; }
+              setScenarioText(""); setScenarioResult(null); setMode("scenario");
+            }}
           >
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
                 <Route className="h-5 w-5 text-primary" />
               </div>
               <div className="flex-1">
-                <p className="font-bold text-foreground text-sm">Scenario Walkthrough</p>
+                <div className="flex items-center gap-2">
+                  <p className="font-bold text-foreground text-sm">Scenario Walkthrough</p>
+                  {isFreeTier && <Badge className="bg-primary/10 text-primary border-0 text-[10px] px-1.5 py-0">PRO</Badge>}
+                </div>
                 <p className="text-xs text-muted-foreground">Describe a real job, get a decision-by-decision breakdown</p>
               </div>
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
@@ -1235,7 +1256,10 @@ const Learn = () => {
                 <Camera className="h-5 w-5 text-primary" />
               </div>
               <div className="flex-1">
-                <p className="font-bold text-foreground text-sm">Photo Analysis</p>
+                <div className="flex items-center gap-2">
+                  <p className="font-bold text-foreground text-sm">Photo Analysis</p>
+                  {isFreeTier && <Badge className="bg-primary/10 text-primary border-0 text-[10px] px-1.5 py-0">PRO</Badge>}
+                </div>
                 <p className="text-xs text-muted-foreground">Upload handwritten work for AI hints</p>
               </div>
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
@@ -1535,6 +1559,9 @@ const Learn = () => {
             <div className="prose prose-sm dark:prose-invert max-w-none text-foreground">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{photoAnalysis}</ReactMarkdown>
             </div>
+            <p className="text-[10px] text-muted-foreground text-center mt-4 pt-3 border-t border-border">
+              AI-assisted reference only — always verify against the original standard before relying on it on the job.
+            </p>
           </Card>
         )}
 
