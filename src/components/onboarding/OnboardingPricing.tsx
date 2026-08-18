@@ -73,7 +73,7 @@ const OnboardingPricing = ({ onNext, onBack }: Props) => {
           </span>
           {annual && (
             <Badge className="bg-primary text-primary-foreground text-[10px] px-1.5 py-0">
-              Save 25%
+              Save 26%
             </Badge>
           )}
         </div>
@@ -113,12 +113,12 @@ const OnboardingPricing = ({ onNext, onBack }: Props) => {
             <span className="text-sm font-bold text-primary-foreground">Pro</span>
           </div>
           <p className="text-2xl font-extrabold text-foreground">
-            {annual ? "$14.99" : "$19.99"}
+            {annual ? "$7.42" : "$9.99"}
           </p>
           <p className="text-xs text-muted-foreground mb-1">/month</p>
           {annual && (
             <p className="text-xs text-primary font-semibold mb-4">
-              $179/year — save 25%
+              $89/year — save 26%
             </p>
           )}
           {!annual && <div className="mb-4" />}

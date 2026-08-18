@@ -41,7 +41,7 @@ function buildHtmlEmail(firstName: string, expiresLabel: string): string {
               </p>
               <p style="margin:0 0 28px;font-size:15px;color:#555;line-height:1.6;">
                 Keep unlimited standards, full indexing and 1,000 queries/month by upgrading to Pro now —
-                just $19.99/month, cancel anytime.
+                just $9.99/month, cancel anytime.
               </p>
               <table width="100%" cellpadding="0" cellspacing="0">
                 <tr>
@@ -70,7 +70,7 @@ function buildPlainTextEmail(firstName: string, expiresLabel: string): string {
 
 Your free Pro access to StandAId ends on ${expiresLabel}. After that you'll drop back to the Free plan — limited standards, limited daily queries.
 
-Keep unlimited standards, full indexing and 1,000 queries/month by upgrading to Pro now — just $19.99/month, cancel anytime.
+Keep unlimited standards, full indexing and 1,000 queries/month by upgrading to Pro now — just $9.99/month, cancel anytime.
 
 Upgrade: ${APP_URL}/profile
 

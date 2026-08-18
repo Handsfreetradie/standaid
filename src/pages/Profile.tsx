@@ -11,7 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
-import { useProfile, useStandards, useOrganization } from "@/hooks/useData";
+import { useProfile, useStandards, useOrganization, useSubscription } from "@/hooks/useData";
 import { supabase } from "@/integrations/supabase/client";
 import { compressImageToBlob } from "@/lib/image";
 
@@ -57,6 +57,7 @@ const Profile = () => {
   const queryClient = useQueryClient();
   const { user, signOut } = useAuth();
   const { data: profile, isLoading: profileLoading } = useProfile();
+  const { data: subscription } = useSubscription();
   const { data: standards } = useStandards();
   const { data: org } = useOrganization();
   const [activePanel, setActivePanel] = useState<string | null>(null);
@@ -172,12 +173,20 @@ const Profile = () => {
     if (outcome) window.history.replaceState({}, "", "/profile");
   }, []);
 
+  // Which billing cycle pending Pro/Business checkouts use — shared by every
+  // upgrade button on this page so they all agree.
+  const [billingInterval, setBillingInterval] = useState<"monthly" | "annual">("monthly");
+  const proPrice = billingInterval === "annual" ? "$7.42/mo" : "$9.99/mo";
+  const businessPrice = billingInterval === "annual" ? "$37.42/mo" : "$49.99/mo";
+
   // Start a Stripe Checkout session for the chosen tier and redirect to it.
   const startCheckout = async (chosenTier: "pro" | "business") => {
     if (billingBusy) return;
     setBillingBusy(true);
     try {
-      const { data, error } = await supabase.functions.invoke("create-checkout", { body: { tier: chosenTier } });
+      const { data, error } = await supabase.functions.invoke("create-checkout", {
+        body: { tier: chosenTier, interval: billingInterval },
+      });
       if (error || !data?.url) throw error ?? new Error("No checkout URL");
       window.location.href = data.url;
     } catch (e) {
@@ -417,14 +426,34 @@ const Profile = () => {
                 </div>
               </div>
               {(!isPro || trialDaysLeft !== null) && (
-                <Button
-                  className="w-full h-11 text-sm font-semibold gap-1.5"
-                  disabled={billingBusy}
-                  onClick={() => startCheckout("pro")}
-                >
-                  {billingBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-                  {trialDaysLeft !== null ? "Keep Pro — subscribe now" : "Upgrade to Pro — $19.99/mo"}
-                </Button>
+                <>
+                  <div className="flex items-center justify-center gap-2 mb-3">
+                    <span className={`text-xs font-medium ${billingInterval === "monthly" ? "text-foreground" : "text-muted-foreground"}`}>
+                      Monthly
+                    </span>
+                    <Switch
+                      checked={billingInterval === "annual"}
+                      onCheckedChange={(checked) => setBillingInterval(checked ? "annual" : "monthly")}
+                    />
+                    <span className={`text-xs font-medium ${billingInterval === "annual" ? "text-foreground" : "text-muted-foreground"}`}>
+                      Annual
+                    </span>
+                    {billingInterval === "annual" && (
+                      <Badge className="bg-primary text-primary-foreground text-[10px] px-1.5 py-0">Save 26%</Badge>
+                    )}
+                  </div>
+                  <Button
+                    className="w-full h-11 text-sm font-semibold gap-1.5"
+                    disabled={billingBusy}
+                    onClick={() => startCheckout("pro")}
+                  >
+                    {billingBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+                    {trialDaysLeft !== null ? "Keep Pro — subscribe now" : `Upgrade to Pro — ${proPrice}`}
+                  </Button>
+                  {billingInterval === "annual" && (
+                    <p className="text-[10px] text-muted-foreground text-center mt-1.5">$89/year, billed annually</p>
+                  )}
+                </>
               )}
             </Card>
 
@@ -471,8 +500,8 @@ const Profile = () => {
                 <div className="grid grid-cols-3 gap-2">
                   {[
                     { name: "Free", price: "$0", features: ["1 standard", "3 queries/day", "Partial clauses"] },
-                    { name: "Pro", price: "$19.99", features: ["Unlimited", "Unlimited", "Full clauses", "Voice & Photo"], highlight: true, tier: "pro" as const },
-                    { name: "Business", price: "per seat", features: ["Unlimited", "Unlimited", "Full clauses", "Team libraries"], goToTeam: true },
+                    { name: "Pro", price: billingInterval === "annual" ? "$7.42" : "$9.99", features: ["Unlimited", "Unlimited", "Full clauses", "Voice & Photo"], highlight: true, tier: "pro" as const },
+                    { name: "Business", price: billingInterval === "annual" ? "$37.42" : "$49.99", features: ["Everything in Pro", "Single login", "Priority support"], tier: "business" as const, showTeamLink: true },
                   ].map((plan) => (
                     <Card
                       key={plan.name}
@@ -480,7 +509,7 @@ const Profile = () => {
                     >
                       <p className="text-xs font-bold text-foreground">{plan.name}</p>
                       <p className="text-lg font-extrabold text-foreground mt-1">{plan.price}</p>
-                      <p className="text-[10px] text-muted-foreground">{plan.goToTeam ? "" : "/month"}</p>
+                      <p className="text-[10px] text-muted-foreground">{plan.price === "$0" ? "" : billingInterval === "annual" ? "/mo, billed yearly" : "/month"}</p>
                       <Separator className="my-2" />
                       <div className="space-y-1 flex-1">
                         {plan.features.map((f) => (
@@ -498,15 +527,13 @@ const Profile = () => {
                           Upgrade
                         </Button>
                       )}
-                      {plan.goToTeam && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="w-full mt-2 h-7 text-[10px]"
+                      {plan.showTeamLink && (
+                        <button
+                          className="w-full mt-1.5 text-[9px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
                           onClick={() => navigate("/team")}
                         >
-                          Set up a team
-                        </Button>
+                          Need multiple seats? Set up a team
+                        </button>
                       )}
                     </Card>
                   ))}
@@ -660,9 +687,9 @@ const Profile = () => {
                               ? "Free"
                               : org
                               ? "Per-seat billing"
-                              : tier === "business"
-                              ? "$49.99/month"
-                              : "$19.99/month"}
+                              : subscription?.interval === "year"
+                              ? "Billed annually"
+                              : "Billed monthly"}
                           </span>
                         </div>
                         {trialDaysLeft !== null && (
@@ -723,13 +750,15 @@ const Profile = () => {
                           onClick={() => startCheckout("pro")}
                         >
                           {billingBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
-                          {trialDaysLeft !== null ? "Keep Pro — subscribe now" : "Upgrade to Pro — $19.99/mo"}
+                          {trialDaysLeft !== null ? "Keep Pro — subscribe now" : `Upgrade to Pro — ${proPrice}`}
                         </Button>
                       )}
                       <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-3 space-y-1.5">
-                        <p className="text-xs font-medium text-amber-900 dark:text-amber-100">Monthly Billing</p>
+                        <p className="text-xs font-medium text-amber-900 dark:text-amber-100">
+                          {subscription?.interval === "year" ? "Annual Billing" : "Monthly Billing"}
+                        </p>
                         <p className="text-xs text-amber-800 dark:text-amber-200 leading-relaxed">
-                          Your subscription renews automatically each month. You can view past invoices, update your payment method, or cancel anytime in the buttons above.
+                          Your subscription renews automatically each {subscription?.interval === "year" ? "year" : "month"}. You can view past invoices, update your payment method, or cancel anytime in the buttons above.
                         </p>
                       </div>
                       <p className="text-xs text-muted-foreground leading-relaxed">

@@ -30,9 +30,18 @@ serve(async (req) => {
     const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
     if (userError || !user) return json({ error: "Unauthorized" }, 401);
 
-    const { tier, initial_seats, team_name } = await req.json();
+    const { tier, initial_seats, team_name, interval } = await req.json();
     if (tier !== "pro" && tier !== "business" && tier !== "business_team") {
       return json({ error: "Invalid tier" }, 400);
+    }
+
+    // pro, business, and business_team all offer a real annual price.
+    let billingInterval: "monthly" | "annual" = "monthly";
+    if (tier === "pro" || tier === "business" || tier === "business_team") {
+      if (interval !== "monthly" && interval !== "annual") {
+        return json({ error: "interval must be \"monthly\" or \"annual\"" }, 400);
+      }
+      billingInterval = interval;
     }
 
     let seats = 1;
@@ -73,7 +82,7 @@ serve(async (req) => {
       mode: "subscription",
       customer: customerId,
       client_reference_id: user.id,
-      line_items: [{ price: isTeam ? teamSeatPriceId() : priceIdForTier(tier), quantity: seats }],
+      line_items: [{ price: isTeam ? teamSeatPriceId(billingInterval) : priceIdForTier(tier, billingInterval), quantity: seats }],
       allow_promotion_codes: true,
       subscription_data: {
         metadata: isTeam

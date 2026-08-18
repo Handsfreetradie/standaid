@@ -24,6 +24,31 @@ export function useProfile() {
   });
 }
 
+// The current user's latest subscription row (interval/price info that
+// `profiles` doesn't carry — profiles only stores the resolved tier).
+export function useSubscription() {
+  const { user } = useAuth();
+
+  return useQuery({
+    queryKey: ["subscription", user?.id],
+    queryFn: async () => {
+      if (!user) return null;
+      const { data, error } = await supabase
+        .from("subscriptions")
+        .select("interval, price_id, status, cancel_at_period_end")
+        .eq("user_id", user.id)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!user,
+    staleTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 10,
+  });
+}
+
 export function useStandards() {
   const { user } = useAuth();
   const queryClient = useQueryClient();

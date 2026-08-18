@@ -13,33 +13,52 @@ export function getStripe(): Stripe {
 }
 
 export type PaidTier = "pro" | "business";
+export type BillingInterval = "monthly" | "annual";
 
 // Map an app tier → the Stripe Price id configured in the environment.
 // "business_team" is a distinct per-seat Price, not one of the two personal
 // tiers — priceIdForTier only handles the two individual tiers; team
 // checkout reads STRIPE_PRICE_TEAM_SEAT directly (see create-checkout).
-export function priceIdForTier(tier: string): string {
-  const map: Record<string, string | undefined> = {
-    pro: Deno.env.get("STRIPE_PRICE_PRO"),
-    business: Deno.env.get("STRIPE_PRICE_BUSINESS"),
-  };
-  const price = map[tier];
-  if (!price) throw new Error(`No Stripe price configured for tier "${tier}"`);
-  return price;
+//
+// "pro" has two live prices (monthly/annual). STRIPE_PRICE_PRO is the
+// legacy $19.99/mo price — kept only so existing subscribers on it keep
+// working (see tierForPriceId below); new checkouts never use it.
+export function priceIdForTier(tier: string, interval: BillingInterval = "monthly"): string {
+  if (tier === "pro") {
+    const price = interval === "annual"
+      ? Deno.env.get("STRIPE_PRICE_PRO_ANNUAL")
+      : Deno.env.get("STRIPE_PRICE_PRO_MONTHLY");
+    if (!price) throw new Error(`No Stripe price configured for tier "pro" interval "${interval}"`);
+    return price;
+  }
+  if (tier === "business") {
+    const price = interval === "annual"
+      ? Deno.env.get("STRIPE_PRICE_BUSINESS_ANNUAL")
+      : Deno.env.get("STRIPE_PRICE_BUSINESS");
+    if (!price) throw new Error(`No Stripe price configured for tier "business" interval "${interval}"`);
+    return price;
+  }
+  throw new Error(`No Stripe price configured for tier "${tier}"`);
 }
 
-export function teamSeatPriceId(): string {
-  const price = Deno.env.get("STRIPE_PRICE_TEAM_SEAT");
-  if (!price) throw new Error("STRIPE_PRICE_TEAM_SEAT not configured");
+export function teamSeatPriceId(interval: BillingInterval = "monthly"): string {
+  const price = interval === "annual"
+    ? Deno.env.get("STRIPE_PRICE_TEAM_SEAT_ANNUAL")
+    : Deno.env.get("STRIPE_PRICE_TEAM_SEAT");
+  if (!price) throw new Error(`STRIPE_PRICE_TEAM_SEAT${interval === "annual" ? "_ANNUAL" : ""} not configured`);
   return price;
 }
 
 // Reverse map a Stripe Price id → app tier (used by the webhook).
 export function tierForPriceId(priceId: string | undefined): PaidTier | null {
   if (!priceId) return null;
-  if (priceId === Deno.env.get("STRIPE_PRICE_PRO")) return "pro";
+  if (priceId === Deno.env.get("STRIPE_PRICE_PRO")) return "pro"; // legacy $19.99/mo, existing subscribers only
+  if (priceId === Deno.env.get("STRIPE_PRICE_PRO_MONTHLY")) return "pro";
+  if (priceId === Deno.env.get("STRIPE_PRICE_PRO_ANNUAL")) return "pro";
   if (priceId === Deno.env.get("STRIPE_PRICE_BUSINESS")) return "business";
+  if (priceId === Deno.env.get("STRIPE_PRICE_BUSINESS_ANNUAL")) return "business";
   if (priceId === Deno.env.get("STRIPE_PRICE_TEAM_SEAT")) return "business";
+  if (priceId === Deno.env.get("STRIPE_PRICE_TEAM_SEAT_ANNUAL")) return "business";
   return null;
 }
 

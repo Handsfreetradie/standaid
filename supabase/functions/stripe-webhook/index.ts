@@ -54,12 +54,14 @@ serve(async (req) => {
       return;
     }
 
-    const priceId = sub.items.data[0]?.price?.id;
+    const item = sub.items.data[0];
+    const priceId = item?.price?.id;
     const paidTier = tierForPriceId(priceId);
     const active = isActiveStatus(sub.status);
     // Access tier: the paid tier while active/trialing, otherwise back to free.
     const accessTier = active && paidTier ? paidTier : "free";
-    const quantity = sub.items.data[0]?.quantity ?? 1;
+    const quantity = item?.quantity ?? 1;
+    const billingInterval = item?.price?.recurring?.interval ?? null; // "month" | "year"
 
     console.log(`[stripe-webhook] Processing: priceId=${priceId}, paidTier=${paidTier}, active=${active}, status=${sub.status}, userId=${userId}`);
 
@@ -70,6 +72,8 @@ serve(async (req) => {
       status: sub.status,
       tier: paidTier ?? "free",
       quantity,
+      price_id: priceId ?? null,
+      interval: billingInterval,
       current_period_end: sub.current_period_end
         ? new Date(sub.current_period_end * 1000).toISOString() : null,
       cancel_at_period_end: sub.cancel_at_period_end ?? false,
@@ -97,7 +101,14 @@ serve(async (req) => {
         const resendKey = Deno.env.get("RESEND_API_KEY");
         if (resendKey) {
           const tierName = paidTier === "business" ? "Business" : "Pro";
-          const price = paidTier === "business" ? "$49.99" : "$19.99";
+          // Derive the real amount/cadence from the subscription's actual price
+          // rather than hardcoding — this must stay correct across monthly AND
+          // annual prices, and across future repricing, without code changes.
+          const unitAmount = item?.price?.unit_amount ?? 0;
+          const currency = (item?.price?.currency ?? "aud").toUpperCase();
+          const amountStr = (unitAmount / 100).toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          const price = `$${amountStr}`;
+          const cadence = billingInterval === "year" ? "year" : "month";
           const todayDate = new Date().toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" });
 
           const htmlEmail = `<!DOCTYPE html>
@@ -140,11 +151,11 @@ serve(async (req) => {
                       </tr>
                       <tr>
                         <td style="padding:6px 0;color:#888;">Amount:</td>
-                        <td style="padding:6px 0;text-align:right;color:#1a1a2e;font-weight:600;">${price} AUD/month</td>
+                        <td style="padding:6px 0;text-align:right;color:#1a1a2e;font-weight:600;">${price} ${currency}/${cadence}</td>
                       </tr>
                       <tr style="border-top:1px solid #ddd;">
                         <td style="padding:10px 0;color:#1a1a2e;font-weight:700;font-size:14px;">Total:</td>
-                        <td style="padding:10px 0;text-align:right;color:#eb1414;font-weight:700;font-size:14px;">${price} AUD</td>
+                        <td style="padding:10px 0;text-align:right;color:#eb1414;font-weight:700;font-size:14px;">${price} ${currency}</td>
                       </tr>
                     </table>
                   </td>
@@ -166,7 +177,7 @@ serve(async (req) => {
               </table>
 
               <p style="margin:28px 0 0;padding-top:28px;border-top:1px solid #f0f0f0;font-size:13px;color:#888;line-height:1.6;">
-                <strong>Billing:</strong> Your subscription renews automatically each month. You can view invoices, update payment details, or cancel anytime in your StandAId profile under "Subscription & Billing".
+                <strong>Billing:</strong> Your subscription renews automatically each ${cadence}. You can view invoices, update payment details, or cancel anytime in your StandAId profile under "Subscription & Billing".
               </p>
 
               <table width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0 0;padding-top:24px;border-top:1px solid #f0f0f0;">

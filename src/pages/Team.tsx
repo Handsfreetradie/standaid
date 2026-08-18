@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogFooter,
   AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
@@ -23,6 +24,7 @@ const Team = () => {
 
   const [teamName, setTeamName] = useState("");
   const [seatCount, setSeatCount] = useState("3");
+  const [billingInterval, setBillingInterval] = useState<"monthly" | "annual">("monthly");
   const [creating, setCreating] = useState(false);
   const [newEmail, setNewEmail] = useState("");
   const [addingMember, setAddingMember] = useState(false);
@@ -48,7 +50,7 @@ const Team = () => {
     setCreating(true);
     try {
       const { data, error } = await supabase.functions.invoke("create-checkout", {
-        body: { tier: "business_team", initial_seats: seats, team_name: teamName.trim() },
+        body: { tier: "business_team", initial_seats: seats, team_name: teamName.trim(), interval: billingInterval },
       });
       if (error || !data?.url) throw error ?? new Error("No checkout URL");
       window.location.href = data.url;
@@ -198,6 +200,32 @@ const Team = () => {
                 value={seatCount}
                 onChange={(e) => setSeatCount(e.target.value)}
               />
+            </div>
+            <div>
+              <Label className="text-sm">Billing</Label>
+              <div className="flex items-center gap-2 mt-1.5">
+                <span className={`text-xs font-medium ${billingInterval === "monthly" ? "text-foreground" : "text-muted-foreground"}`}>
+                  Monthly — $5/seat
+                </span>
+                <Switch
+                  checked={billingInterval === "annual"}
+                  onCheckedChange={(checked) => setBillingInterval(checked ? "annual" : "monthly")}
+                />
+                <span className={`text-xs font-medium ${billingInterval === "annual" ? "text-foreground" : "text-muted-foreground"}`}>
+                  Annual — $3.75/seat
+                </span>
+                {billingInterval === "annual" && (
+                  <Badge className="bg-primary text-primary-foreground text-[10px] px-1.5 py-0">Save 25%</Badge>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1.5">
+                {(() => {
+                  const seats = Number(seatCount) || 0;
+                  return billingInterval === "annual"
+                    ? `${seats} seat${seats === 1 ? "" : "s"} × $45/yr = $${(seats * 45).toLocaleString("en-AU")}/year`
+                    : `${seats} seat${seats === 1 ? "" : "s"} × $5/mo = $${(seats * 5).toLocaleString("en-AU")}/month`;
+                })()}
+              </p>
             </div>
             <Button className="w-full h-11 font-semibold gap-1.5" disabled={creating} onClick={startTeamCheckout}>
               {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Users className="h-4 w-4" />}
