@@ -692,6 +692,22 @@ const Chat = () => {
                     </div>
                   )}
 
+                  {/* Copyright attribution — names the specific standard(s) this
+                      answer drew from, so any excerpt carries its source even
+                      if screenshotted or copied out of the app. */}
+                  {!msg.isTyping && (() => {
+                    const codes = new Set<string>();
+                    msg.citations?.forEach((c) => c.standard_code && codes.add(c.standard_code));
+                    msg.figures_referenced?.forEach((f) => f.standard_code && codes.add(f.standard_code));
+                    msg.tables_referenced?.forEach((t) => t.standard_code && codes.add(t.standard_code));
+                    if (codes.size === 0) return null;
+                    return (
+                      <p className="mt-2 text-[10px] text-muted-foreground/70">
+                        Sourced from {Array.from(codes).join(", ")} — © Standards Australia. Shown under your personal licence.
+                      </p>
+                    );
+                  })()}
+
                   {/* Safety warning */}
                   {!msg.isTyping && msg.safety_critical && (
                     <div className="flex items-start gap-2 mt-3 rounded-lg bg-destructive/10 p-3">

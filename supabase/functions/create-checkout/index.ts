@@ -31,8 +31,8 @@ serve(async (req) => {
     if (userError || !user) return json({ error: "Unauthorized" }, 401);
 
     const { tier, initial_seats, team_name, interval } = await req.json();
-    if (tier !== "pro" && tier !== "business" && tier !== "business_team") {
-      return json({ error: "Invalid tier" }, 400);
+    if (tier !== "pro") {
+      return json({ error: "This plan isn't available for new signups right now." }, 400);
     }
 
     // pro, business, and business_team all offer a real annual price.
