@@ -1,11 +1,19 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { BookOpen, Upload, Lock, Search, Loader2, Trash2, CheckCircle2, AlertCircle, Clock, FileText } from "lucide-react";
+import { BookOpen, Upload, Lock, Search, Loader2, Trash2, Pencil, CheckCircle2, AlertCircle, Clock, FileText } from "lucide-react";
 import { PDFViewerModal } from "@/components/PDFViewerModal";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { useStandards, useProfile, useProcessingJobs } from "@/hooks/useData";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -43,6 +51,8 @@ export function formatFailedLabels(labels: string[] | null | undefined, count: n
 const Standards = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [pdfViewer, setPdfViewer] = useState<{ standardId: string; standardCode: string } | null>(null);
+  const [renaming, setRenaming] = useState<{ id: string; title: string; standard_code: string } | null>(null);
+  const [renameSaving, setRenameSaving] = useState(false);
   const { data: standards = [], isLoading } = useStandards();
   const { data: profile } = useProfile();
   const { data: processingJobs = [] } = useProcessingJobs();
@@ -94,6 +104,32 @@ const Standards = () => {
 
     toast.success("Standard deleted");
     queryClient.invalidateQueries({ queryKey: ["standards"] });
+  };
+
+  const saveRename = async () => {
+    if (!renaming || !renaming.title.trim() || renameSaving) return;
+    setRenameSaving(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("rename-standard", {
+        body: { standard_id: renaming.id, title: renaming.title.trim(), standard_code: renaming.standard_code.trim() },
+      });
+      if (error) throw error;
+
+      if (data.newlyLocked) {
+        toast.info("This name matches Standards Australia content — AI features have been turned off for it.");
+      } else if (data.stillLocked) {
+        toast.info("This standard is still locked — Standards Australia content stays off even after a rename.");
+      } else {
+        toast.success("Standard renamed");
+      }
+      setRenaming(null);
+      queryClient.invalidateQueries({ queryKey: ["standards"] });
+    } catch (e) {
+      console.error(e);
+      toast.error("Couldn't rename this standard — please try again.");
+    } finally {
+      setRenameSaving(false);
+    }
   };
 
   return (
@@ -286,6 +322,14 @@ const Standards = () => {
                     <Button
                       size="icon"
                       variant="ghost"
+                      className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                      onClick={() => setRenaming({ id: s.id, title: s.title, standard_code: s.standard_code || "" })}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
                       className="h-8 w-8 text-muted-foreground hover:text-destructive"
                       onClick={() => handleDelete(s.id)}
                     >
@@ -307,6 +351,43 @@ const Standards = () => {
         standardId={pdfViewer?.standardId}
         standardCode={pdfViewer?.standardCode}
       />
+
+      <Dialog open={!!renaming} onOpenChange={(v) => { if (!v) setRenaming(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Rename standard</DialogTitle>
+          </DialogHeader>
+          {renaming && (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="rename-title">Title</Label>
+                <Input
+                  id="rename-title"
+                  value={renaming.title}
+                  onChange={(e) => setRenaming({ ...renaming, title: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="rename-code">Standard code</Label>
+                <Input
+                  id="rename-code"
+                  value={renaming.standard_code}
+                  onChange={(e) => setRenaming({ ...renaming, standard_code: e.target.value })}
+                  placeholder="e.g. NCC 2025"
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenaming(null)} disabled={renameSaving}>
+              Cancel
+            </Button>
+            <Button onClick={saveRename} disabled={renameSaving || !renaming?.title.trim()}>
+              {renameSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Upgrade CTA for free tier */}
       {tier === "free" && (
