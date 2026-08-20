@@ -110,7 +110,7 @@ const Audits = () => {
           </div>
           <h1 className="text-xl font-bold text-foreground mb-2">Site Audit is a Pro feature</h1>
           <p className="text-sm text-muted-foreground mb-6">
-            Walk a job, photograph each item, and get an AI compliance assessment against your standards — with the questions it needs answered.
+            Walk a job, photograph each item, and run your own compliance audit against your standards — AI helps flag issues and asks the questions it needs answered.
           </p>
           <Button onClick={() => navigate("/profile")} className="gap-1.5">Upgrade to Pro</Button>
         </div>

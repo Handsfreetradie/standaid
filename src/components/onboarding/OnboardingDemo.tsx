@@ -105,7 +105,7 @@ const OnboardingDemo = ({ onNext, onSkip }: Props) => {
                   <Lock className="h-6 w-6 text-foreground" />
                 </div>
                 <p className="text-sm font-semibold text-foreground text-center px-6">
-                  Photograph your job — AI checks compliance instantly
+                  Photograph your job — AI helps you audit compliance instantly
                 </p>
               </div>
               <Badge className="absolute top-3 right-3 bg-primary text-primary-foreground text-xs">
