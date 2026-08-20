@@ -14,9 +14,9 @@
 // allowed/blocked uploads.
 const SA_STANDARD_PATTERN = new RegExp(
   [
-    String.raw`\bAS\s*[\/\-]?\s*NZS\b`, // AS/NZS, AS-NZS, ASNZS, AS NZS
-    String.raw`\bNZS\s*\d{2,6}(?:\.\d+)?\b`, // NZS 3604
-    String.raw`\bAS\s*\d{2,6}(?:\.\d+)?\b`, // AS 3000, AS3000, AS 1170.1
+    String.raw`\bAS\s*[\/\-]?\s*NZS?\b`, // AS/NZS, AS-NZS, ASNZS, AS NZS, AS NZ (missing S — real-world upload typo)
+    String.raw`\bNZS?\s*\d{2,10}(?:\.\d+)?\b`, // NZS 3604, NZ 3604
+    String.raw`\bAS\s*\d{2,10}(?:\.\d+)?\b`, // AS 3000, AS3000, AS 1170.1, AS 30002018 (code+year run together)
     String.raw`australian\s*\/\s*new\s*zealand\s+standard`,
     String.raw`\baustralian\s+standard\b`,
     String.raw`\bnew\s+zealand\s+standard\b`,
