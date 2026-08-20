@@ -44,9 +44,9 @@ const OnboardingPricing = ({ onNext, onBack }: Props) => {
       </button>
 
       <div className="text-center mb-6">
-        <h2 className="font-sans text-2xl font-extrabold text-foreground">Start with a free trial.</h2>
+        <h2 className="font-sans text-2xl font-extrabold text-foreground">Choose your plan.</h2>
         <p className="text-muted-foreground text-sm mt-2">
-          Every new account gets 7 days of Pro, free — no card needed. Drops to Free after unless you upgrade.
+          Start free, upgrade to Pro any time.
         </p>
       </div>
 
@@ -139,10 +139,10 @@ const OnboardingPricing = ({ onNext, onBack }: Props) => {
           onClick={() => onNext()}
           className="w-full h-12 text-base font-bold rounded-xl"
         >
-          Start my 7-day free trial
+          Continue
         </Button>
         <p className="text-xs text-muted-foreground text-center mt-2">
-          No card needed. Cancel any time. No lock in.
+          No card needed to start on Free. Cancel any time. No lock in.
         </p>
       </div>
     </div>
