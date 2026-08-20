@@ -932,7 +932,9 @@ const Learn = () => {
     setMode("photo-analysis");
     try {
       const { data, error } = await supabase.functions.invoke("capstone", {
-        body: { action: "analyze_photo", standardId: selectedStandard, imageBase64: base64 },
+        body: isLockedStandardSelected
+          ? { action: "analyze_photo_general", standardId: selectedStandard, imageBase64: base64 }
+          : { action: "analyze_photo", standardId: selectedStandard, imageBase64: base64 },
       });
       if (error) throw await extractFnError(error);
       if (data?.error) throw new Error(data.error);
@@ -1144,8 +1146,9 @@ const Learn = () => {
           <Card className="p-3 mb-4 bg-muted/50 border-muted-foreground/20">
             <p className="text-xs text-muted-foreground leading-relaxed">
               Standards Australia's licensing terms don't allow AI use of this document's actual content.
-              Practice Quiz here uses general trade knowledge instead — not your exact document, and not
-              tied to specific clause numbers. Always verify against your own copy of the standard.
+              Practice Quiz and Photo Analysis here use general trade knowledge instead — not your exact
+              document, and not tied to specific clause numbers. Always verify against your own copy of
+              the standard.
             </p>
           </Card>
         )}
@@ -1188,6 +1191,27 @@ const Learn = () => {
             </div>
           </Card>
 
+          <Card
+            className="p-4 cursor-pointer hover:border-primary/50 transition-colors"
+            onClick={handlePhotoUpload}
+          >
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center flex-shrink-0">
+                <Camera className="h-5 w-5 text-primary" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <p className="font-bold text-foreground text-sm">Photo Analysis</p>
+                  {isFreeTier && <Badge className="bg-primary/10 text-primary border-0 text-[10px] px-1.5 py-0">PRO</Badge>}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {isLockedStandardSelected ? "Handwritten work reviewed with general formulas — not your exact document" : "Upload handwritten work for AI hints"}
+                </p>
+              </div>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </div>
+          </Card>
+
           {!isLockedStandardSelected && (
           <Card
             className="p-4 cursor-pointer hover:border-primary/50 transition-colors"
@@ -1207,6 +1231,7 @@ const Learn = () => {
           )}
 
           {!isLockedStandardSelected && (
+          <>
           <Card
             className="p-4 cursor-pointer hover:border-primary/50 transition-colors"
             onClick={generateCalculation}
@@ -1284,25 +1309,6 @@ const Learn = () => {
           </Card>
 
           <Card
-            className="p-4 cursor-pointer hover:border-primary/50 transition-colors"
-            onClick={handlePhotoUpload}
-          >
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-lg bg-accent flex items-center justify-center flex-shrink-0">
-                <Camera className="h-5 w-5 text-primary" />
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <p className="font-bold text-foreground text-sm">Photo Analysis</p>
-                  {isFreeTier && <Badge className="bg-primary/10 text-primary border-0 text-[10px] px-1.5 py-0">PRO</Badge>}
-                </div>
-                <p className="text-xs text-muted-foreground">Upload handwritten work for AI hints</p>
-              </div>
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
-            </div>
-          </Card>
-
-          <Card
             className="p-4 cursor-pointer hover:border-primary/50 transition-colors border-primary/20 bg-primary/[0.02]"
             onClick={() => setMode("exam-prep")}
           >
@@ -1317,6 +1323,7 @@ const Learn = () => {
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </div>
           </Card>
+          </>
           )}
 
           <Card
