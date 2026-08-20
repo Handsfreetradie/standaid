@@ -472,6 +472,12 @@ serve(async (req) => {
     const aiEnabledStandardIds = (ownedStandardsResult.data || [])
       .filter((s: any) => s.extraction_status !== "ai_disabled")
       .map((s: any) => s.id);
+    // Labels for the refusal-gate fallback below — lets that message name
+    // which of the user's standards can't be searched, instead of leaving
+    // them thinking the standard wasn't uploaded or the question was wrong.
+    const aiDisabledStandardLabels = (ownedStandardsResult.data || [])
+      .filter((s: any) => s.extraction_status === "ai_disabled")
+      .map((s: any) => s.standard_code || s.title);
     // Drops chunks from a standard we're confident belongs to a different
     // trade than the question. Never filters on an unconfident query guess
     // ("general") or an unrecognised standard (null), and never empties a
@@ -1080,9 +1086,13 @@ ${chunk.content}`;
         );
       }
 
+      const lockedStandardsNote = aiDisabledStandardLabels.length > 0
+        ? ` Note: ${aiDisabledStandardLabels.join(", ")} can't be searched — Standards Australia's licensing terms don't allow AI use of their content, so those are stored for viewing only. If your answer is in one of them, open the PDF directly from your Standards library.`
+        : "";
+
       const noChunksPayload = {
         done: true,
-        answer: "I couldn't find relevant content in your uploaded standards for this query. Please check that the relevant standard has been uploaded and fully processed, or try rephrasing your question.",
+        answer: "I couldn't find relevant content in your uploaded standards for this query. Please check that the relevant standard has been uploaded and fully processed, or try rephrasing your question." + lockedStandardsNote,
         answer_found: false,
         citations: [],
         figures_referenced: [],
