@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Mic, ThumbsUp, ThumbsDown, HelpCircle, Check, FileText, History, X, ExternalLink, ShoppingCart } from "lucide-react";
+import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Mic, ThumbsUp, ThumbsDown, HelpCircle, Check, FileText, History, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import VoiceMode from "@/components/VoiceMode";
@@ -154,8 +154,6 @@ function FeedbackButtons({ queryId }: { queryId: string }) {
     </div>
   );
 }
-
-const STANDARDS_AFFILIATE_URL = "https://www.standards.org.au"; // TODO: replace with affiliate link
 
 function ThinkingBubble({ isComplianceCheck }: { isComplianceCheck?: boolean }) {
   const [stage, setStage] = useState(0);
@@ -534,18 +532,6 @@ const Chat = () => {
                 Ask anything about your uploaded standards. I'll find the exact clause.
               </p>
             </div>
-
-            {/* Affiliate — subtle secondary link */}
-            <a
-              href={STANDARDS_AFFILIATE_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-border bg-background hover:bg-muted/50 active:scale-[0.98] transition-all text-xs text-muted-foreground hover:text-foreground"
-            >
-              <ShoppingCart className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
-              <span>Need a standard? <span className="font-semibold text-foreground">Buy Australian Standards</span></span>
-              <ExternalLink className="h-3 w-3 flex-shrink-0 ml-auto" />
-            </a>
           </div>
         )}
 

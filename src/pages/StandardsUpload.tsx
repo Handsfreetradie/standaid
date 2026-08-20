@@ -655,6 +655,12 @@ const StandardsUpload = () => {
           </div>
         )}
 
+        <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-3">
+          <p className="text-xs text-amber-700 dark:text-amber-500 leading-relaxed">
+            Standards Australia strictly prohibits any AI use of their content (AS/NZS/NZS standards). Documents like these are stored for viewing only — no AI search, chat, or Learn features will be available for them.
+          </p>
+        </div>
+
         <label className="flex items-start gap-3 mb-6 cursor-pointer">
           <Checkbox
             checked={licenceConfirmed}
