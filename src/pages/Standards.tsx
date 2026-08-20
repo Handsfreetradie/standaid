@@ -117,8 +117,10 @@ const Standards = () => {
 
       if (data.newlyLocked) {
         toast.info("This name matches Standards Australia content — AI features have been turned off for it.");
-      } else if (data.stillLocked) {
-        toast.info("This standard is still locked — Standards Australia content stays off even after a rename.");
+      } else if (data.unlockedWithoutContent) {
+        toast.info("Unlocked — but this standard was never fully processed, so it still has no searchable content. Delete and re-upload to process it.");
+      } else if (data.unlocked) {
+        toast.success("Unlocked — AI search, chat and Learn are available for this standard again.");
       } else {
         toast.success("Standard renamed");
       }
@@ -213,6 +215,14 @@ const Standards = () => {
                       </Badge>
                     )}
                     {statusIcon[s.extraction_status as keyof typeof statusIcon]}
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                      onClick={() => setRenaming({ id: s.id, title: s.title, standard_code: s.standard_code || "" })}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
                   </div>
                 </div>
 
@@ -322,14 +332,6 @@ const Standards = () => {
                     <Button
                       size="icon"
                       variant="ghost"
-                      className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                      onClick={() => setRenaming({ id: s.id, title: s.title, standard_code: s.standard_code || "" })}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
                       className="h-8 w-8 text-muted-foreground hover:text-destructive"
                       onClick={() => handleDelete(s.id)}
                     >
@@ -376,6 +378,10 @@ const Standards = () => {
                   placeholder="e.g. NCC 2025"
                 />
               </div>
+              <p className="text-xs text-muted-foreground">
+                Entering an incorrect title or code to make a Standards Australia document appear
+                AI-eligible breaches our Terms of Service — you're responsible for what you enter here.
+              </p>
             </div>
           )}
           <DialogFooter>

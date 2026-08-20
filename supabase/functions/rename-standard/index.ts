@@ -9,14 +9,20 @@ import { isAiAllowed } from "../_shared/standard-licence.ts";
 // update was the actual bypass for the Standards Australia AI block, not
 // just a UX gap.
 //
-// One-way ratchet, confirmed with Kyle: a rename can only tighten the AI
-// block, never loosen it.
+// Rename re-runs the AI-eligibility check both ways (confirmed with Kyle,
+// knowingly accepting that a user can self-unblock their own standard by
+// renaming it — this is the deliberate design, not an oversight):
 //   - If the new title/code now matches AS/AS-NZS/NZS, the standard is
 //     locked (ai_disabled) regardless of what it was before.
-//   - If the new title/code looks fine, an already-locked standard STAYS
-//     locked — renaming alone never restores AI features. Unblocking a
-//     standard is a separate, manual, reviewed action (see
-//     scripts/list-ai-disabled-standards.mjs).
+//   - If the new title/code no longer matches, an already-locked standard
+//     is unlocked IF it already has processed chunks (was fully processed
+//     before being blocked — flipping is_indexed back on costs nothing, same
+//     as the NCC 2025 fix earlier). If it has zero chunks (blocked before it
+//     ever finished processing), the status still flips, but actually
+//     restoring content needs a real reprocess — that costs OCR/embedding
+//     API spend, so it is NOT auto-triggered here. See
+//     scripts/list-ai-disabled-standards.mjs / reprocess-standard for that,
+//     always with a cost quote first.
 
 serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
@@ -61,10 +67,29 @@ serve(async (req) => {
     const nowAllowed = isAiAllowed(cleanCode, cleanTitle);
     const wasDisabled = standard.extraction_status === "ai_disabled";
 
-    // Tighten if the new text looks like AS/AS-NZS/NZS; otherwise never
-    // touch extraction_status here — an already-disabled standard stays
-    // disabled no matter how it's renamed.
-    const newStatus = !nowAllowed ? "ai_disabled" : standard.extraction_status;
+    let newStatus = standard.extraction_status;
+    let unlockedWithoutContent = false;
+
+    if (!nowAllowed) {
+      // Tighten: always locks, regardless of what it was before.
+      newStatus = "ai_disabled";
+    } else if (wasDisabled) {
+      // Was blocked, new name looks fine — restore it if there's already
+      // processed content to restore (free); otherwise flip the status but
+      // don't spend money reprocessing automatically.
+      const { count: chunkCount } = await supabaseAdmin
+        .from("standard_chunks")
+        .select("id", { count: "exact", head: true })
+        .eq("standard_id", standard_id);
+
+      if (chunkCount && chunkCount > 0) {
+        await supabaseAdmin.from("standard_chunks").update({ is_indexed: true }).eq("standard_id", standard_id);
+        newStatus = "complete";
+      } else {
+        newStatus = "pending";
+        unlockedWithoutContent = true;
+      }
+    }
 
     const { error: updateError } = await supabaseAdmin
       .from("standards")
@@ -77,7 +102,8 @@ serve(async (req) => {
       standard_code: cleanCode,
       extraction_status: newStatus,
       newlyLocked: !nowAllowed && !wasDisabled,
-      stillLocked: nowAllowed && wasDisabled,
+      unlocked: nowAllowed && wasDisabled,
+      unlockedWithoutContent,
     });
   } catch (e) {
     console.error("[rename-standard] error:", e);

@@ -76,6 +76,15 @@ const Legal = ({ kind }: LegalProps) => {
                 automatically at upload; it is not something you can opt into or out of.
               </p>
               <p>
+                You can edit a document's title and standard code after upload. Doing so honestly —
+                for example, to correct a typo — is fine. Entering an incorrect title or code for the
+                purpose of making a Standards Australia document (or any document you are not
+                entitled to process with AI) appear eligible is a breach of these terms and of the
+                publisher's licence, and you are solely responsible for that breach, including any
+                resulting claim against you. StandAId is not liable for AI processing that occurs
+                because you supplied an inaccurate title or code.
+              </p>
+              <p>
                 Your uploaded documents are stored privately against your account. They are never
                 shared with, or made searchable by, other users — even if another user owns the same
                 standard, they cannot access, view or search your copy. Where AI processing is
