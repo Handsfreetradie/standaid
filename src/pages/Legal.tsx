@@ -3,7 +3,7 @@ import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const SUPPORT_EMAIL = "hello@standaid.ai";
-const LAST_UPDATED = "4 July 2026";
+const LAST_UPDATED = "20 August 2026";
 
 interface LegalProps {
   kind: "terms" | "privacy";
@@ -68,13 +68,19 @@ const Legal = ({ kind }: LegalProps) => {
                 uploading, you confirm this and accept responsibility for complying with the
                 publisher's terms.
               </p>
+              <p className="font-medium text-foreground">
+                Standards Australia's terms do not permit any AI or machine-learning use of their
+                content. Documents affected by this (AS, AS/NZS and NZS standards) are stored in
+                your account for viewing only — AI search, chat and Learn/study features are not
+                available for them, regardless of your subscription tier. We detect and apply this
+                automatically at upload; it is not something you can opt into or out of.
+              </p>
               <p>
                 Your uploaded documents are stored privately against your account. They are never
                 shared with, or made searchable by, other users — even if another user owns the same
-                standard, they cannot access, view or search your copy. This reflects the licensing
-                terms Standards Australia and other publishers place on their documents. Processing
-                (text extraction, indexing and answering your questions) happens solely to provide
-                the service to you.
+                standard, they cannot access, view or search your copy. Where AI processing is
+                available for a document, it (text extraction, indexing and answering your
+                questions) happens solely to provide the service to you.
               </p>
             </Section>
 
@@ -143,6 +149,11 @@ const Legal = ({ kind }: LegalProps) => {
                 photos you submit are processed by our AI providers (Anthropic and OpenAI) under
                 their API terms, which do not permit them to train their models on this data. Voice
                 input is transcribed on your device by your browser, not on our servers.
+              </p>
+              <p>
+                This only applies to documents eligible for AI processing. Standards Australia's
+                content (AS, AS/NZS and NZS standards) is excluded from AI processing entirely — see
+                our Terms of Service, Section 3.
               </p>
             </Section>
 
