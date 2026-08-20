@@ -4,18 +4,31 @@
 // licence/pilot for this on 2026-08-20 — there is no path to compliant AI
 // use of their content right now.
 //
-// Deny-by-default: a standard is only AI-eligible if its code/title clearly
-// matches an allow-listed non-SA publisher. A false positive here just means
-// a legitimate upload gets manually reviewed; a false negative is an actual
-// licence breach — so anything ambiguous (including a blank standard_code)
-// stays blocked. This is a text-pattern match on free-text fields, so it's
-// not bulletproof; keep an eye on newly allowed/blocked uploads.
-const ALLOWED_PUBLISHER_PATTERN =
-  /\bNCC\b|national construction code|\bBCA\b|building code of australia/i;
+// Deny-list: only AS / AS-NZS / NZS content is blocked from AI features —
+// everything else (NCC, other trade docs, other standards bodies) is
+// AI-eligible by default. This means anything ambiguous or blank now
+// defaults to ALLOWED, not blocked — a deliberate call, since the upload
+// disclaimer + licence-confirmation checkbox are the accepted safeguard for
+// a user who mislabels an AS/NZS document. Case-insensitive, text-pattern
+// match on free-text fields, so it's not bulletproof; keep an eye on newly
+// allowed/blocked uploads.
+const SA_STANDARD_PATTERN = new RegExp(
+  [
+    String.raw`\bAS\s*[\/\-]?\s*NZS\b`, // AS/NZS, AS-NZS, ASNZS, AS NZS
+    String.raw`\bNZS\s*\d{2,6}(?:\.\d+)?\b`, // NZS 3604
+    String.raw`\bAS\s*\d{2,6}(?:\.\d+)?\b`, // AS 3000, AS3000, AS 1170.1
+    String.raw`australian\s*\/\s*new\s*zealand\s+standard`,
+    String.raw`\baustralian\s+standard\b`,
+    String.raw`\bnew\s+zealand\s+standard\b`,
+    String.raw`standards\s+australia`,
+    String.raw`standards\s+new\s+zealand`,
+  ].join("|"),
+  "i",
+);
 
 export function isAiAllowed(standardCode: string | null | undefined, title: string | null | undefined): boolean {
   const text = `${standardCode ?? ""} ${title ?? ""}`;
-  return ALLOWED_PUBLISHER_PATTERN.test(text);
+  return !SA_STANDARD_PATTERN.test(text);
 }
 
 // Call right after loading a standard row (needs standard_code + title) and
