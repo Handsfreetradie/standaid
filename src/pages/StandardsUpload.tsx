@@ -5,7 +5,7 @@ import { extractPdfText } from "@/lib/pdf-text";
 import { scanTooLargeForOcr } from "@/lib/scanned-check";
 import {
   Upload, FileText, CheckCircle2, Loader2, ArrowLeft, ArrowRight,
-  BookOpen, Zap, Search, Shield, Sparkles,
+  BookOpen, Zap, Search, Shield, Sparkles, ShieldAlert,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -562,6 +562,10 @@ const StandardsUpload = () => {
 
   // ── NAMING ──
   if (step === "naming") {
+    // Same non-AI cover-scan regex used above, re-tested against whatever's
+    // currently in the two fields (auto-filled or user-edited) so the banner
+    // stays accurate live as the user types, not just at scan time.
+    const detectedAsNzs = STANDARD_CODE_RE.test(docName) || STANDARD_CODE_RE.test(standardCode);
     return (
       <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md mx-auto">
         <button
@@ -658,6 +662,17 @@ const StandardsUpload = () => {
                 You don't have a base standard to link this to yet — it'll be uploaded as its own standard for now. Upload the base standard later and you'll be able to link this as an amendment to it.
               </p>
             )}
+          </div>
+        )}
+
+        {detectedAsNzs && (
+          <div className="mb-4 rounded-xl border border-amber-500/50 bg-amber-500/15 px-3.5 py-3 flex items-start gap-2">
+            <ShieldAlert className="h-4 w-4 text-amber-700 dark:text-amber-500 flex-shrink-0 mt-0.5" />
+            <p className="text-xs font-medium text-amber-700 dark:text-amber-500 leading-relaxed">
+              We've detected this looks like an AS, AS/NZS or NZS document. It can still be uploaded and viewed,
+              but AI search, chat and Learn features won't be available for it — Standards Australia's licensing
+              terms don't allow AI use of their content.
+            </p>
           </div>
         )}
 

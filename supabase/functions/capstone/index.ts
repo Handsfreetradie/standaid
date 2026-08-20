@@ -499,7 +499,10 @@ serve(async (req) => {
     // trigger — but every Learn/exam action ultimately pulls fresh content
     // from standard_chunks for a given standardId, so block centrally rather
     // than patching each action branch. See _shared/standard-licence.ts.
-    if (standardId) {
+    // generate_questions_general is exempt on purpose — it never reads
+    // standard_chunks, only the standard's title/code for prompt context, so
+    // it's safe to run against an ai_disabled (AS/NZS) standard.
+    if (standardId && action !== "generate_questions_general") {
       const { data: standardForGate } = await supabase
         .from("standards").select("extraction_status").eq("id", standardId).maybeSingle();
       if (standardForGate?.extraction_status === "ai_disabled") {
@@ -578,7 +581,7 @@ serve(async (req) => {
     // start_exam is not in AI_ACTIONS: it only calls Claude when the question
     // pool is short, so it invokes enforceAiRateLimit() itself at that point
     // rather than charging a slot for every exam start.
-    const AI_ACTIONS = ["generate_questions", "analyze_photo", "explain_chunk", "generate_study_guide", "generate_short_answer", "generate_calculation", "grade_calculation", "grade_short_answer", "exam_prep", "scenario_walkthrough"];
+    const AI_ACTIONS = ["generate_questions", "generate_questions_general", "analyze_photo", "explain_chunk", "generate_study_guide", "generate_short_answer", "generate_calculation", "grade_calculation", "grade_short_answer", "exam_prep", "scenario_walkthrough"];
     const enforceAiRateLimit = async (): Promise<Response | null> => {
       // Tier-based limits: free = 5/day, pro/business = 1000/day (effectively unlimited)
       const limits = tier === "free"
@@ -691,6 +694,80 @@ Write questions and explanations in plain Australian English. Each explanation m
       const { data: saved, error: saveErr } = await supabase.from("capstone_questions").insert(inserts).select();
       if (saveErr) throw saveErr;
       return new Response(JSON.stringify({ questions: saved }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // ── GENERATE QUIZ QUESTIONS — GENERAL KNOWLEDGE (no document ingestion) ──
+    // For AS/NZS/NZS standards, where we can't process the actual purchased
+    // document with AI at all (Standards Australia licensing). This asks the
+    // model for practice questions from its own general trade knowledge only
+    // — never grounded in standard_chunks, never citing a clause number as if
+    // quoting the real document (that would risk a confidently wrong citation
+    // on safety-critical content). A fixed disclaimer is appended in code
+    // (not left to the model) so it's never accidentally dropped.
+    if (action === "generate_questions_general") {
+      const { data: standard } = standardId
+        ? await supabase.from("standards").select("title, standard_code").eq("id", standardId).maybeSingle()
+        : { data: null };
+
+      const count = questionCount || 5;
+      const diff = difficulty || "medium";
+      const label = standard?.standard_code || standard?.title || topic || "this standard";
+
+      const aiResponse = await callAI({
+        model: "claude-sonnet-4-6",
+        messages: [
+          { role: "system", content: `You are an exam question generator helping a trade apprentice study general concepts related to ${label}. You do NOT have access to the actual current text of this standard — generate questions from your own general trade knowledge only, about well-established, widely-known concepts and practices. Never state a specific clause number, table number, or exact numeric threshold as if quoting the current official standard — if a question needs a number, phrase it as an approximate range or "closest to" rather than implying a precise cited figure. Frame questions as real on-site situations. Write in plain Australian English.` },
+          { role: "user", content: `Generate ${count} ${diff}-difficulty multiple-choice general-knowledge practice questions about core ${label} concepts.` },
+        ],
+        tools: [{
+          type: "function",
+          function: {
+            name: "return_questions",
+            description: "Return generated quiz questions",
+            parameters: {
+              type: "object",
+              properties: {
+                questions: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      question: { type: "string" },
+                      options: { type: "array", items: { type: "string" }, minItems: 4, maxItems: 4 },
+                      correct_answer: { type: "string" },
+                      explanation: { type: "string" },
+                      topic: { type: "string" },
+                    },
+                    required: ["question", "options", "correct_answer", "explanation"],
+                  },
+                },
+              },
+              required: ["questions"],
+              additionalProperties: false,
+            },
+          },
+        }],
+        tool_choice: { type: "function", function: { name: "return_questions" } },
+      }, ANTHROPIC_API_KEY, { temperature: 0.3, max_tokens: 3000, usageLogger: { supabaseAdmin: supabase, userId: user.id, kind: "capstone_generate_questions_general" } });
+
+      if (!aiResponse.ok) return await aiError(aiResponse);
+
+      const aiData = await aiResponse.json();
+      const input = getToolInput(aiData);
+      if (!input) throw new Error("No questions generated");
+      const questions = normaliseQuestions(input.questions);
+      if (!questions.length) throw new Error("No valid questions generated. Please try again.");
+
+      const DISCLAIMER = " (General knowledge practice — verify exact figures and clause numbers against your own copy of the current standard.)";
+      const inserts = questions.map((q: any) => ({
+        user_id: user.id, standard_id: standardId || null, question: q.question, options: q.options,
+        correct_answer: q.correct_answer, explanation: (q.explanation || "").trim() + DISCLAIMER,
+        clause_reference: null, difficulty: diff, topic: q.topic || label,
+      }));
+
+      const { data: saved, error: saveErr } = await supabase.from("capstone_questions").insert(inserts).select();
+      if (saveErr) throw saveErr;
+      return new Response(JSON.stringify({ questions: saved, generalKnowledge: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // ── ANALYZE PHOTO OF HANDWRITTEN WORK ──
