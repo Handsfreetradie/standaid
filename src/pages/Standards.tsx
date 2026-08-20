@@ -117,10 +117,8 @@ const Standards = () => {
 
       if (data.newlyLocked) {
         toast.info("This name matches Standards Australia content — AI features have been turned off for it.");
-      } else if (data.unlockedWithoutContent) {
-        toast.info("Unlocked — but this standard was never fully processed, so it still has no searchable content. Delete and re-upload to process it.");
-      } else if (data.unlocked) {
-        toast.success("Unlocked — AI search, chat and Learn are available for this standard again.");
+      } else if (data.stillLocked) {
+        toast.info("This standard is still locked — Standards Australia content stays off even after a rename.");
       } else {
         toast.success("Standard renamed");
       }
@@ -379,8 +377,8 @@ const Standards = () => {
                 />
               </div>
               <p className="text-xs text-muted-foreground">
-                Entering an incorrect title or code to make a Standards Australia document appear
-                AI-eligible breaches our Terms of Service — you're responsible for what you enter here.
+                A Standards Australia document stays locked regardless of what you enter here — renaming
+                doesn't change AI availability for it.
               </p>
             </div>
           )}
