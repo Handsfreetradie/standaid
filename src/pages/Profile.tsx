@@ -35,7 +35,7 @@ const FAQS = [
   },
   {
     q: "What standards can I upload?",
-    a: "Any Australian Standard in PDF format — AS/NZS 3000, AS 3017, plumbing codes, building codes, NCC, and more. Any trade, any standard.",
+    a: "Any Australian Standard in PDF format, for AI search and chat — plumbing codes, building codes, NCC, and more. AS/NZS standards (e.g. AS/NZS 3000, AS 3017) can still be uploaded and viewed, but Standards Australia's licensing terms mean AI features aren't available for them.",
   },
   {
     q: "How accurate are the AI answers?",
