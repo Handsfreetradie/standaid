@@ -4,6 +4,7 @@ import { Calculator, BookOpen, GraduationCap, MessageSquare, User, ClipboardChec
 import { cn } from "@/lib/utils";
 import BottomNav from "./BottomNav";
 import { ProgressBar } from "./ProgressBar";
+import { AiRestrictionNotice } from "./AiRestrictionNotice";
 
 const NAV_TABS = [
   { path: "/tools", icon: Calculator, label: "Tools" },
@@ -29,6 +30,7 @@ const AppLayout = () => {
 
   return (
     <>
+      <AiRestrictionNotice />
       <ProgressBar />
       <div className="fixed inset-0 flex overflow-hidden" style={{ background: 'linear-gradient(to right, #FFFFFF, #FFE8E8)' }}>
       {/* SVG Noise texture overlay */}
