@@ -6,6 +6,7 @@ import { extractPageRangeBase64, bumpAttempts } from "../describe-figures/shared
 import { extractTableChunks, extractFigureChunks, type Chunk } from "../process-standard/extraction.ts";
 import { transcriptionRules } from "../process-standard/ocr.ts";
 import { logTokenUsage } from "../_shared/log-usage.ts";
+import { blockIfNotAiAllowed } from "../_shared/standard-licence.ts";
 
 // Fixes permanently-failed table/figure chunks (embedding IS NULL AND
 // index_attempts >= 3 — the same condition embed-chunks uses to compute
@@ -50,6 +51,17 @@ serve(async (req) => {
     const { standard_id, user_id } = await req.json();
     if (!standard_id || !user_id) return json({ error: "standard_id and user_id are required" }, 400);
 
+    const { data: standard, error: standardError } = await supabaseAdmin
+      .from("standards")
+      .select("id, file_path, standard_code, title, version, organization_id")
+      .eq("id", standard_id)
+      .eq("user_id", user_id)
+      .single();
+    if (standardError || !standard?.file_path) return json({ error: "Standard not found" }, 404);
+    if (await blockIfNotAiAllowed(supabaseAdmin, standard)) {
+      return json({ standard_id, status: "ai_disabled", message: "This standard isn't eligible for AI processing under the publisher's licensing terms." });
+    }
+
     const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
     if (!ANTHROPIC_API_KEY) return json({ error: "Service unavailable" }, 500);
 
@@ -79,17 +91,6 @@ serve(async (req) => {
     const skippedNonCaption = failed.length - targets.length;
     if (targets.length === 0) {
       return json({ fixed: 0, skipped_non_caption: skippedNonCaption, note: "no table/figure failures to target" });
-    }
-
-    const { data: standard, error: standardError } = await supabaseAdmin
-      .from("standards")
-      .select("file_path, standard_code, version, organization_id")
-      .eq("id", standard_id)
-      .eq("user_id", user_id)
-      .single();
-    if (standardError || !standard?.file_path) {
-      console.error("[recover-failed-chunks] Error fetching standard:", standardError);
-      return json({ error: "Standard not found" }, 404);
     }
 
     const { data: fileData, error: downloadError } = await supabaseAdmin.storage

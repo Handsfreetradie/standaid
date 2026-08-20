@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { PAGE_GAP_SENTINEL } from "../process-standard/pipeline.ts";
 import { logTokenUsage } from "../_shared/log-usage.ts";
 import { getAllowedOrigin } from "../_shared/cors.ts";
+import { blockIfNotAiAllowed } from "../_shared/standard-licence.ts";
 
 const EMBED_BATCH_SIZE = 50;
 const PARALLEL_EMBED = 5;
@@ -164,7 +165,7 @@ serve(async (req) => {
 
     const { data: standard } = await supabaseAdmin
       .from("standards")
-      .select("total_chunks, extraction_status, user_id, title")
+      .select("id, total_chunks, extraction_status, user_id, title, standard_code")
       .eq("id", standard_id)
       .single();
 
@@ -172,6 +173,12 @@ serve(async (req) => {
     if (callerUserId && standard && standard.user_id !== callerUserId) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (standard && (standard.extraction_status === "ai_disabled" || await blockIfNotAiAllowed(supabaseAdmin, standard))) {
+      return new Response(JSON.stringify({ status: "ai_disabled" }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 

@@ -17,6 +17,7 @@ const statusIcon = {
   processing: <Loader2 className="h-4 w-4 animate-spin text-primary" />,
   complete: <CheckCircle2 className="h-4 w-4 text-green-600" />,
   failed: <AlertCircle className="h-4 w-4 text-destructive" />,
+  ai_disabled: <Lock className="h-4 w-4 text-muted-foreground" />,
 };
 
 // "TABLE 5.1" -> "Table 5.1" — the raw clause_number as stored, not meant for
@@ -207,6 +208,15 @@ const Standards = () => {
                   );
                 })()}
 
+                {s.extraction_status === "ai_disabled" && (
+                  <div className="mt-3">
+                    <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+                      <Lock className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+                      Stored for reference only — AI search unavailable under the publisher's licensing terms.
+                    </p>
+                  </div>
+                )}
+
                 {s.extraction_status === "failed" && (() => {
                   const failedJob = processingJobs.find((j: any) => j.standard_id === s.id);
                   return (
@@ -262,7 +272,7 @@ const Standards = () => {
                     })}
                   </span>
                   <div className="flex items-center gap-1">
-                    {s.extraction_status === "complete" && (
+                    {(s.extraction_status === "complete" || s.extraction_status === "ai_disabled") && (
                       <Button
                         size="sm"
                         variant="ghost"

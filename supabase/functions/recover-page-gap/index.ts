@@ -6,6 +6,7 @@ import { extractPageBase64, bumpAttempts } from "../describe-figures/shared.ts";
 import { sortIntoSections, chunkSections, extractTableChunks, extractFigureChunks, type Chunk } from "../process-standard/extraction.ts";
 import { transcriptionRules } from "../process-standard/ocr.ts";
 import { logTokenUsage } from "../_shared/log-usage.ts";
+import { blockIfNotAiAllowed } from "../_shared/standard-licence.ts";
 
 // Recovers pages the OCR pass silently dropped entirely (chunkAndPersist
 // flags them as "PAGE-GAP {N}" placeholder chunks — see pipeline.ts and
@@ -64,13 +65,16 @@ serve(async (req) => {
 
     const { data: standard, error: standardError } = await supabaseAdmin
       .from("standards")
-      .select("file_path, standard_code, version, organization_id")
+      .select("id, file_path, standard_code, title, version, organization_id")
       .eq("id", standard_id)
       .eq("user_id", user_id)
       .single();
     if (standardError || !standard?.file_path) {
       console.error("[recover-page-gap] Error fetching standard:", standardError);
       return json({ error: "Standard not found" }, 404);
+    }
+    if (await blockIfNotAiAllowed(supabaseAdmin, standard)) {
+      return json({ standard_id, status: "ai_disabled" });
     }
 
     const { data: fileData, error: downloadError } = await supabaseAdmin.storage

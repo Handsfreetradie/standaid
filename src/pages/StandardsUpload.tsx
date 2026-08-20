@@ -126,6 +126,7 @@ const StandardsUpload = () => {
     stage: "extracting", percent: 0, message: STAGE_LABELS.extracting,
   });
   const [result, setResult] = useState<{ totalChunks: number; indexedChunks: number; quality: number } | null>(null);
+  const [aiDisabled, setAiDisabled] = useState(false);
   const [licenceConfirmed, setLicenceConfirmed] = useState(false);
   const [canBackground, setCanBackground] = useState(false);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
@@ -346,6 +347,16 @@ const StandardsUpload = () => {
         );
         toast.error((error as any)?.context?.error || error.message || "Upload failed");
         setStep("naming");
+        return;
+      }
+
+      // Publisher's licensing terms mean this standard skips AI processing
+      // entirely — nothing to poll, it's stored for viewing only.
+      if (data.status === "ai_disabled") {
+        setAiDisabled(true);
+        setProgress({ stage: "done", percent: 100, message: STAGE_LABELS.done });
+        queryClient.invalidateQueries({ queryKey: ["standards"] });
+        setStep("success");
         return;
       }
 
@@ -756,11 +767,13 @@ const StandardsUpload = () => {
           </div>
           <h2 className="font-display text-xl font-extrabold text-foreground mb-2">Upload Complete!</h2>
           <p className="text-sm text-muted-foreground">
-            Your standard is ready for AI-powered queries.
+            {aiDisabled
+              ? "Stored for viewing only — AI search/chat isn't available for this standard due to the publisher's licensing terms."
+              : "Your standard is ready for AI-powered queries."}
           </p>
         </div>
 
-        {result && (
+        {result && !aiDisabled && (
           <Card className="p-4 mb-6">
             <div className="grid grid-cols-2 gap-3">
               <div className="text-center">
@@ -783,10 +796,12 @@ const StandardsUpload = () => {
         )}
 
         <div className="space-y-3">
-          <Button className="w-full h-12 font-bold rounded-xl gap-2" onClick={() => navigate("/chat")}>
-            <BookOpen className="h-4 w-4" />
-            Ask a Question
-          </Button>
+          {!aiDisabled && (
+            <Button className="w-full h-12 font-bold rounded-xl gap-2" onClick={() => navigate("/chat")}>
+              <BookOpen className="h-4 w-4" />
+              Ask a Question
+            </Button>
+          )}
           <Button
             variant="outline"
             className="w-full h-12 font-bold rounded-xl gap-2"

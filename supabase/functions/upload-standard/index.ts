@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getAllowedOrigin } from "../_shared/cors.ts";
+import { isAiAllowed } from "../_shared/standard-licence.ts";
 
 declare const EdgeRuntime: { waitUntil: (p: Promise<unknown>) => void } | undefined;
 
@@ -155,6 +156,12 @@ serve(async (req) => {
       }
     }
 
+    // Standards Australia's licence terms ban AI/ML use of their content
+    // (AS/NZS/NZS standards) — SA declined a licence/pilot on 2026-08-20.
+    // Anything not clearly an allow-listed non-SA publisher (e.g. NCC) skips
+    // the AI pipeline entirely and is stored for PDF viewing only.
+    const aiAllowed = isAiAllowed(standardCode, title);
+
     // Create standard record with the file_path already known
     const { data: standard, error: insertError } = await supabaseAdmin
       .from("standards")
@@ -167,7 +174,7 @@ serve(async (req) => {
         trade_category: tradeCategory || null,
         file_path: filePath,
         amends_standard_id: amendsStandardId || null,
-        extraction_status: "pending",
+        extraction_status: aiAllowed ? "pending" : "ai_disabled",
         is_partial: tier === "free" && !organizationId,
       })
       .select()
@@ -177,6 +184,17 @@ serve(async (req) => {
       console.error("Insert error:", JSON.stringify(insertError));
       return new Response(JSON.stringify({ error: "Failed to create standard record", details: insertError.message }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
+
+    if (!aiAllowed) {
+      console.log(`[upload-standard] Standard ${standard.id} is not AI-eligible (licence restriction) — skipping processing`);
+      return new Response(JSON.stringify({
+        standard_id: standard.id,
+        status: "ai_disabled",
+        message: "Standard uploaded and stored for viewing. AI search/chat isn't available for this standard due to the publisher's licensing terms.",
+      }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
     }
 
@@ -215,12 +233,12 @@ serve(async (req) => {
       await processPromise;
     }
 
-    return new Response(JSON.stringify({ 
-      standard_id: standard.id, 
+    return new Response(JSON.stringify({
+      standard_id: standard.id,
       status: "pending",
-      message: "Standard uploaded successfully. Processing will begin shortly." 
-    }), { 
-      status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } 
+      message: "Standard uploaded successfully. Processing will begin shortly."
+    }), {
+      status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
   } catch (e) {
     console.error("[upload-standard] Unexpected error:", JSON.stringify(e));

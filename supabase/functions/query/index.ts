@@ -448,10 +448,11 @@ serve(async (req) => {
             .from("standard_chunks")
             .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index, chunk_type, is_normative")
             .or(ownershipFilter)
+            .eq("is_indexed", true)
             .in("clause_number", clauseNumberMatches)
             .limit(20)
         : Promise.resolve({ data: [] }),
-      supabase.from("standards").select("id, standard_code, title").or(ownershipFilter),
+      supabase.from("standards").select("id, standard_code, title, extraction_status").or(ownershipFilter),
     ]);
 
     // Map every standard the user/org can see to its trade (by code/title
@@ -464,6 +465,13 @@ serve(async (req) => {
         standardTradeFromCode(s.standard_code) ?? standardTradeFromCode(s.title),
       ])
     );
+    // Standards with AI processing disabled (licence-restricted content —
+    // see _shared/standard-licence.ts) — used to keep figure/table/known-gap
+    // lookups below from surfacing them via a route that doesn't have its
+    // own is_indexed column to filter on.
+    const aiEnabledStandardIds = (ownedStandardsResult.data || [])
+      .filter((s: any) => s.extraction_status !== "ai_disabled")
+      .map((s: any) => s.id);
     // Drops chunks from a standard we're confident belongs to a different
     // trade than the question. Never filters on an unconfident query guess
     // ("general") or an unrecognised standard (null), and never empties a
@@ -755,6 +763,7 @@ serve(async (req) => {
             .from("standard_chunks")
             .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index, chunk_type, is_normative")
             .or(ownershipFilter)
+            .eq("is_indexed", true)
             .in("clause_number", [...refKeys].slice(0, 12))
             .limit(8)
         : Promise.resolve({ data: [] }),
@@ -763,6 +772,7 @@ serve(async (req) => {
             .from("standard_chunks")
             .select("id, standard_id, content, clause_number, clause_title, page_number, chunk_index, chunk_type, is_normative")
             .or(ownershipFilter)
+            .eq("is_indexed", true)
             .in("clause_number", wantClauses)
             .limit(8)
         : Promise.resolve({ data: [] }),
@@ -941,6 +951,7 @@ serve(async (req) => {
         .from("standard_figures")
         .select("figure_number, caption, page_number")
         .or(ownershipFilter)
+        .in("standard_id", aiEnabledStandardIds)
         .in("figure_number", preFigNums);
       if (preFigData?.length) {
         figCaptionContext = "\n\n[FIGURE REFERENCE]\n" + preFigData.map((f: any) =>
@@ -963,6 +974,7 @@ serve(async (req) => {
       .from("standard_chunks")
       .select("standard_id, clause_number, clause_title, page_number")
       .or(ownershipFilter)
+      .in("standard_id", aiEnabledStandardIds)
       .is("embedding", null)
       .gte("index_attempts", 3)
       .or("clause_number.ilike.TABLE%,clause_number.ilike.FIGURE%")

@@ -1295,7 +1295,7 @@ export type Database = {
       sweep_stale_processing_jobs: { Args: never; Returns: undefined }
     }
     Enums: {
-      extraction_status: "pending" | "processing" | "complete" | "failed"
+      extraction_status: "pending" | "processing" | "complete" | "failed" | "ai_disabled"
       subscription_tier: "free" | "pro" | "business"
     }
     CompositeTypes: {
@@ -1427,7 +1427,7 @@ export const Constants = {
   },
   public: {
     Enums: {
-      extraction_status: ["pending", "processing", "complete", "failed"],
+      extraction_status: ["pending", "processing", "complete", "failed", "ai_disabled"],
       subscription_tier: ["free", "pro", "business"],
     },
   },

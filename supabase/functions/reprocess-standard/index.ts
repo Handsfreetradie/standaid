@@ -5,6 +5,7 @@ import { PIPELINE_VERSION, computeQualityScore } from "../process-standard/extra
 import { extractTextFromPdf } from "../process-standard/ocr.ts";
 import { chunkAndPersist } from "../process-standard/pipeline.ts";
 import { buildOcrResume, isStalledResume } from "../process-standard/resume.ts";
+import { blockIfNotAiAllowed } from "../_shared/standard-licence.ts";
 
 // Admin-only, single-standard reprocess trigger: re-runs the chunking/
 // extraction/tagging pipeline against an already-uploaded standard's stored
@@ -78,6 +79,10 @@ serve(async (req) => {
     const { data: standard, error: standardError } = await supabaseAdmin
       .from("standards").select("*").eq("id", standard_id).single();
     if (standardError || !standard) return json({ error: "Standard not found" }, 404);
+
+    if (await blockIfNotAiAllowed(supabaseAdmin, standard)) {
+      return json({ standard_id, status: "ai_disabled", message: "This standard isn't eligible for AI processing under the publisher's licensing terms." });
+    }
 
     // Don't race an in-flight upload/process — its own chunking will land
     // with the current PIPELINE_VERSION anyway. A resume call is expected to

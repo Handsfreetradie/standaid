@@ -9,6 +9,7 @@ import {
 } from "./extraction.ts";
 import { extractTextFromPdf } from "./ocr.ts";
 import { chunkAndPersist } from "./pipeline.ts";
+import { blockIfNotAiAllowed } from "../_shared/standard-licence.ts";
 
 // Mark jobs as failed if processing exceeds this — must be under Supabase's 150s limit.
 const PROCESSING_TIMEOUT_MS = 110_000;
@@ -76,6 +77,14 @@ serve(async (req) => {
       .from("standards").select("*").eq("id", standard_id).eq("user_id", userId).single();
     if (standardError || !standard) {
       return new Response(JSON.stringify({ error: "Standard not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // Defense-in-depth: upload-standard already screens this before ever
+    // triggering us, but re-check here in case this is ever invoked directly.
+    if (await blockIfNotAiAllowed(supabaseAdmin, standard)) {
+      return new Response(JSON.stringify({ standard_id, status: "ai_disabled" }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
     }
 
     // Set up timeout — fires at 110s so we can clean up before Supabase kills the function at 150s

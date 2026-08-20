@@ -493,6 +493,22 @@ serve(async (req) => {
     const tier = (profile?.subscription_tier || "free") as "free" | "pro" | "business";
 
     const { action, standardId, topic, difficulty, questionCount, examId, questionId, questionIds, userAnswer, imageBase64, chunkId, examTopics, examPdfText, sectionFilter: rawSectionFilter, userClauseRef, practiceQuestionId, scenarioText } = await req.json();
+
+    // Defense-in-depth: the Learn UI's standard picker already only lists
+    // extraction_status='complete' standards, so this shouldn't normally
+    // trigger — but every Learn/exam action ultimately pulls fresh content
+    // from standard_chunks for a given standardId, so block centrally rather
+    // than patching each action branch. See _shared/standard-licence.ts.
+    if (standardId) {
+      const { data: standardForGate } = await supabase
+        .from("standards").select("extraction_status").eq("id", standardId).maybeSingle();
+      if (standardForGate?.extraction_status === "ai_disabled") {
+        return new Response(JSON.stringify({ error: "AI features aren't available for this standard due to the publisher's licensing terms." }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
     if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
     const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
