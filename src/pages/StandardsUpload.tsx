@@ -510,6 +510,12 @@ const StandardsUpload = () => {
           ))}
         </div>
 
+        <div className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-3">
+          <p className="text-xs text-amber-700 dark:text-amber-500 leading-relaxed">
+            Standards Australia strictly prohibits any AI use of their content (AS/NZS/NZS standards). Documents like these are stored for viewing only — no AI search, chat, or Learn features will be available for them.
+          </p>
+        </div>
+
         <Button className="w-full h-12 font-bold rounded-xl gap-2" onClick={() => setStep("upload")}>
           <Upload className="h-4 w-4" />
           Upload PDF
