@@ -4,6 +4,19 @@ import { getAllowedOrigin } from "../_shared/cors.ts";
 
 declare const EdgeRuntime: { waitUntil: (p: Promise<unknown>) => void } | undefined;
 
+// Mirrors the frontend's duplicate-check heuristic (StandardsUpload.tsx) so
+// "same code" and "same title" agree on what counts as the same document.
+function normalizeStandardName(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function looksLikeSameStandard(newTitle: string, existingTitle: string): boolean {
+  const a = normalizeStandardName(newTitle);
+  const b = normalizeStandardName(existingTitle);
+  if (a === b) return true;
+  return a.length > 4 && b.length > 4 && (a.includes(b) || b.includes(a));
+}
+
 serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
   const corsHeaders = {
@@ -90,6 +103,13 @@ serve(async (req) => {
     // amendment of the SAME base standard with the same code — so uploading "AS/NZS
     // 3000 Amendment 2" never wipes out the base "AS/NZS 3000" standard it amends, but
     // re-uploading the same amendment twice still gets deduplicated instead of piling up.
+    //
+    // A matching code is NOT on its own proof this is the same document — e.g. NCC's
+    // cover-scan code detection didn't used to capture the volume number, so Volume
+    // One/Two/Three all detected as the bare "NCC 2025" code and one silently deleted
+    // another on upload (real incident, 2026-08-25). Require the titles to also look
+    // like the same standard before treating this as a replacement rather than a new,
+    // separate standard that happens to share a code.
     let isReplacement = false;
     if (standardCode) {
       // Team members share one library — match on the org's copy (any
@@ -97,7 +117,7 @@ serve(async (req) => {
       // existing team standard replaces it rather than duplicating it.
       let existingQuery = supabaseAdmin
         .from("standards")
-        .select("id, file_path")
+        .select("id, file_path, title")
         .eq("standard_code", standardCode);
       existingQuery = amendsStandardId
         ? existingQuery.eq("amends_standard_id", amendsStandardId)
@@ -106,7 +126,7 @@ serve(async (req) => {
         organizationId ? existingQuery.eq("organization_id", organizationId) : existingQuery.eq("user_id", userId)
       ).maybeSingle();
 
-      if (existing) {
+      if (existing && looksLikeSameStandard(title, existing.title)) {
         isReplacement = true;
         await supabaseAdmin.from("standard_chunks").delete().eq("standard_id", existing.id);
         await supabaseAdmin.from("standard_figures").delete().eq("standard_id", existing.id);

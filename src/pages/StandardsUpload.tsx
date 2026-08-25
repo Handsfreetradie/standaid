@@ -68,6 +68,14 @@ function findLikelyDuplicate(
 // upload payload.
 const STANDARD_CODE_RE = /\b(AS\s*\/\s*NZS|NZS|AS)\s+(\d{1,5}(?:\.\d{1,3})?)(?:\s*:\s*(\d{4}))?\b/i;
 const NCC_CODE_RE = /\bNCC\s+(\d{4})\b/i;
+// NCC ships as several volumes (Building, Housing Provisions, Plumbing…)
+// that are genuinely separate documents — without this, every volume
+// detects as the bare "NCC 2025" code, which the upload backend treats as
+// "same document, replace it", silently deleting whichever volume was
+// there first. See the Volume Two/Volume Three incident this was added
+// after — the code MUST distinguish volumes.
+const NCC_VOLUME_RE = /\bVolume\s+(One|Two|Three|Four|Five|Six|1|2|3|4|5|6)\b/i;
+const VOLUME_WORD_TO_NUM: Record<string, string> = { one: "1", two: "2", three: "3", four: "4", five: "5", six: "6" };
 
 function extractStandardCode(coverText: string): string | null {
   const m = coverText.match(STANDARD_CODE_RE);
@@ -76,7 +84,11 @@ function extractStandardCode(coverText: string): string | null {
     return `${prefix} ${m[2]}${m[3] ? `:${m[3]}` : ""}`;
   }
   const ncc = coverText.match(NCC_CODE_RE);
-  return ncc ? `NCC ${ncc[1]}` : null;
+  if (!ncc) return null;
+  const vol = coverText.match(NCC_VOLUME_RE);
+  if (!vol) return `NCC ${ncc[1]}`;
+  const volNum = VOLUME_WORD_TO_NUM[vol[1].toLowerCase()] ?? vol[1];
+  return `NCC ${ncc[1]} Vol ${volNum}`;
 }
 
 const AMENDMENT_RE = /\b(Amendment\s+No\.?\s*\d+|Amdt\.?\s*\d+|Corrigendum(?:\s+No\.?\s*\d+)?)\b/i;
@@ -353,6 +365,12 @@ const StandardsUpload = () => {
       }
 
       setProgress({ stage: "storing", percent: 60, message: STAGE_LABELS.storing });
+      // The standard row + processing job now exist and process-standard has
+      // already been triggered server-side (fire-and-forget, keeps running
+      // via EdgeRuntime.waitUntil regardless of this tab) — safe to leave
+      // from here on, so surface the "leave" button now instead of making
+      // the user wait out the old 2-minute poll-based timer for it.
+      setCanBackground(true);
 
       // Poll for text processing completion
       const standardId = data.standard_id;
