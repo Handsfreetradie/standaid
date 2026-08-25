@@ -4,12 +4,12 @@ import { Calculator, BookOpen, GraduationCap, MessageSquare, User, ClipboardChec
 import { cn } from "@/lib/utils";
 import BottomNav from "./BottomNav";
 import { ProgressBar } from "./ProgressBar";
-import { AiRestrictionNotice } from "./AiRestrictionNotice";
+import { AiDisclaimerNotice } from "./AiDisclaimerNotice";
 
 const NAV_TABS = [
   { path: "/tools", icon: Calculator, label: "Tools" },
   { path: "/audits", icon: ClipboardCheck, label: "Audit" },
-  { path: "/standards", icon: BookOpen, label: "Standards" },
+  { path: "/standards", icon: BookOpen, label: "Documents" },
   { path: "/learn", icon: GraduationCap, label: "Learn" },
   { path: "/chat", icon: MessageSquare, label: "Chat" },
   { path: "/profile", icon: User, label: "Profile" },
@@ -30,7 +30,7 @@ const AppLayout = () => {
 
   return (
     <>
-      <AiRestrictionNotice />
+      <AiDisclaimerNotice />
       <ProgressBar />
       <div className="fixed inset-0 flex overflow-hidden" style={{ background: 'linear-gradient(to right, #FFFFFF, #FFE8E8)' }}>
       {/* SVG Noise texture overlay */}

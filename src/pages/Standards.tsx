@@ -25,7 +25,6 @@ const statusIcon = {
   processing: <Loader2 className="h-4 w-4 animate-spin text-primary" />,
   complete: <CheckCircle2 className="h-4 w-4 text-green-600" />,
   failed: <AlertCircle className="h-4 w-4 text-destructive" />,
-  ai_disabled: <Lock className="h-4 w-4 text-muted-foreground" />,
 };
 
 // "TABLE 5.1" -> "Table 5.1" — the raw clause_number as stored, not meant for
@@ -115,13 +114,7 @@ const Standards = () => {
       });
       if (error) throw error;
 
-      if (data.newlyLocked) {
-        toast.info("This name matches Standards Australia content — AI features have been turned off for it.");
-      } else if (data.stillLocked) {
-        toast.info("This standard is still locked — Standards Australia content stays off even after a rename.");
-      } else {
-        toast.success("Standard renamed");
-      }
+      toast.success("Standard renamed");
       setRenaming(null);
       queryClient.invalidateQueries({ queryKey: ["standards"] });
     } catch (e) {
@@ -138,10 +131,10 @@ const Standards = () => {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="font-sans text-2xl font-extrabold tracking-tight text-foreground">
-            Standards Library
+            Documents Library
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {standards.length} standard{standards.length !== 1 ? "s" : ""} uploaded
+            {standards.length} document{standards.length !== 1 ? "s" : ""} uploaded
             {tier === "free" && " (Free tier: 1 max)"}
           </p>
         </div>
@@ -159,7 +152,7 @@ const Standards = () => {
       <div className="relative mb-5">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Search standards..."
+          placeholder="Search documents..."
           className="pl-9 h-11"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
@@ -252,15 +245,6 @@ const Standards = () => {
                   );
                 })()}
 
-                {s.extraction_status === "ai_disabled" && (
-                  <div className="mt-3">
-                    <p className="text-xs text-muted-foreground flex items-start gap-1.5">
-                      <Lock className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
-                      Stored for reference only — AI search unavailable under the publisher's licensing terms.
-                    </p>
-                  </div>
-                )}
-
                 {s.extraction_status === "failed" && (() => {
                   const failedJob = processingJobs.find((j: any) => j.standard_id === s.id);
                   return (
@@ -316,7 +300,7 @@ const Standards = () => {
                     })}
                   </span>
                   <div className="flex items-center gap-1">
-                    {(s.extraction_status === "complete" || s.extraction_status === "ai_disabled") && (
+                    {s.extraction_status === "complete" && (
                       <Button
                         size="sm"
                         variant="ghost"
@@ -403,7 +387,7 @@ const Standards = () => {
                 Unlock full indexing
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                Your standards are only 25% indexed on the Free tier. Upgrade to
+                Your documents are only 25% indexed on the Free tier. Upgrade to
                 Pro for full document access and unlimited uploads.
               </p>
               <Button size="sm" className="mt-3 h-9 text-xs font-semibold">

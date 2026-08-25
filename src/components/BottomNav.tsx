@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 const tabs = [
   { path: "/tools", icon: Calculator, label: "Tools" },
   { path: "/audits", icon: ClipboardCheck, label: "Audit" },
-  { path: "/standards", icon: BookOpen, label: "Standards" },
+  { path: "/standards", icon: BookOpen, label: "Documents" },
   { path: "/learn", icon: GraduationCap, label: "Learn" },
   { path: "/chat", icon: MessageSquare, label: "Chat" },
   { path: "/profile", icon: User, label: "Profile" },

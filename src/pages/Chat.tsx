@@ -159,7 +159,7 @@ function ThinkingBubble({ isComplianceCheck }: { isComplianceCheck?: boolean }) 
   const [stage, setStage] = useState(0);
   const stages = isComplianceCheck
     ? ["Scanning photo…", "Checking compliance…", "Reviewing clauses…"]
-    : ["Searching standards…", "Finding clauses…", "Drafting answer…"];
+    : ["Searching documents…", "Finding clauses…", "Drafting answer…"];
 
   useEffect(() => {
     const t = setInterval(() => setStage((s) => (s + 1) % stages.length), 2000);
@@ -296,7 +296,7 @@ const Chat = () => {
     const aiMsgId = crypto.randomUUID();
     setMessages((prev) => [...prev, { id: aiMsgId, role: "ai" as const, content: "", isTyping: true }]);
     scrollToBottom();
-    start("searching", "Searching standards...");
+    start("searching", "Searching documents...");
 
     try {
       await retryWithBackoff(
@@ -529,7 +529,7 @@ const Chat = () => {
                 What do you need to know?
               </p>
               <p className="text-xs text-muted-foreground">
-                Ask anything about your uploaded standards. I'll find the exact clause.
+                Ask anything about your uploaded documents. I'll find the exact clause.
               </p>
             </div>
           </div>
@@ -799,7 +799,7 @@ const Chat = () => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={pendingImage ? "Describe what to check, or just send to let Claude assess it..." : "Ask about your standards..."}
+            placeholder={pendingImage ? "Describe what to check, or just send to let Claude assess it..." : "Ask about your documents..."}
             className="min-h-[40px] max-h-[120px] resize-none text-sm"
             rows={1}
           />

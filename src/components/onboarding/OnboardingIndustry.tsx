@@ -7,16 +7,16 @@ interface Props {
 }
 
 const industries = [
-  { id: "electrical", icon: "⚡", name: "Electrical", count: "12 standards loaded" },
-  { id: "plumbing", icon: "🔧", name: "Plumbing", count: "8 standards loaded" },
-  { id: "building", icon: "🏗️", name: "Building & Construction", count: "15 standards loaded" },
-  { id: "carpentry", icon: "🔩", name: "Carpentry", count: "6 standards loaded" },
-  { id: "gas", icon: "🔥", name: "Gas Fitting", count: "5 standards loaded" },
-  { id: "hvac", icon: "🌡️", name: "HVAC", count: "7 standards loaded" },
-  { id: "health_safety", icon: "⚕️", name: "Health & Safety", count: "10 standards loaded" },
-  { id: "engineering", icon: "🏭", name: "Engineering", count: "9 standards loaded" },
-  { id: "food_safety", icon: "🍽️", name: "Food Safety", count: "6 standards loaded" },
-  { id: "other", icon: "📐", name: "Other", count: "Browse all standards" },
+  { id: "electrical", icon: "⚡", name: "Electrical", count: "12 documents loaded" },
+  { id: "plumbing", icon: "🔧", name: "Plumbing", count: "8 documents loaded" },
+  { id: "building", icon: "🏗️", name: "Building & Construction", count: "15 documents loaded" },
+  { id: "carpentry", icon: "🔩", name: "Carpentry", count: "6 documents loaded" },
+  { id: "gas", icon: "🔥", name: "Gas Fitting", count: "5 documents loaded" },
+  { id: "hvac", icon: "🌡️", name: "HVAC", count: "7 documents loaded" },
+  { id: "health_safety", icon: "⚕️", name: "Health & Safety", count: "10 documents loaded" },
+  { id: "engineering", icon: "🏭", name: "Engineering", count: "9 documents loaded" },
+  { id: "food_safety", icon: "🍽️", name: "Food Safety", count: "6 documents loaded" },
+  { id: "other", icon: "📐", name: "Other", count: "Browse all documents" },
 ];
 
 const OnboardingIndustry = ({ onNext, onBack }: Props) => {
@@ -40,7 +40,7 @@ const OnboardingIndustry = ({ onNext, onBack }: Props) => {
           What's your industry?
         </h2>
         <p className="text-muted-foreground text-sm mt-2">
-          We'll load the right standards and tools for you
+          We'll load the right documents and tools for you
         </p>
       </div>
 

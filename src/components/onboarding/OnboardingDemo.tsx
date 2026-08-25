@@ -67,7 +67,7 @@ const OnboardingDemo = ({ onNext, onSkip }: Props) => {
             </div>
             <div className="flex items-start gap-2 mt-3 rounded-lg bg-primary/5 p-3">
               <AlertTriangle className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-primary font-medium">Verified from uploaded standard</p>
+              <p className="text-xs text-primary font-medium">Verified from uploaded document</p>
             </div>
           </Card>
         </div>

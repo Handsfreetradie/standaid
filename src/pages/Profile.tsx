@@ -1131,7 +1131,7 @@ const Profile = () => {
             </div>
 
             <p className="text-center text-[10px] text-muted-foreground mt-auto">
-              StandAId v1.0 · Australian Standards AI Assistant
+              StandAId v1.0 · Document Search Assistant
             </p>
           </div>
 

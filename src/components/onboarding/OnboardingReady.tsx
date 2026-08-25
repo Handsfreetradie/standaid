@@ -57,7 +57,7 @@ const OnboardingReady = ({ firstName, industryCount, onFinish }: Props) => {
           You're ready, {firstName || "mate"}!
         </h2>
         <p className="text-muted-foreground text-sm mt-2">
-          Your standards are loaded and your AI assistant is ready.
+          Your documents are loaded and your AI assistant is ready.
         </p>
 
         {/* Stats */}
@@ -65,7 +65,7 @@ const OnboardingReady = ({ firstName, industryCount, onFinish }: Props) => {
           <div className="flex flex-col items-center bg-card border border-border rounded-xl px-5 py-4 min-w-[100px]">
             <span className="text-lg mb-1">📚</span>
             <span className="text-lg font-extrabold text-foreground">{standardsLoaded}</span>
-            <span className="text-[10px] text-muted-foreground">Standards</span>
+            <span className="text-[10px] text-muted-foreground">Documents</span>
             <span className="text-[10px] text-muted-foreground">Loaded and ready</span>
           </div>
           <div className="flex flex-col items-center bg-card border border-border rounded-xl px-5 py-4 min-w-[100px]">

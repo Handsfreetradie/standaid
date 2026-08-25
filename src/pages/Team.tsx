@@ -353,7 +353,7 @@ const Team = () => {
           <AlertDialogHeader>
             <AlertDialogTitle>Remove this teammate?</AlertDialogTitle>
             <AlertDialogDescription>
-              They'll immediately lose access to the shared standards library. This doesn't reduce your paid
+              They'll immediately lose access to the shared documents library. This doesn't reduce your paid
               seat count — you can add someone else in their place any time.
             </AlertDialogDescription>
           </AlertDialogHeader>

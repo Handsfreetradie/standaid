@@ -126,7 +126,6 @@ const StandardsUpload = () => {
     stage: "extracting", percent: 0, message: STAGE_LABELS.extracting,
   });
   const [result, setResult] = useState<{ totalChunks: number; indexedChunks: number; quality: number } | null>(null);
-  const [aiDisabled, setAiDisabled] = useState(false);
   const [licenceConfirmed, setLicenceConfirmed] = useState(false);
   const [canBackground, setCanBackground] = useState(false);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
@@ -170,8 +169,8 @@ const StandardsUpload = () => {
       toast.error("Only PDF files are supported");
       return;
     }
-    if (selected.size > 50 * 1024 * 1024) {
-      toast.error("File must be under 50MB");
+    if (selected.size > 70 * 1024 * 1024) {
+      toast.error("File must be under 70MB");
       return;
     }
 
@@ -350,16 +349,6 @@ const StandardsUpload = () => {
         return;
       }
 
-      // Publisher's licensing terms mean this standard skips AI processing
-      // entirely — nothing to poll, it's stored for viewing only.
-      if (data.status === "ai_disabled") {
-        setAiDisabled(true);
-        setProgress({ stage: "done", percent: 100, message: STAGE_LABELS.done });
-        queryClient.invalidateQueries({ queryKey: ["standards"] });
-        setStep("success");
-        return;
-      }
-
       setProgress({ stage: "storing", percent: 60, message: STAGE_LABELS.storing });
 
       // Poll for text processing completion
@@ -485,10 +474,10 @@ const StandardsUpload = () => {
             <Upload className="h-8 w-8 text-primary" />
           </div>
           <h1 className="font-display text-2xl font-extrabold text-foreground mb-2">
-            Upload a Standard
+            Upload a Document
           </h1>
           <p className="text-sm text-muted-foreground">
-            Uploading your standards lets the AI give you accurate, clause-specific answers instead of generic guidance.
+            Uploading your documents lets the AI give you accurate, clause-specific answers instead of generic guidance.
           </p>
         </div>
 
@@ -512,7 +501,11 @@ const StandardsUpload = () => {
 
         <div className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-3">
           <p className="text-xs text-amber-700 dark:text-amber-500 leading-relaxed">
-            Standards Australia strictly prohibits any AI use of their content (AS/NZS/NZS standards). Documents like these are stored for viewing only — no AI search, chat, or Learn features will be available for them.
+            Only upload documents you're legally entitled to use with AI — for example, a copy you've
+            purchased or hold a valid licence for. Some publishers, including Standards Australia,
+            don't permit AI/ML use of their content under their own terms. You're responsible for
+            checking your document's licence before uploading — see our{" "}
+            <button type="button" className="underline" onClick={() => navigate("/terms")}>Terms of Service</button>.
           </p>
         </div>
 
@@ -537,7 +530,7 @@ const StandardsUpload = () => {
 
         <h2 className="font-display text-xl font-extrabold text-foreground mb-2">Select your document</h2>
         <p className="text-sm text-muted-foreground mb-6">
-          PDF only, up to 50MB. Digital PDFs work best — very long scanned copies (photos of pages) can't be read.
+          PDF only, up to 70MB. Digital PDFs work best — very long scanned copies (photos of pages) can't be read.
         </p>
 
         <input
@@ -669,16 +662,18 @@ const StandardsUpload = () => {
           <div className="mb-4 rounded-xl border border-amber-500/50 bg-amber-500/15 px-3.5 py-3 flex items-start gap-2">
             <ShieldAlert className="h-4 w-4 text-amber-700 dark:text-amber-500 flex-shrink-0 mt-0.5" />
             <p className="text-xs font-medium text-amber-700 dark:text-amber-500 leading-relaxed">
-              We've detected this looks like an AS, AS/NZS or NZS document. It can still be uploaded and viewed,
-              but AI search, chat and Learn features won't be available for it — Standards Australia's licensing
-              terms don't allow AI use of their content.
+              We've detected this looks like an AS, AS/NZS or NZS document. Standards Australia's own
+              terms don't permit AI/ML use of their content — that's between you and the publisher.
+              Check your licence covers this before continuing.
             </p>
           </div>
         )}
 
         <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-3">
           <p className="text-xs text-amber-700 dark:text-amber-500 leading-relaxed">
-            Standards Australia strictly prohibits any AI use of their content (AS/NZS/NZS standards). Documents like these are stored for viewing only — no AI search, chat, or Learn features will be available for them.
+            AI-generated answers can be wrong — always verify anything safety-critical against the
+            original document. You're responsible for having the right to upload and use this document
+            with AI.
           </p>
         </div>
 
@@ -689,7 +684,9 @@ const StandardsUpload = () => {
             className="mt-0.5 flex-shrink-0"
           />
           <span className="text-xs text-muted-foreground leading-relaxed">
-            I confirm I hold a valid licence or subscription for this document and am authorised to upload it in accordance with the publisher's terms of use.
+            I confirm I'm authorised to upload this document and use it with AI features under the
+            publisher's terms, and I accept full responsibility for that — including verifying
+            AI-generated answers and complying with any AI-use restrictions in the publisher's licence.
           </span>
         </label>
 
@@ -793,14 +790,10 @@ const StandardsUpload = () => {
             <CheckCircle2 className="h-8 w-8 text-primary" />
           </div>
           <h2 className="font-display text-xl font-extrabold text-foreground mb-2">Upload Complete!</h2>
-          <p className="text-sm text-muted-foreground">
-            {aiDisabled
-              ? "Stored for viewing only — AI search/chat isn't available for this standard due to the publisher's licensing terms."
-              : "Your standard is ready for AI-powered queries."}
-          </p>
+          <p className="text-sm text-muted-foreground">Your standard is ready for AI-powered queries.</p>
         </div>
 
-        {result && !aiDisabled && (
+        {result && (
           <Card className="p-4 mb-6">
             <div className="grid grid-cols-2 gap-3">
               <div className="text-center">
@@ -823,18 +816,16 @@ const StandardsUpload = () => {
         )}
 
         <div className="space-y-3">
-          {!aiDisabled && (
-            <Button className="w-full h-12 font-bold rounded-xl gap-2" onClick={() => navigate("/chat")}>
-              <BookOpen className="h-4 w-4" />
-              Ask a Question
-            </Button>
-          )}
+          <Button className="w-full h-12 font-bold rounded-xl gap-2" onClick={() => navigate("/chat")}>
+            <BookOpen className="h-4 w-4" />
+            Ask a Question
+          </Button>
           <Button
             variant="outline"
             className="w-full h-12 font-bold rounded-xl gap-2"
             onClick={() => navigate("/standards")}
           >
-            View Standards Library
+            View Documents Library
           </Button>
         </div>
       </div>

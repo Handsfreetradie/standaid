@@ -146,7 +146,7 @@ const Index = () => {
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
             <BookOpen className="h-6 w-6 text-primary" />
           </div>
-          <span className="text-sm font-semibold text-foreground">Standards</span>
+          <span className="text-sm font-semibold text-foreground">Documents</span>
           <span className="text-xs text-muted-foreground text-center">Manage your library</span>
         </Card>
       </div>
@@ -159,7 +159,7 @@ const Index = () => {
             <p className="text-sm text-muted-foreground py-4 text-center">
               No queries yet.{" "}
               <button onClick={() => navigate("/standards")} className="text-primary underline">
-                Upload a standard
+                Upload a document
               </button>{" "}
               and start asking questions.
             </p>
