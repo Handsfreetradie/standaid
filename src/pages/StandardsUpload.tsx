@@ -99,13 +99,16 @@ interface ProcessingProgress {
   message: string;
 }
 
+// Plain-English progress labels — deliberately not naming the underlying
+// steps (extraction, chunking, embeddings) since that's internal detail
+// that confuses tradies without telling them anything useful.
 const STAGE_LABELS: Record<string, string> = {
   reading: "Reading your PDF…",
-  uploading: "Uploading to secure storage…",
-  extracting: "Extracting text from document…",
-  sorting: "Sorting content into sections…",
-  chunking: "AI is chunking sections…",
-  storing: "Storing chunks & generating embeddings…",
+  uploading: "Uploading your document…",
+  extracting: "Reading through your document…",
+  sorting: "Organising the content…",
+  chunking: "Getting it ready for AI search…",
+  storing: "Finishing up…",
   done: "Processing complete!",
 };
 
@@ -724,6 +727,15 @@ const StandardsUpload = () => {
     const stages = ["reading", "uploading", "extracting", "sorting", "chunking", "storing", "done"];
     const currentIdx = stages.indexOf(progress.stage);
 
+    // Collapse the internal pipeline (extracting/sorting/chunking/storing)
+    // into one plain "uploading to your account" row — tradies don't need
+    // the processing internals, just that it's reading their PDF and then
+    // getting it into their account.
+    const displayStages = [
+      { key: "reading", label: "Reading your PDF…", minIdx: 0, maxIdx: 0 },
+      { key: "uploading", label: "Uploading to your account…", minIdx: 1, maxIdx: 5 },
+    ];
+
     return (
       <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8 max-w-md mx-auto">
         <div className="text-center mb-8 mt-8">
@@ -737,12 +749,12 @@ const StandardsUpload = () => {
         <Progress value={progress.percent} className="mb-6 h-2" />
 
         <div className="space-y-3">
-          {stages.filter(s => s !== "done").map((stage, idx) => {
-            const isActive = idx === currentIdx;
-            const isDone = idx < currentIdx;
+          {displayStages.map(({ key, label, minIdx, maxIdx }) => {
+            const isActive = currentIdx >= minIdx && currentIdx <= maxIdx;
+            const isDone = currentIdx > maxIdx;
 
             return (
-              <div key={stage} className="flex items-center gap-3">
+              <div key={key} className="flex items-center gap-3">
                 {isDone ? (
                   <CheckCircle2 className="h-5 w-5 text-primary flex-shrink-0" />
                 ) : isActive ? (
@@ -751,7 +763,7 @@ const StandardsUpload = () => {
                   <div className="h-5 w-5 rounded-full border-2 border-muted flex-shrink-0" />
                 )}
                 <p className={`text-sm ${isDone ? "text-foreground" : isActive ? "text-foreground font-semibold" : "text-muted-foreground"}`}>
-                  {STAGE_LABELS[stage]}
+                  {label}
                 </p>
               </div>
             );
