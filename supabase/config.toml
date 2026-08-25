@@ -1,5 +1,11 @@
 project_id = "wyxeqkgpwkcckyntqcns"
 
+[functions.unsubscribe-promo]
+verify_jwt = false
+
+[functions.promo-free-standard]
+verify_jwt = false
+
 [functions.process-standard]
 verify_jwt = false
 
