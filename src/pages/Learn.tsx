@@ -225,7 +225,6 @@ const Learn = () => {
   const isFreeTier = (profile?.subscription_tier || "free") === "free";
   const [mode, setMode] = useState<Mode>("menu");
   const [standards, setStandards] = useState<any[]>([]);
-  const [lockedStandards, setLockedStandards] = useState<any[]>([]);
   const [selectedStandard, setSelectedStandard] = useState("");
   const [loading, setLoading] = useState(false);
   const [sections, setSections] = useState<{ prefix: string; title: string }[]>([]);
@@ -320,17 +319,6 @@ const Learn = () => {
       .select("id, title, standard_code, extraction_status")
       .eq("extraction_status", "complete");
     if (data) setStandards(data);
-
-    // AS/NZS standards can't be studied from their own document content, but
-    // still offered for general-knowledge practice questions (see
-    // generate_questions_general in the capstone function) — kept separate
-    // from `standards` so every other Learn feature (which needs real
-    // grounding) keeps ignoring them.
-    const { data: locked } = await supabase
-      .from("standards")
-      .select("id, title, standard_code, extraction_status")
-      .eq("extraction_status", "ai_disabled");
-    if (locked) setLockedStandards(locked);
   };
 
   const loadSections = async (standardId: string) => {
@@ -491,16 +479,12 @@ const Learn = () => {
     if (data) setGuides(data);
   };
 
-  const isLockedStandardSelected = lockedStandards.some((s) => s.id === selectedStandard);
-
   const generateQuestions = async () => {
     if (!selectedStandard) { toast.error("Select a standard first"); return; }
     setLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke("capstone", {
-        body: isLockedStandardSelected
-          ? { action: "generate_questions_general", standardId: selectedStandard, questionCount: 5 }
-          : { action: "generate_questions", standardId: selectedStandard, questionCount: 5, sectionFilter: (selectedSection && selectedSection !== "__all__") ? selectedSection : undefined },
+        body: { action: "generate_questions", standardId: selectedStandard, questionCount: 5, sectionFilter: (selectedSection && selectedSection !== "__all__") ? selectedSection : undefined },
       });
       if (error) throw await extractFnError(error);
       if (data?.error) throw new Error(data.error);
@@ -932,9 +916,7 @@ const Learn = () => {
     setMode("photo-analysis");
     try {
       const { data, error } = await supabase.functions.invoke("capstone", {
-        body: isLockedStandardSelected
-          ? { action: "analyze_photo_general", standardId: selectedStandard, imageBase64: base64 }
-          : { action: "analyze_photo", standardId: selectedStandard, imageBase64: base64 },
+        body: { action: "analyze_photo", standardId: selectedStandard, imageBase64: base64 },
       });
       if (error) throw await extractFnError(error);
       if (data?.error) throw new Error(data.error);
@@ -1130,30 +1112,14 @@ const Learn = () => {
                   {s.standard_code || s.title}
                 </SelectItem>
               ))}
-              {lockedStandards.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  🔒 {s.standard_code || s.title} (general knowledge only)
-                </SelectItem>
-              ))}
             </SelectContent>
           </Select>
-          {!standards.length && !lockedStandards.length && (
+          {!standards.length && (
             <p className="text-xs text-muted-foreground mt-2">Upload a standard first from the Standards tab</p>
           )}
         </div>
 
-        {isLockedStandardSelected && (
-          <Card className="p-3 mb-4 bg-muted/50 border-muted-foreground/20">
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Standards Australia's licensing terms don't allow AI use of this document's actual content.
-              Practice Quiz and Photo Analysis here use general trade knowledge instead — not your exact
-              document, and not tied to specific clause numbers. Always verify against your own copy of
-              the standard.
-            </p>
-          </Card>
-        )}
-
-        {selectedStandard && !isLockedStandardSelected && sections.length > 0 && (
+        {selectedStandard && sections.length > 0 && (
           <div className="mb-6">
             <label className="text-sm font-medium text-foreground mb-2 block">Focus on a section <span className="text-muted-foreground font-normal">(optional)</span></label>
             <Select value={selectedSection || "__all__"} onValueChange={(v) => setSelectedSection(v === "__all__" ? "" : v)}>
@@ -1183,9 +1149,7 @@ const Learn = () => {
               </div>
               <div className="flex-1">
                 <p className="font-bold text-foreground text-sm">Practice Quiz</p>
-                <p className="text-xs text-muted-foreground">
-                  {isLockedStandardSelected ? "5 general knowledge questions (not from your document)" : "5 questions from your standard"}
-                </p>
+                <p className="text-xs text-muted-foreground">5 questions from your standard</p>
               </div>
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </div>
@@ -1204,15 +1168,12 @@ const Learn = () => {
                   <p className="font-bold text-foreground text-sm">Photo Analysis</p>
                   {isFreeTier && <Badge className="bg-primary/10 text-primary border-0 text-[10px] px-1.5 py-0">PRO</Badge>}
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {isLockedStandardSelected ? "Handwritten work reviewed with general formulas — not your exact document" : "Upload handwritten work for AI hints"}
-                </p>
+                <p className="text-xs text-muted-foreground">Upload handwritten work for AI hints</p>
               </div>
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </div>
           </Card>
 
-          {!isLockedStandardSelected && (
           <Card
             className="p-4 cursor-pointer hover:border-primary/50 transition-colors"
             onClick={generateShortAnswer}
@@ -1228,10 +1189,7 @@ const Learn = () => {
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </div>
           </Card>
-          )}
 
-          {!isLockedStandardSelected && (
-          <>
           <Card
             className="p-4 cursor-pointer hover:border-primary/50 transition-colors"
             onClick={generateCalculation}
@@ -1323,8 +1281,6 @@ const Learn = () => {
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </div>
           </Card>
-          </>
-          )}
 
           <Card
             className="p-4 cursor-pointer hover:border-primary/50 transition-colors"

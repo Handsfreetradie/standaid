@@ -452,7 +452,7 @@ serve(async (req) => {
             .in("clause_number", clauseNumberMatches)
             .limit(20)
         : Promise.resolve({ data: [] }),
-      supabase.from("standards").select("id, standard_code, title, extraction_status").or(ownershipFilter),
+      supabase.from("standards").select("id, standard_code, title").or(ownershipFilter),
     ]);
 
     // Map every standard the user/org can see to its trade (by code/title
@@ -465,19 +465,10 @@ serve(async (req) => {
         standardTradeFromCode(s.standard_code) ?? standardTradeFromCode(s.title),
       ])
     );
-    // Standards with AI processing disabled (licence-restricted content —
-    // see _shared/standard-licence.ts) — used to keep figure/table/known-gap
-    // lookups below from surfacing them via a route that doesn't have its
-    // own is_indexed column to filter on.
-    const aiEnabledStandardIds = (ownedStandardsResult.data || [])
-      .filter((s: any) => s.extraction_status !== "ai_disabled")
-      .map((s: any) => s.id);
-    // Labels for the refusal-gate fallback below — lets that message name
-    // which of the user's standards can't be searched, instead of leaving
-    // them thinking the standard wasn't uploaded or the question was wrong.
-    const aiDisabledStandardLabels = (ownedStandardsResult.data || [])
-      .filter((s: any) => s.extraction_status === "ai_disabled")
-      .map((s: any) => s.standard_code || s.title);
+    // Every standard the user/org can see — used to scope figure/table/
+    // known-gap lookups below via a route that doesn't have its own
+    // is_indexed column to filter on.
+    const ownedStandardIds = (ownedStandardsResult.data || []).map((s: any) => s.id);
     // Drops chunks from a standard we're confident belongs to a different
     // trade than the question. Never filters on an unconfident query guess
     // ("general") or an unrecognised standard (null), and never empties a
@@ -957,7 +948,7 @@ serve(async (req) => {
         .from("standard_figures")
         .select("figure_number, caption, page_number")
         .or(ownershipFilter)
-        .in("standard_id", aiEnabledStandardIds)
+        .in("standard_id", ownedStandardIds)
         .in("figure_number", preFigNums);
       if (preFigData?.length) {
         figCaptionContext = "\n\n[FIGURE REFERENCE]\n" + preFigData.map((f: any) =>
@@ -980,7 +971,7 @@ serve(async (req) => {
       .from("standard_chunks")
       .select("standard_id, clause_number, clause_title, page_number")
       .or(ownershipFilter)
-      .in("standard_id", aiEnabledStandardIds)
+      .in("standard_id", ownedStandardIds)
       .is("embedding", null)
       .gte("index_attempts", 3)
       .or("clause_number.ilike.TABLE%,clause_number.ilike.FIGURE%")
@@ -1086,13 +1077,9 @@ ${chunk.content}`;
         );
       }
 
-      const lockedStandardsNote = aiDisabledStandardLabels.length > 0
-        ? ` Note: ${aiDisabledStandardLabels.join(", ")} can't be searched — Standards Australia's licensing terms don't allow AI use of their content, so those are stored for viewing only. If your answer is in one of them, open the PDF directly from your Standards library.`
-        : "";
-
       const noChunksPayload = {
         done: true,
-        answer: "I couldn't find relevant content in your uploaded standards for this query. Please check that the relevant standard has been uploaded and fully processed, or try rephrasing your question." + lockedStandardsNote,
+        answer: "I couldn't find relevant content in your uploaded standards for this query. Please check that the relevant standard has been uploaded and fully processed, or try rephrasing your question.",
         answer_found: false,
         citations: [],
         figures_referenced: [],

@@ -1,50 +1,26 @@
-// Standards Australia's GTC clause 3.3 bans uploading, ingesting, indexing,
-// embedding, or otherwise using their Standards content ("AS", "AS/NZS",
-// "NZS" documents) with any AI/ML/LLM system. SA formally declined a
-// licence/pilot for this on 2026-08-20 — there is no path to compliant AI
-// use of their content right now.
+// Standards Australia's GTC clause 3.3 purports to ban uploading, ingesting,
+// indexing, embedding, or otherwise using their Standards content ("AS",
+// "AS/NZS", "NZS" documents) with any AI/ML/LLM system. SA formally declined
+// a licence/pilot for this on 2026-08-20.
 //
-// Deny-list: only AS / AS-NZS / NZS content is blocked from AI features —
-// everything else (NCC, other trade docs, other standards bodies) is
-// AI-eligible by default. This means anything ambiguous or blank now
-// defaults to ALLOWED, not blocked — a deliberate call, since the upload
-// disclaimer + licence-confirmation checkbox are the accepted safeguard for
-// a user who mislabels an AS/NZS document. Case-insensitive, text-pattern
-// match on free-text fields, so it's not bulletproof; keep an eye on newly
-// allowed/blocked uploads.
-const SA_STANDARD_PATTERN = new RegExp(
-  [
-    String.raw`\bAS\s*[\/\-]?\s*NZS?\b`, // AS/NZS, AS-NZS, ASNZS, AS NZS, AS NZ (missing S — real-world upload typo)
-    String.raw`\bNZS?\s*\d{2,10}(?:\.\d+)?\b`, // NZS 3604, NZ 3604
-    String.raw`\bAS\s*\d{2,10}(?:\.\d+)?\b`, // AS 3000, AS3000, AS 1170.1, AS 30002018 (code+year run together)
-    String.raw`australian\s*\/\s*new\s*zealand\s+standard`,
-    String.raw`\baustralian\s+standard\b`,
-    String.raw`\bnew\s+zealand\s+standard\b`,
-    String.raw`standards\s+australia`,
-    String.raw`standards\s+new\s+zealand`,
-  ].join("|"),
-  "i",
-);
-
-export function isAiAllowed(standardCode: string | null | undefined, title: string | null | undefined): boolean {
-  const text = `${standardCode ?? ""} ${title ?? ""}`;
-  return !SA_STANDARD_PATTERN.test(text);
+// As of 2026-08-25 StandAId no longer enforces that as an app-level block —
+// Kyle's call, repositioning the app as a general document search tool for
+// tradies. Responsibility for having the right to upload and use a given
+// document with AI now sits with the user, via the upload-time consent
+// checkbox and the Terms of Service (see StandardsUpload.tsx and
+// Legal.tsx), not a deny-list. This file is kept only so every ingestion
+// pipeline that calls it doesn't need to change; both functions are
+// permanently no-ops now.
+export function isAiAllowed(_standardCode?: string | null, _title?: string | null): boolean {
+  return true;
 }
 
-// Call right after loading a standard row (needs standard_code + title) and
-// before any extraction/OCR/embedding step. Returns true if the caller
-// should stop — the standard has been marked ai_disabled and nothing should
-// be sent to an AI/embedding API for it.
+// Kept for compatibility with every pipeline that calls this right after
+// loading a standard row and before extraction/OCR/embedding. Always
+// returns false ("don't block") now.
 export async function blockIfNotAiAllowed(
-  supabaseAdmin: { from: (table: string) => any },
-  standard: { id: string; standard_code?: string | null; title?: string | null },
+  _supabaseAdmin: { from: (table: string) => any },
+  _standard: { id: string; standard_code?: string | null; title?: string | null },
 ): Promise<boolean> {
-  if (isAiAllowed(standard.standard_code, standard.title)) return false;
-
-  await supabaseAdmin
-    .from("standards")
-    .update({ extraction_status: "ai_disabled" })
-    .eq("id", standard.id);
-
-  return true;
+  return false;
 }

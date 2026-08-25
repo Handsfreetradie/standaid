@@ -3,7 +3,7 @@ import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const SUPPORT_EMAIL = "hello@standaid.ai";
-const LAST_UPDATED = "20 August 2026";
+const LAST_UPDATED = "25 August 2026";
 
 interface LegalProps {
   kind: "terms" | "privacy";
@@ -63,33 +63,33 @@ const Legal = ({ kind }: LegalProps) => {
 
             <Section title="3. Your uploads and copyright">
               <p>
-                You may only upload documents you are legally entitled to use — for example, a
-                standard you have purchased or hold a valid licence or subscription for. By
-                uploading, you confirm this and accept responsibility for complying with the
-                publisher's terms.
+                You may only upload documents you are legally entitled to use, and to process with AI
+                — for example, a standard you have purchased or hold a valid licence or subscription
+                for. By uploading a document, you confirm this and accept full responsibility for
+                complying with the publisher's terms, including any restriction the publisher places
+                on AI or machine-learning use of their content.
               </p>
               <p className="font-medium text-foreground">
-                Standards Australia's terms do not permit any AI or machine-learning use of their
-                content. Documents affected by this (AS, AS/NZS and NZS standards) are stored in
-                your account for viewing only — AI search, chat and Learn/study features are not
-                available for them, regardless of your subscription tier. We detect and apply this
-                automatically at upload; it is not something you can opt into or out of.
+                Some publishers, including Standards Australia, do not permit AI or machine-learning
+                use of their content under their own licensing terms. StandAId does not detect or
+                enforce this for you — every document you upload, including AS, AS/NZS and NZS
+                standards, is processed the same way, with full AI search, chat and Learn/study
+                features. Checking whether your licence for a given document permits that use is
+                entirely your responsibility, and you are solely liable for any breach of a
+                publisher's terms that results from your use of the service, including any resulting
+                claim against you. StandAId is not a party to your licence with any publisher and
+                accepts no liability for how you use the service in relation to it.
               </p>
               <p>
-                You can edit a document's title and standard code after upload. Doing so honestly —
-                for example, to correct a typo — is fine. Entering an incorrect title or code for the
-                purpose of making a Standards Australia document (or any document you are not
-                entitled to process with AI) appear eligible is a breach of these terms and of the
-                publisher's licence, and you are solely responsible for that breach, including any
-                resulting claim against you. StandAId is not liable for AI processing that occurs
-                because you supplied an inaccurate title or code.
+                You can edit a document's title and standard code after upload — for example, to
+                correct a typo.
               </p>
               <p>
                 Your uploaded documents are stored privately against your account. They are never
                 shared with, or made searchable by, other users — even if another user owns the same
-                standard, they cannot access, view or search your copy. Where AI processing is
-                available for a document, it (text extraction, indexing and answering your
-                questions) happens solely to provide the service to you.
+                standard, they cannot access, view or search your copy. AI processing (text
+                extraction, indexing and answering your questions) happens solely to provide the
+                service to you.
               </p>
             </Section>
 
@@ -160,9 +160,9 @@ const Legal = ({ kind }: LegalProps) => {
                 input is transcribed on your device by your browser, not on our servers.
               </p>
               <p>
-                This only applies to documents eligible for AI processing. Standards Australia's
-                content (AS, AS/NZS and NZS standards) is excluded from AI processing entirely — see
-                our Terms of Service, Section 3.
+                This applies to every document you upload, including AS, AS/NZS and NZS standards —
+                see our Terms of Service, Section 3, for your responsibility around publisher licence
+                restrictions on AI use.
               </p>
             </Section>
 

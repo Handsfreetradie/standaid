@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { BookOpen, Upload, Lock, Search, Loader2, Trash2, Pencil, CheckCircle2, AlertCircle, Clock, FileText } from "lucide-react";
+import { BookOpen, Upload, Lock, Loader2, Trash2, Pencil, CheckCircle2, AlertCircle, Clock, FileText } from "lucide-react";
 import { PDFViewerModal } from "@/components/PDFViewerModal";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -48,7 +48,6 @@ export function formatFailedLabels(labels: string[] | null | undefined, count: n
 }
 
 const Standards = () => {
-  const [searchQuery, setSearchQuery] = useState("");
   const [pdfViewer, setPdfViewer] = useState<{ standardId: string; standardCode: string } | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; title: string; standard_code: string } | null>(null);
   const [renameSaving, setRenameSaving] = useState(false);
@@ -60,12 +59,6 @@ const Standards = () => {
   const navigate = useNavigate();
 
   const tier = profile?.subscription_tier; // undefined while loading — never guess
-
-  const filteredStandards = standards.filter(
-    (s) =>
-      s.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (s.standard_code || "").toLowerCase().includes(searchQuery.toLowerCase())
-  );
 
   const handleDelete = async (standardId: string) => {
     if (!window.confirm("Delete this standard? This cannot be undone.")) return;
@@ -148,35 +141,22 @@ const Standards = () => {
         </Button>
       </div>
 
-      {/* Search */}
-      <div className="relative mb-5">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Search documents..."
-          className="pl-9 h-11"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-        />
-      </div>
-
       {/* Standards List */}
       {isLoading ? (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
       ) : (
-        filteredStandards.length === 0 ? (
+        standards.length === 0 ? (
           <div className="text-center py-12 mb-6">
             <BookOpen className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
             <p className="text-sm text-muted-foreground">
-              {standards.length === 0
-                ? "No standards uploaded yet. Upload a PDF to get started."
-                : "No standards match your search."}
+              No standards uploaded yet. Upload a PDF to get started.
             </p>
           </div>
         ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-6">
-          {filteredStandards.map((s) => {
+          {standards.map((s) => {
             const indexedPercent =
               s.total_chunks && s.total_chunks > 0
                 ? Math.round(((s.indexed_chunks || 0) / s.total_chunks) * 100)

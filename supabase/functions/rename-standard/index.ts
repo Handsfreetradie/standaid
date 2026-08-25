@@ -1,25 +1,16 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getAllowedOrigin } from "../_shared/cors.ts";
-import { isAiAllowed } from "../_shared/standard-licence.ts";
 
 // Lets a user rename their own standard's title/standard_code. This is the
 // only writer for the standards table now that direct client UPDATEs are
-// revoked (see 20260820130000_lock_standards_updates.sql) — a raw client
-// update was the actual bypass for the Standards Australia AI block, not
-// just a UX gap.
+// revoked (see 20260820130000_lock_standards_updates.sql) — that RLS lock
+// stands regardless of the AS/NZS AI block being lifted, since it also
+// closed a general bypass letting any user flip system-managed columns
+// (extraction_status, is_indexed) via a raw client update.
 //
-// One-way ratchet, confirmed with Kyle: a rename can only tighten the AI
-// block, never loosen it. (Full auto-unblock-on-rename was tried and
-// deliberately reverted — the lie alone being sufficient to restore AI
-// access was a real bypass, not just a UX gap; see git history if that
-// tradeoff needs revisiting.)
-//   - If the new title/code now matches AS/AS-NZS/NZS, the standard is
-//     locked (ai_disabled) regardless of what it was before.
-//   - If the new title/code looks fine, an already-locked standard STAYS
-//     locked — renaming alone never restores AI features. Unblocking a
-//     standard is a separate, manual, reviewed action (see
-//     scripts/list-ai-disabled-standards.mjs).
+// No AS/NZS ratchet here any more (see _shared/standard-licence.ts) —
+// renaming a standard just renames it.
 
 serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
@@ -61,26 +52,16 @@ serve(async (req) => {
     if (fetchError || !standard) return json({ error: "Standard not found" }, 404);
     if (standard.user_id !== user.id) return json({ error: "Forbidden" }, 403);
 
-    const nowAllowed = isAiAllowed(cleanCode, cleanTitle);
-    const wasDisabled = standard.extraction_status === "ai_disabled";
-
-    // Tighten if the new text looks like AS/AS-NZS/NZS; otherwise never
-    // touch extraction_status here — an already-disabled standard stays
-    // disabled no matter how it's renamed.
-    const newStatus = !nowAllowed ? "ai_disabled" : standard.extraction_status;
-
     const { error: updateError } = await supabaseAdmin
       .from("standards")
-      .update({ title: cleanTitle, standard_code: cleanCode, extraction_status: newStatus })
+      .update({ title: cleanTitle, standard_code: cleanCode })
       .eq("id", standard_id);
     if (updateError) throw updateError;
 
     return json({
       title: cleanTitle,
       standard_code: cleanCode,
-      extraction_status: newStatus,
-      newlyLocked: !nowAllowed && !wasDisabled,
-      stillLocked: nowAllowed && wasDisabled,
+      extraction_status: standard.extraction_status,
     });
   } catch (e) {
     console.error("[rename-standard] error:", e);
