@@ -70,6 +70,7 @@ export interface LayerVisibility {
   switches: boolean;
   data: boolean;
   safety: boolean;
+  coverage: boolean;
   measurements: boolean;
 }
 
@@ -79,7 +80,18 @@ export const DEFAULT_LAYER_VISIBILITY: LayerVisibility = {
   switches: true,
   data: true,
   safety: true,
+  coverage: false,
   measurements: true,
+};
+
+export const LAYER_LABELS: Record<keyof LayerVisibility, string> = {
+  lighting: "Lighting",
+  power: "Power",
+  switches: "Switches",
+  data: "Data",
+  safety: "Safety",
+  coverage: "Coverage overlay",
+  measurements: "Measurements",
 };
 
 export interface SetoutPlan {

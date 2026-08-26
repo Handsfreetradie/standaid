@@ -2,8 +2,8 @@ import { useRef, useState, useCallback, useMemo } from "react";
 import { Hand, Minus, Plus, MousePointer2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
-import type { Point, SetoutFitting, WallSegment } from "@/lib/setoutTypes";
-import { snapOrthogonal, isNearFirstPoint } from "@/lib/setoutGeometry";
+import type { Point, SetoutFitting, WallSegment, LayerVisibility } from "@/lib/setoutTypes";
+import { snapOrthogonal, isNearFirstPoint, lightPoolRadius, poolsSignificantlyOverlap } from "@/lib/setoutGeometry";
 
 interface ViewBox {
   x: number;
@@ -43,6 +43,7 @@ interface SetoutCanvasProps {
   onFittingDrag?: (fittingId: string, position: Point) => void;
   selectedFittingId?: string | null;
   onFittingSelect?: (fittingId: string | null) => void;
+  layerVisibility?: LayerVisibility;
   className?: string;
 }
 
@@ -78,6 +79,7 @@ export default function SetoutCanvas({
   onFittingDrag,
   selectedFittingId,
   onFittingSelect,
+  layerVisibility,
   className,
 }: SetoutCanvasProps) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -228,6 +230,26 @@ export default function SetoutCanvas({
     return { vLines, hLines, startX, endX, startY, endY };
   }, [viewBox]);
 
+  const visibleFittings = useMemo(() => {
+    if (!layerVisibility) return fittings;
+    return fittings.filter((f) => layerVisibility[f.category]);
+  }, [fittings, layerVisibility]);
+
+  const lightPools = useMemo(() => {
+    if (!layerVisibility?.coverage) return [];
+    const downlights = fittings.filter((f) => f.type === "downlight");
+    return downlights.map((f) => {
+      const pos = dragPreview?.id === f.id ? dragPreview.position : f.position;
+      const radius = lightPoolRadius(f.specs);
+      const overlapsAnother = downlights.some((other) => {
+        if (other.id === f.id) return false;
+        const otherPos = dragPreview?.id === other.id ? dragPreview.position : other.position;
+        return poolsSignificantlyOverlap(pos, radius, otherPos, lightPoolRadius(other.specs));
+      });
+      return { id: f.id, position: pos, radius, overlapsAnother };
+    });
+  }, [fittings, layerVisibility?.coverage, dragPreview]);
+
   const iconScale = (ICON_SCREEN_PX * px2scene()) / 24;
   const cursorClass = panMode || mode === "view" ? "cursor-grab active:cursor-grabbing" : "cursor-crosshair";
 
@@ -278,7 +300,24 @@ export default function SetoutCanvas({
           </g>
         )}
 
-        {fittings.map((f) => {
+        {lightPools.length > 0 && (
+          <g>
+            {lightPools.map((pool) => (
+              <circle
+                key={pool.id}
+                cx={pool.position.x}
+                cy={pool.position.y}
+                r={pool.radius}
+                className={pool.overlapsAnother ? "fill-warning/15 stroke-warning" : "fill-primary/10 stroke-primary/40"}
+                strokeWidth={1}
+                strokeDasharray="0.1 0.08"
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
+          </g>
+        )}
+
+        {visibleFittings.map((f) => {
           const Icon = FITTING_SYMBOLS[f.type];
           if (!Icon) return null;
           const pos = dragPreview?.id === f.id ? dragPreview.position : f.position;

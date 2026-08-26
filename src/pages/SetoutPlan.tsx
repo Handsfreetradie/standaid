@@ -1,16 +1,20 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import SetoutCanvas from "@/components/setout/SetoutCanvas";
 import FittingPalette from "@/components/setout/FittingPalette";
+import LayerVisibilityToggle from "@/components/setout/LayerVisibilityToggle";
 import type { FittingType } from "@/components/setout/symbols";
-import type { Point } from "@/lib/setoutTypes";
+import { DEFAULT_LAYER_VISIBILITY, type FittingSpecs, type LayerVisibility, type Point } from "@/lib/setoutTypes";
+import CircuitsPanel from "@/components/setout/CircuitsPanel";
 import {
   useSetoutPlan,
   useSetoutFittings,
   useCreateSetoutFitting,
   useUpdateSetoutFittingPosition,
+  useUpdateSetoutFittingSpecs,
+  useUpdateSetoutPlanLayerVisibility,
   useDeleteSetoutFitting,
 } from "@/hooks/useSetoutPlans";
 
@@ -23,10 +27,33 @@ const SetoutPlan = () => {
 
   const createFitting = useCreateSetoutFitting(planId || "");
   const updateFittingPosition = useUpdateSetoutFittingPosition(planId || "");
+  const updateFittingSpecs = useUpdateSetoutFittingSpecs(planId || "");
+  const updateLayerVisibility = useUpdateSetoutPlanLayerVisibility(planId || "");
   const deleteFitting = useDeleteSetoutFitting(planId || "");
 
   const [selectedType, setSelectedType] = useState<FittingType | null>(null);
   const [selectedFittingId, setSelectedFittingId] = useState<string | null>(null);
+  const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>(DEFAULT_LAYER_VISIBILITY);
+  const layerSyncedRef = useRef(false);
+
+  useEffect(() => {
+    if (plan && !layerSyncedRef.current) {
+      setLayerVisibility(plan.layer_visibility);
+      layerSyncedRef.current = true;
+    }
+  }, [plan]);
+
+  const handleLayerVisibilityChange = (next: LayerVisibility) => {
+    setLayerVisibility(next);
+    updateLayerVisibility.mutate(next);
+  };
+
+  const selectedFitting = fittings.find((f) => f.id === selectedFittingId) ?? null;
+
+  const handleUpdateSpecs = (specs: FittingSpecs) => {
+    if (!selectedFittingId) return;
+    updateFittingSpecs.mutate({ fittingId: selectedFittingId, specs });
+  };
 
   const handlePlaceFitting = (point: Point) => {
     if (!selectedType) return;
@@ -103,7 +130,11 @@ const SetoutPlan = () => {
         >
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
-        <h2 className="font-sans text-lg font-extrabold text-foreground mb-4">{plan.name}</h2>
+        <h2 className="font-sans text-lg font-extrabold text-foreground mb-3">{plan.name}</h2>
+
+        <div className="mb-3">
+          <LayerVisibilityToggle value={layerVisibility} onChange={handleLayerVisibilityChange} />
+        </div>
 
         <div className="flex-1 min-h-[420px] mb-4">
           <SetoutCanvas
@@ -115,6 +146,7 @@ const SetoutPlan = () => {
             onFittingDrag={handleFittingDrag}
             selectedFittingId={selectedFittingId}
             onFittingSelect={setSelectedFittingId}
+            layerVisibility={layerVisibility}
             className="h-full min-h-[420px]"
           />
         </div>
@@ -124,7 +156,14 @@ const SetoutPlan = () => {
           onSelectType={setSelectedType}
           selectedFittingId={selectedFittingId}
           onDeleteSelected={handleDeleteSelected}
+          selectedFitting={selectedFitting}
+          onUpdateSpecs={handleUpdateSpecs}
         />
+
+        <div className="mt-6 pt-6 border-t border-border">
+          <h3 className="font-sans text-base font-extrabold text-foreground mb-3">Circuits &amp; switchboard legend</h3>
+          {planId && <CircuitsPanel planId={planId} />}
+        </div>
       </div>
     </div>
   );

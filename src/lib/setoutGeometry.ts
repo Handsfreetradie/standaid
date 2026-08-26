@@ -1,4 +1,4 @@
-import { distance, type Point, type WallSegment } from "./setoutTypes";
+import { distance, type Point, type WallSegment, type FittingSpecs } from "./setoutTypes";
 
 let wallIdCounter = 0;
 function nextWallId(): string {
@@ -61,4 +61,34 @@ export function applyWallLengths(sketchPoints: Point[], lengths: number[]): Poin
     if (i < sketchPoints.length - 1) rebuilt.push(next);
   }
   return rebuilt;
+}
+
+// Defaults for downlights that haven't had their specs edited yet — a
+// standard 90mm LED downlight on a typical 2.4m residential ceiling with a
+// common 36° beam.
+export const DEFAULT_BEAM_ANGLE = 36;
+export const DEFAULT_MOUNTING_HEIGHT = 2.4;
+export const BEAM_ANGLE_OPTIONS = [24, 36, 60, 90];
+
+// Indicative light-pool radius on the floor, from beam angle and mounting
+// height — basic trig (radius = height * tan(halfBeamAngle)), NOT a
+// photometric/lux calculation. Real coverage depends on reflectance,
+// obstructions, fitting output etc. — this is a rough "will these overlap or
+// leave a gap" guide only, and must be labelled as such wherever it's shown.
+export function lightPoolRadius(specs: FittingSpecs): number {
+  const beamAngle = specs.beamAngle ?? DEFAULT_BEAM_ANGLE;
+  const height = specs.mountingHeight ?? DEFAULT_MOUNTING_HEIGHT;
+  const halfAngleRad = (beamAngle / 2) * (Math.PI / 180);
+  return height * Math.tan(halfAngleRad);
+}
+
+// Two light pools count as "significantly" overlapping (worth flagging as
+// possibly doubled-up) once their circles overlap by more than this fraction
+// of their combined radii — i.e. distance between centres is less than this
+// fraction of (rA + rB). A lower fraction flags earlier/lighter overlap.
+const OVERLAP_WARNING_FACTOR = 0.6;
+
+export function poolsSignificantlyOverlap(centreA: Point, radiusA: number, centreB: Point, radiusB: number): boolean {
+  const d = distance(centreA, centreB);
+  return d < (radiusA + radiusB) * OVERLAP_WARNING_FACTOR;
 }

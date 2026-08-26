@@ -10,6 +10,8 @@ import {
   type PlanSourceType,
   type Point,
   type FittingCategory,
+  type LayerVisibility,
+  type FittingSpecs,
   CATEGORY_FOR_TYPE,
 } from "@/lib/setoutTypes";
 import type { FittingType } from "@/components/setout/symbols";
@@ -114,6 +116,41 @@ export function useUpdateSetoutPlanGeometry(planId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_plan", planId] });
       queryClient.invalidateQueries({ queryKey: ["setout_plans"] });
+    },
+  });
+}
+
+export function useUpdateSetoutPlanLayerVisibility(planId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (layerVisibility: LayerVisibility) => {
+      const { error } = await sb
+        .from("setout_plans")
+        .update({ layer_visibility: layerVisibility })
+        .eq("id", planId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["setout_plan", planId] });
+      queryClient.invalidateQueries({ queryKey: ["setout_plans"] });
+    },
+  });
+}
+
+export function useUpdateSetoutFittingSpecs(planId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: { fittingId: string; specs: FittingSpecs }) => {
+      const { error } = await sb
+        .from("setout_fittings")
+        .update({ specs: input.specs })
+        .eq("id", input.fittingId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
     },
   });
 }
