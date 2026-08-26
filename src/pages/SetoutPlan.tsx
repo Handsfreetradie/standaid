@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Loader2, MousePointerClick, Cable, Download } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { cn } from "@/lib/utils";
 import SetoutCanvas, { type SetoutCanvasMode } from "@/components/setout/SetoutCanvas";
 import FittingPalette from "@/components/setout/FittingPalette";
@@ -69,6 +70,7 @@ const SetoutPlan = () => {
   };
 
   const selectedFitting = fittings.find((f) => f.id === selectedFittingId) ?? null;
+  const lockedCount = fittings.filter((f) => f.measurement_lock).length;
 
   const handleUpdateSpecs = (specs: FittingSpecs) => {
     if (!selectedFittingId) return;
@@ -274,8 +276,17 @@ const SetoutPlan = () => {
         )}
 
         <div className="mt-6 pt-6 border-t border-border">
-          <h3 className="font-sans text-base font-extrabold text-foreground mb-3">Measurement list</h3>
-          <MeasurementListPanel fittings={fittings} walls={plan.walls} />
+          <Accordion type="single" collapsible>
+            <AccordionItem value="measurements" className="border-b-0">
+              <AccordionTrigger className="py-0 font-sans text-base font-extrabold text-foreground hover:no-underline">
+                Measurement list
+                {lockedCount > 0 && <span className="ml-1.5 text-xs font-medium text-muted-foreground">({lockedCount})</span>}
+              </AccordionTrigger>
+              <AccordionContent className="pt-3">
+                <MeasurementListPanel fittings={fittings} walls={plan.walls} />
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
         </div>
 
         <div className="mt-6 pt-6 border-t border-border">

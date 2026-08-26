@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { FITTING_LABELS, FITTING_SYMBOLS } from "@/components/setout/symbols";
 import { useSetoutFittings } from "@/hooks/useSetoutPlans";
 import {
@@ -281,40 +282,47 @@ export default function CircuitsPanel({ planId }: CircuitsPanelProps) {
       </div>
 
       {/* Unassigned fittings */}
-      <div>
-        <h3 className="text-sm font-bold text-foreground mb-2">Unassigned fittings</h3>
-        {unassignedFittings.length === 0 ? (
-          <p className="text-xs text-muted-foreground py-3">All placed fittings are assigned to a circuit.</p>
-        ) : circuits.length === 0 ? (
-          <p className="text-xs text-muted-foreground py-3">Create a circuit above first, then assign these fittings to it.</p>
-        ) : (
-          <div className="space-y-2">
-            {unassignedFittings.map((fitting) => {
-              const Icon = FITTING_SYMBOLS[fitting.type];
-              return (
-                <Card key={fitting.id} className="p-2.5 flex items-center gap-2.5 rounded-xl">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 flex-shrink-0">
-                    <Icon size={16} className="text-primary" strokeWidth={1.5} />
-                  </div>
-                  <p className="flex-1 text-sm font-medium text-foreground truncate">{FITTING_LABELS[fitting.type]}</p>
-                  <Select onValueChange={(value) => handleAssign(fitting.id, value)}>
-                    <SelectTrigger className="w-40 h-9">
-                      <SelectValue placeholder="Assign to circuit" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {circuits.map((circuit) => (
-                        <SelectItem key={circuit.id} value={circuit.id}>
-                          {circuit.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Card>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      <Accordion type="single" collapsible>
+        <AccordionItem value="unassigned" className="border-b-0">
+          <AccordionTrigger className="py-0 text-sm font-bold text-foreground hover:no-underline">
+            Unassigned fittings
+            {unassignedFittings.length > 0 && <span className="ml-1.5 text-xs font-medium text-muted-foreground">({unassignedFittings.length})</span>}
+          </AccordionTrigger>
+          <AccordionContent className="pt-2">
+            {unassignedFittings.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-3">All placed fittings are assigned to a circuit.</p>
+            ) : circuits.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-3">Create a circuit above first, then assign these fittings to it.</p>
+            ) : (
+              <div className="space-y-2">
+                {unassignedFittings.map((fitting) => {
+                  const Icon = FITTING_SYMBOLS[fitting.type];
+                  return (
+                    <Card key={fitting.id} className="p-2.5 flex items-center gap-2.5 rounded-xl">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 flex-shrink-0">
+                        <Icon size={16} className="text-primary" strokeWidth={1.5} />
+                      </div>
+                      <p className="flex-1 text-sm font-medium text-foreground truncate">{FITTING_LABELS[fitting.type]}</p>
+                      <Select onValueChange={(value) => handleAssign(fitting.id, value)}>
+                        <SelectTrigger className="w-40 h-9">
+                          <SelectValue placeholder="Assign to circuit" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {circuits.map((circuit) => (
+                            <SelectItem key={circuit.id} value={circuit.id}>
+                              {circuit.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
     </div>
   );
 }
