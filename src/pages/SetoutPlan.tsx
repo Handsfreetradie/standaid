@@ -1,22 +1,30 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, MousePointerClick, Cable } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import SetoutCanvas from "@/components/setout/SetoutCanvas";
+import { cn } from "@/lib/utils";
+import SetoutCanvas, { type SetoutCanvasMode } from "@/components/setout/SetoutCanvas";
 import FittingPalette from "@/components/setout/FittingPalette";
 import LayerVisibilityToggle from "@/components/setout/LayerVisibilityToggle";
+import SwitchLinksPanel from "@/components/setout/SwitchLinksPanel";
 import type { FittingType } from "@/components/setout/symbols";
-import { DEFAULT_LAYER_VISIBILITY, type FittingSpecs, type LayerVisibility, type Point } from "@/lib/setoutTypes";
+import { DEFAULT_LAYER_VISIBILITY, type FittingSpecs, type FittingStatus, type LayerVisibility, type Point } from "@/lib/setoutTypes";
+import { computeMeasurementLock } from "@/lib/setoutGeometry";
 import CircuitsPanel from "@/components/setout/CircuitsPanel";
+import MeasurementListPanel from "@/components/setout/MeasurementListPanel";
 import {
   useSetoutPlan,
   useSetoutFittings,
   useCreateSetoutFitting,
   useUpdateSetoutFittingPosition,
   useUpdateSetoutFittingSpecs,
+  useUpdateSetoutFittingStatus,
   useUpdateSetoutPlanLayerVisibility,
+  useToggleSwitchLink,
   useDeleteSetoutFitting,
 } from "@/hooks/useSetoutPlans";
+
+type WorkspaceMode = Extract<SetoutCanvasMode, "place-fittings" | "link-switches">;
 
 const SetoutPlan = () => {
   const { planId } = useParams();
@@ -29,10 +37,14 @@ const SetoutPlan = () => {
   const updateFittingPosition = useUpdateSetoutFittingPosition(planId || "");
   const updateFittingSpecs = useUpdateSetoutFittingSpecs(planId || "");
   const updateLayerVisibility = useUpdateSetoutPlanLayerVisibility(planId || "");
+  const toggleSwitchLink = useToggleSwitchLink(planId || "");
+  const updateFittingStatus = useUpdateSetoutFittingStatus(planId || "");
   const deleteFitting = useDeleteSetoutFitting(planId || "");
 
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("place-fittings");
   const [selectedType, setSelectedType] = useState<FittingType | null>(null);
   const [selectedFittingId, setSelectedFittingId] = useState<string | null>(null);
+  const [activeSwitchId, setActiveSwitchId] = useState<string | null>(null);
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>(DEFAULT_LAYER_VISIBILITY);
   const layerSyncedRef = useRef(false);
 
@@ -56,8 +68,8 @@ const SetoutPlan = () => {
   };
 
   const handlePlaceFitting = (point: Point) => {
-    if (!selectedType) return;
-    createFitting.mutate({ type: selectedType, position: point });
+    if (!selectedType || !plan) return;
+    createFitting.mutate({ type: selectedType, position: point, measurement_lock: computeMeasurementLock(point, plan.walls) });
     // Deliberately kept selected rather than cleared — tradies place several
     // of the same fitting (e.g. a run of downlights) in a row, so forcing a
     // re-tap of the palette after every single placement would be worse UX.
@@ -66,13 +78,34 @@ const SetoutPlan = () => {
   };
 
   const handleFittingDrag = (fittingId: string, position: Point) => {
-    updateFittingPosition.mutate({ fittingId, position });
+    if (!plan) return;
+    // Re-lock on every manual adjustment — the whole point of the lock is
+    // that it always reflects where the fitting actually is right now.
+    updateFittingPosition.mutate({ fittingId, position, measurement_lock: computeMeasurementLock(position, plan.walls) });
   };
 
   const handleDeleteSelected = () => {
     if (!selectedFittingId) return;
     deleteFitting.mutate(selectedFittingId);
     setSelectedFittingId(null);
+  };
+
+  const handleUpdateStatus = (status: FittingStatus) => {
+    if (!selectedFittingId) return;
+    updateFittingStatus.mutate({ fittingId: selectedFittingId, status });
+  };
+
+  const handleLinkTargetTap = (targetId: string) => {
+    const activeSwitch = fittings.find((f) => f.id === activeSwitchId);
+    if (!activeSwitch) return;
+    toggleSwitchLink.mutate({ switchFitting: activeSwitch, targetId });
+  };
+
+  const handleWorkspaceModeChange = (next: WorkspaceMode) => {
+    setWorkspaceMode(next);
+    setSelectedFittingId(null);
+    setSelectedType(null);
+    setActiveSwitchId(null);
   };
 
   if (planLoading || fittingsLoading) {
@@ -136,29 +169,65 @@ const SetoutPlan = () => {
           <LayerVisibilityToggle value={layerVisibility} onChange={handleLayerVisibilityChange} />
         </div>
 
+        <div className="mb-3 flex gap-1.5">
+          <button
+            type="button"
+            onClick={() => handleWorkspaceModeChange("place-fittings")}
+            className={cn(
+              "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+              workspaceMode === "place-fittings" ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"
+            )}
+          >
+            <MousePointerClick className="h-3.5 w-3.5" /> Place fittings
+          </button>
+          <button
+            type="button"
+            onClick={() => handleWorkspaceModeChange("link-switches")}
+            className={cn(
+              "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+              workspaceMode === "link-switches" ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"
+            )}
+          >
+            <Cable className="h-3.5 w-3.5" /> Link switches
+          </button>
+        </div>
+
         <div className="flex-1 min-h-[420px] mb-4">
           <SetoutCanvas
             walls={plan.walls}
             fittings={fittings}
-            mode="place-fittings"
+            mode={workspaceMode}
             selectedFittingType={selectedType}
             onPlaceFitting={handlePlaceFitting}
             onFittingDrag={handleFittingDrag}
             selectedFittingId={selectedFittingId}
             onFittingSelect={setSelectedFittingId}
             layerVisibility={layerVisibility}
+            linkActiveSwitchId={activeSwitchId}
+            onSwitchTap={setActiveSwitchId}
+            onLinkTargetTap={handleLinkTargetTap}
             className="h-full min-h-[420px]"
           />
         </div>
 
-        <FittingPalette
-          selectedType={selectedType}
-          onSelectType={setSelectedType}
-          selectedFittingId={selectedFittingId}
-          onDeleteSelected={handleDeleteSelected}
-          selectedFitting={selectedFitting}
-          onUpdateSpecs={handleUpdateSpecs}
-        />
+        {workspaceMode === "place-fittings" ? (
+          <FittingPalette
+            selectedType={selectedType}
+            onSelectType={setSelectedType}
+            selectedFittingId={selectedFittingId}
+            onDeleteSelected={handleDeleteSelected}
+            selectedFitting={selectedFitting}
+            onUpdateSpecs={handleUpdateSpecs}
+            onUpdateStatus={handleUpdateStatus}
+          />
+        ) : (
+          <SwitchLinksPanel fittings={fittings} activeSwitchId={activeSwitchId} onSelectSwitch={setActiveSwitchId} />
+        )}
+
+        <div className="mt-6 pt-6 border-t border-border">
+          <h3 className="font-sans text-base font-extrabold text-foreground mb-3">Measurement list</h3>
+          <MeasurementListPanel fittings={fittings} walls={plan.walls} />
+        </div>
 
         <div className="mt-6 pt-6 border-t border-border">
           <h3 className="font-sans text-base font-extrabold text-foreground mb-3">Circuits &amp; switchboard legend</h3>

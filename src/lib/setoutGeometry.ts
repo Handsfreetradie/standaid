@@ -1,4 +1,4 @@
-import { distance, type Point, type WallSegment, type FittingSpecs } from "./setoutTypes";
+import { distance, type Point, type WallSegment, type FittingSpecs, type MeasurementLock } from "./setoutTypes";
 
 let wallIdCounter = 0;
 function nextWallId(): string {
@@ -91,4 +91,35 @@ const OVERLAP_WARNING_FACTOR = 0.6;
 export function poolsSignificantlyOverlap(centreA: Point, radiusA: number, centreB: Point, radiusB: number): boolean {
   const d = distance(centreA, centreB);
   return d < (radiusA + radiusB) * OVERLAP_WARNING_FACTOR;
+}
+
+// Closest point to `p` on the finite wall segment (not the infinite line
+// through it) — a fitting near a corner should measure off the wall's actual
+// end, not a point that would fall past it.
+export function closestPointOnWall(p: Point, wall: WallSegment): Point {
+  const dx = wall.end.x - wall.start.x;
+  const dy = wall.end.y - wall.start.y;
+  const lengthSq = dx * dx + dy * dy;
+  if (lengthSq === 0) return wall.start;
+  let t = ((p.x - wall.start.x) * dx + (p.y - wall.start.y) * dy) / lengthSq;
+  t = Math.max(0, Math.min(1, t));
+  return { x: wall.start.x + t * dx, y: wall.start.y + t * dy };
+}
+
+export function perpendicularDistanceToWall(p: Point, wall: WallSegment): number {
+  return distance(p, closestPointOnWall(p, wall));
+}
+
+// Auto-locks a fitting to its two nearest walls (by perpendicular distance)
+// — this is what gets read off with a laser on site, so it must be
+// recomputed any time the fitting moves ("re-lock on any manual adjustment").
+// Picking the two walls a tradie would naturally choose (which two happen to
+// be closest) is the simple, predictable default; manual override of which
+// walls to lock to is a later enhancement.
+export function computeMeasurementLock(position: Point, walls: WallSegment[]): MeasurementLock | null {
+  if (walls.length < 2) return null;
+  const ranked = walls
+    .map((wall) => ({ wallId: wall.id, distance: perpendicularDistanceToWall(position, wall) }))
+    .sort((a, b) => a.distance - b.distance);
+  return { wallA: ranked[0], wallB: ranked[1] };
 }

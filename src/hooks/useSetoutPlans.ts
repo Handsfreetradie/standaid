@@ -12,6 +12,7 @@ import {
   type FittingCategory,
   type LayerVisibility,
   type FittingSpecs,
+  type MeasurementLock,
   CATEGORY_FOR_TYPE,
 } from "@/lib/setoutTypes";
 import type { FittingType } from "@/components/setout/symbols";
@@ -173,7 +174,7 @@ export function useCreateSetoutFitting(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (input: { type: FittingType; position: Point }) => {
+    mutationFn: async (input: { type: FittingType; position: Point; measurement_lock?: MeasurementLock | null }) => {
       const category: FittingCategory = CATEGORY_FOR_TYPE[input.type];
       const { data, error } = await sb
         .from("setout_fittings")
@@ -183,6 +184,7 @@ export function useCreateSetoutFitting(planId: string) {
           position: input.position,
           category,
           specs: {},
+          measurement_lock: input.measurement_lock ?? null,
         })
         .select()
         .single();
@@ -195,14 +197,49 @@ export function useCreateSetoutFitting(planId: string) {
   });
 }
 
+// Toggles a target fitting in/out of a switch's linked_to array — the sole
+// source of truth for switch<->light wiring (no separate "switch type"
+// field; a light with 2+ switches pointing at it is a 2-way by definition).
+export function useToggleSwitchLink(planId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: { switchFitting: SetoutFitting; targetId: string }) => {
+      const current = input.switchFitting.linked_to;
+      const next = current.includes(input.targetId)
+        ? current.filter((id) => id !== input.targetId)
+        : [...current, input.targetId];
+      const { error } = await sb.from("setout_fittings").update({ linked_to: next }).eq("id", input.switchFitting.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
+    },
+  });
+}
+
+export function useUpdateSetoutFittingStatus(planId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: { fittingId: string; status: "placed" | "confirmed" }) => {
+      const { error } = await sb.from("setout_fittings").update({ status: input.status }).eq("id", input.fittingId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
+    },
+  });
+}
+
 export function useUpdateSetoutFittingPosition(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (input: { fittingId: string; position: Point }) => {
+    mutationFn: async (input: { fittingId: string; position: Point; measurement_lock: MeasurementLock | null }) => {
       const { error } = await sb
         .from("setout_fittings")
-        .update({ position: input.position })
+        .update({ position: input.position, measurement_lock: input.measurement_lock })
         .eq("id", input.fittingId);
       if (error) throw error;
     },

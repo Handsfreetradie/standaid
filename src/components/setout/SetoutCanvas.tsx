@@ -3,7 +3,7 @@ import { Hand, Minus, Plus, MousePointer2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
 import type { Point, SetoutFitting, WallSegment, LayerVisibility } from "@/lib/setoutTypes";
-import { snapOrthogonal, isNearFirstPoint, lightPoolRadius, poolsSignificantlyOverlap } from "@/lib/setoutGeometry";
+import { snapOrthogonal, isNearFirstPoint, lightPoolRadius, poolsSignificantlyOverlap, closestPointOnWall } from "@/lib/setoutGeometry";
 
 interface ViewBox {
   x: number;
@@ -27,7 +27,7 @@ interface BackgroundImage {
   height: number;
 }
 
-export type SetoutCanvasMode = "view" | "sketch-walls" | "place-fittings";
+export type SetoutCanvasMode = "view" | "sketch-walls" | "place-fittings" | "link-switches";
 
 interface SetoutCanvasProps {
   backgroundImage?: BackgroundImage;
@@ -44,6 +44,9 @@ interface SetoutCanvasProps {
   selectedFittingId?: string | null;
   onFittingSelect?: (fittingId: string | null) => void;
   layerVisibility?: LayerVisibility;
+  linkActiveSwitchId?: string | null;
+  onSwitchTap?: (switchId: string | null) => void;
+  onLinkTargetTap?: (fittingId: string) => void;
   className?: string;
 }
 
@@ -80,6 +83,9 @@ export default function SetoutCanvas({
   selectedFittingId,
   onFittingSelect,
   layerVisibility,
+  linkActiveSwitchId,
+  onSwitchTap,
+  onLinkTargetTap,
   className,
 }: SetoutCanvasProps) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -160,9 +166,11 @@ export default function SetoutCanvas({
         onPlaceFitting?.(scene);
       } else if (mode === "place-fittings") {
         onFittingSelect?.(null);
+      } else if (mode === "link-switches") {
+        onSwitchTap?.(null);
       }
     },
-    [panMode, mode, viewBox, px2scene, sceneFromClient, sketchPoints, onSketchClose, snapWalls, onSketchPointAdd, selectedFittingType, onPlaceFitting, onFittingSelect]
+    [panMode, mode, viewBox, px2scene, sceneFromClient, sketchPoints, onSketchClose, snapWalls, onSketchPointAdd, selectedFittingType, onPlaceFitting, onFittingSelect, onSwitchTap]
   );
 
   const handlePointerMove = useCallback(
@@ -202,6 +210,14 @@ export default function SetoutCanvas({
   const handleFittingPointerDown = useCallback(
     (e: React.PointerEvent<SVGGElement>, fitting: SetoutFitting) => {
       e.stopPropagation();
+      if (mode === "link-switches") {
+        if (fitting.type === "switch") {
+          onSwitchTap?.(fitting.id === linkActiveSwitchId ? null : fitting.id);
+        } else if (linkActiveSwitchId) {
+          onLinkTargetTap?.(fitting.id);
+        }
+        return;
+      }
       onFittingSelect?.(fitting.id);
       if (mode !== "place-fittings" || panMode) return;
       dragState.current = {
@@ -214,7 +230,7 @@ export default function SetoutCanvas({
       setDragPreview({ id: fitting.id, position: fitting.position });
       (e.target as Element).setPointerCapture(e.pointerId);
     },
-    [mode, panMode, px2scene, onFittingSelect]
+    [mode, panMode, px2scene, onFittingSelect, linkActiveSwitchId, onSwitchTap, onLinkTargetTap]
   );
 
   const gridLines = useMemo(() => {
@@ -249,6 +265,39 @@ export default function SetoutCanvas({
       return { id: f.id, position: pos, radius, overlapsAnother };
     });
   }, [fittings, layerVisibility?.coverage, dragPreview]);
+
+  const switchLinks = useMemo(() => {
+    if (layerVisibility && !layerVisibility.switches) return [];
+    const switches = fittings.filter((f) => f.type === "switch");
+    const links: { key: string; switchPos: Point; targetPos: Point; active: boolean }[] = [];
+    for (const sw of switches) {
+      const swPos = dragPreview?.id === sw.id ? dragPreview.position : sw.position;
+      for (const targetId of sw.linked_to) {
+        const target = fittings.find((f) => f.id === targetId);
+        if (!target) continue;
+        const targetPos = dragPreview?.id === target.id ? dragPreview.position : target.position;
+        links.push({ key: `${sw.id}-${targetId}`, switchPos: swPos, targetPos, active: sw.id === linkActiveSwitchId });
+      }
+    }
+    return links;
+  }, [fittings, layerVisibility?.switches, dragPreview, linkActiveSwitchId]);
+
+  const measurementLines = useMemo(() => {
+    if (!layerVisibility?.measurements) return [];
+    const wallById = new Map(walls.map((w) => [w.id, w]));
+    const lines: { key: string; from: Point; to: Point; label: string }[] = [];
+    for (const f of fittings) {
+      if (!f.measurement_lock) continue;
+      const pos = dragPreview?.id === f.id ? dragPreview.position : f.position;
+      for (const lock of [f.measurement_lock.wallA, f.measurement_lock.wallB]) {
+        const wall = wallById.get(lock.wallId);
+        if (!wall) continue;
+        const to = closestPointOnWall(pos, wall);
+        lines.push({ key: `${f.id}-${lock.wallId}`, from: pos, to, label: `${lock.distance.toFixed(2)}m` });
+      }
+    }
+    return lines;
+  }, [fittings, walls, layerVisibility?.measurements, dragPreview]);
 
   const iconScale = (ICON_SCREEN_PX * px2scene()) / 24;
   const cursorClass = panMode || mode === "view" ? "cursor-grab active:cursor-grabbing" : "cursor-crosshair";
@@ -317,20 +366,88 @@ export default function SetoutCanvas({
           </g>
         )}
 
+        {switchLinks.length > 0 && (
+          <g>
+            {switchLinks.map((link) => (
+              <line
+                key={link.key}
+                x1={link.switchPos.x}
+                y1={link.switchPos.y}
+                x2={link.targetPos.x}
+                y2={link.targetPos.y}
+                className={link.active ? "text-primary" : "text-muted-foreground"}
+                stroke="currentColor"
+                strokeOpacity={link.active ? 0.8 : 0.35}
+                strokeWidth={link.active ? 1.5 : 1}
+                strokeDasharray="0.12 0.08"
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
+          </g>
+        )}
+
+        {measurementLines.length > 0 && (
+          <g>
+            {measurementLines.map((line) => {
+              const midX = (line.from.x + line.to.x) / 2;
+              const midY = (line.from.y + line.to.y) / 2;
+              const fontSize = 11 * px2scene();
+              return (
+                <g key={line.key}>
+                  <line
+                    x1={line.from.x}
+                    y1={line.from.y}
+                    x2={line.to.x}
+                    y2={line.to.y}
+                    className="text-primary"
+                    stroke="currentColor"
+                    strokeOpacity={0.6}
+                    strokeWidth={1}
+                    strokeDasharray="0.06 0.06"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  <text x={midX} y={midY} fontSize={fontSize} textAnchor="middle" stroke="hsl(var(--background))" strokeWidth={fontSize * 0.28} className="text-primary" fill="currentColor" paintOrder="stroke">
+                    {line.label}
+                  </text>
+                </g>
+              );
+            })}
+          </g>
+        )}
+
         {visibleFittings.map((f) => {
           const Icon = FITTING_SYMBOLS[f.type];
           if (!Icon) return null;
           const pos = dragPreview?.id === f.id ? dragPreview.position : f.position;
           const selected = selectedFittingId === f.id;
+          const isActiveSwitch = mode === "link-switches" && f.id === linkActiveSwitchId;
+          const isLinkTarget = mode === "link-switches" && !!linkActiveSwitchId;
           return (
             <g
               key={f.id}
               transform={`translate(${pos.x} ${pos.y}) scale(${iconScale}) translate(-12 -12)`}
               onPointerDown={(e) => handleFittingPointerDown(e, f)}
-              className={cn(mode === "place-fittings" && !panMode ? "cursor-grab" : "cursor-pointer")}
+              className={cn(
+                mode === "place-fittings" && !panMode && "cursor-grab",
+                (mode === "link-switches" && (f.type === "switch" || isLinkTarget)) || mode !== "link-switches" ? "cursor-pointer" : ""
+              )}
             >
-              <circle cx={12} cy={12} r={13} fill="hsl(var(--background))" fillOpacity={0.85} />
-              <Icon size={24} className={selected ? "text-primary" : "text-foreground"} strokeWidth={selected ? 2 : 1.5} />
+              <circle
+                cx={12}
+                cy={12}
+                r={13}
+                fill={isActiveSwitch ? "hsl(var(--primary) / 0.15)" : "hsl(var(--background))"}
+                fillOpacity={isActiveSwitch ? 1 : 0.85}
+                stroke={isActiveSwitch ? "hsl(var(--primary))" : "none"}
+                strokeWidth={isActiveSwitch ? 1.5 : 0}
+              />
+              <Icon size={24} className={selected || isActiveSwitch ? "text-primary" : "text-foreground"} strokeWidth={selected || isActiveSwitch ? 2 : 1.5} />
+              {f.status === "confirmed" && (
+                <g transform="translate(15 -3)">
+                  <circle r={5} fill="hsl(var(--primary))" />
+                  <path d="M-2 0l1.5 1.5L2.5 -2" stroke="hsl(var(--primary-foreground))" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                </g>
+              )}
             </g>
           );
         })}

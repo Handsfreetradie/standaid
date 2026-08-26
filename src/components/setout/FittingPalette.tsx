@@ -1,10 +1,10 @@
-import { Trash2 } from "lucide-react";
+import { Trash2, Check, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { FITTING_LABELS, FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
 import { BEAM_ANGLE_OPTIONS, DEFAULT_BEAM_ANGLE, DEFAULT_MOUNTING_HEIGHT } from "@/lib/setoutGeometry";
-import type { FittingSpecs, SetoutFitting } from "@/lib/setoutTypes";
+import type { FittingSpecs, FittingStatus, SetoutFitting } from "@/lib/setoutTypes";
 
 const FITTING_TYPES = Object.keys(FITTING_SYMBOLS) as FittingType[];
 
@@ -15,6 +15,7 @@ interface FittingPaletteProps {
   onDeleteSelected: () => void;
   selectedFitting?: SetoutFitting | null;
   onUpdateSpecs?: (specs: FittingSpecs) => void;
+  onUpdateStatus?: (status: FittingStatus) => void;
 }
 
 const FittingPalette = ({
@@ -24,17 +25,45 @@ const FittingPalette = ({
   onDeleteSelected,
   selectedFitting,
   onUpdateSpecs,
+  onUpdateStatus,
 }: FittingPaletteProps) => {
   return (
     <div className="space-y-2">
       {selectedFittingId && (
         <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-muted-foreground">Fitting selected</span>
-            <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-destructive hover:text-destructive" onClick={onDeleteSelected}>
-              <Trash2 className="h-3.5 w-3.5" />
-              Delete
-            </Button>
+            <span className="text-xs font-medium text-muted-foreground">
+              Fitting selected
+              {selectedFitting?.status === "confirmed" && (
+                <span className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-medium text-primary bg-primary/10 rounded px-1.5 py-0.5">
+                  <Check className="h-2.5 w-2.5" /> Confirmed
+                </span>
+              )}
+            </span>
+            <div className="flex items-center gap-1">
+              {onUpdateStatus && selectedFitting && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-1.5 text-muted-foreground"
+                  onClick={() => onUpdateStatus(selectedFitting.status === "confirmed" ? "placed" : "confirmed")}
+                >
+                  {selectedFitting.status === "confirmed" ? (
+                    <>
+                      <RotateCcw className="h-3.5 w-3.5" /> Unconfirm
+                    </>
+                  ) : (
+                    <>
+                      <Check className="h-3.5 w-3.5" /> Confirm
+                    </>
+                  )}
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-destructive hover:text-destructive" onClick={onDeleteSelected}>
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete
+              </Button>
+            </div>
           </div>
 
           {selectedFitting?.type === "downlight" && onUpdateSpecs && (
