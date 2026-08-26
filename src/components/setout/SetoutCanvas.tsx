@@ -2,8 +2,8 @@ import { useRef, useState, useCallback, useMemo } from "react";
 import { Hand, Minus, Plus, MousePointer2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
-import type { Point, SetoutFitting, WallSegment, WallLock, LayerVisibility } from "@/lib/setoutTypes";
-import { snapOrthogonal, isNearFirstPoint, lightPoolRadius, poolsSignificantlyOverlap, closestPointOnWall } from "@/lib/setoutGeometry";
+import { isSingleWallFitting, type Point, type SetoutFitting, type WallSegment, type WallLock, type LayerVisibility } from "@/lib/setoutTypes";
+import { snapOrthogonal, isNearFirstPoint, lightPoolRadius, poolsSignificantlyOverlap, closestPointOnWall, snapToNearestWall } from "@/lib/setoutGeometry";
 
 interface ViewBox {
   x: number;
@@ -92,7 +92,7 @@ export default function SetoutCanvas({
   const [viewBox, setViewBox] = useState<ViewBox>(() => initialViewBox(backgroundImage, walls));
   const [panMode, setPanMode] = useState(false);
   const panState = useRef<{ clientX: number; clientY: number; vb: ViewBox; scale: number } | null>(null);
-  const dragState = useRef<{ fittingId: string; clientX: number; clientY: number; scale: number; origin: Point } | null>(null);
+  const dragState = useRef<{ fittingId: string; type: FittingType; clientX: number; clientY: number; scale: number; origin: Point } | null>(null);
   const [dragPreview, setDragPreview] = useState<{ id: string; position: Point } | null>(null);
 
   const px2scene = useCallback(() => {
@@ -163,14 +163,15 @@ export default function SetoutCanvas({
         const point = snapWalls && last ? snapOrthogonal(last, scene) : scene;
         onSketchPointAdd?.(point);
       } else if (mode === "place-fittings" && selectedFittingType) {
-        onPlaceFitting?.(scene);
+        const point = isSingleWallFitting(selectedFittingType) ? snapToNearestWall(scene, walls) : scene;
+        onPlaceFitting?.(point);
       } else if (mode === "place-fittings") {
         onFittingSelect?.(null);
       } else if (mode === "link-switches") {
         onSwitchTap?.(null);
       }
     },
-    [panMode, mode, viewBox, px2scene, sceneFromClient, sketchPoints, onSketchClose, snapWalls, onSketchPointAdd, selectedFittingType, onPlaceFitting, onFittingSelect, onSwitchTap]
+    [panMode, mode, viewBox, px2scene, sceneFromClient, sketchPoints, onSketchClose, snapWalls, onSketchPointAdd, selectedFittingType, onPlaceFitting, onFittingSelect, onSwitchTap, walls]
   );
 
   const handlePointerMove = useCallback(
@@ -181,13 +182,15 @@ export default function SetoutCanvas({
         const dy = (e.clientY - clientY) * scale;
         setViewBox({ ...vb, x: vb.x - dx, y: vb.y - dy });
       } else if (dragState.current) {
-        const { fittingId, clientX, clientY, scale, origin } = dragState.current;
+        const { fittingId, type, clientX, clientY, scale, origin } = dragState.current;
         const dx = (e.clientX - clientX) * scale;
         const dy = (e.clientY - clientY) * scale;
-        setDragPreview({ id: fittingId, position: { x: origin.x + dx, y: origin.y + dy } });
+        const raw = { x: origin.x + dx, y: origin.y + dy };
+        const position = isSingleWallFitting(type) ? snapToNearestWall(raw, walls) : raw;
+        setDragPreview({ id: fittingId, position });
       }
     },
-    []
+    [walls]
   );
 
   const endPan = useCallback(() => {
@@ -222,6 +225,7 @@ export default function SetoutCanvas({
       if (mode !== "place-fittings" || panMode) return;
       dragState.current = {
         fittingId: fitting.id,
+        type: fitting.type,
         clientX: e.clientX,
         clientY: e.clientY,
         scale: px2scene(),

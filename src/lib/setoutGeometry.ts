@@ -76,10 +76,27 @@ export const BEAM_ANGLE_OPTIONS = [24, 36, 60, 90];
 export const DEFAULT_GPO_HEIGHT = 0.3;
 export const DEFAULT_SWITCH_HEIGHT = 1.2;
 
+// Rough starting points for the other wall-mounted types — all editable via
+// the same height field, not a strict standard for every one of these.
+const DEFAULT_HEIGHT_BY_TYPE: Partial<Record<FittingType, number>> = {
+  gpo: DEFAULT_GPO_HEIGHT,
+  switch: DEFAULT_SWITCH_HEIGHT,
+  tv_point: 0.3,
+  phone_point: 0.3,
+  data: 0.3,
+  nbn_box: 0.3,
+  ubo_rhood: 0.3,
+  vacuum_outlet: 0.3,
+  wall_stair_light: 0.3,
+  meter_box: 1.5,
+  thermostat: 1.5,
+  wall_batten_holder: 2.0,
+  ac_head_unit: 2.1,
+  external_light: 2.1,
+};
+
 export function defaultHeightForType(type: FittingType): number | null {
-  if (type === "gpo") return DEFAULT_GPO_HEIGHT;
-  if (type === "switch") return DEFAULT_SWITCH_HEIGHT;
-  return null;
+  return DEFAULT_HEIGHT_BY_TYPE[type] ?? null;
 }
 
 // Indicative light-pool radius on the floor, from beam angle and mounting
@@ -122,6 +139,44 @@ export function perpendicularDistanceToWall(p: Point, wall: WallSegment): number
   return distance(p, closestPointOnWall(p, wall));
 }
 
+// True only when `p` has a genuine 90° foot on this wall's segment (not
+// past either end) — i.e. a laser held square to the wall would actually
+// land on it. `closestPointOnWall` clamps to the nearest endpoint once the
+// foot falls outside the segment, which is correct for "closest point" but
+// wrong for a measurement lock: that clamped distance is a diagonal to a
+// corner, not a 90° reading, and must not be offered as one.
+function hasPerpendicularFoot(p: Point, wall: WallSegment): boolean {
+  const dx = wall.end.x - wall.start.x;
+  const dy = wall.end.y - wall.start.y;
+  const lengthSq = dx * dx + dy * dy;
+  if (lengthSq === 0) return false;
+  const t = ((p.x - wall.start.x) * dx + (p.y - wall.start.y) * dy) / lengthSq;
+  return t >= 0 && t <= 1;
+}
+
+// Snaps a point onto the nearest wall — used for GPOs, switches, and other
+// wall-mounted fittings, which should sit physically on the wall line
+// rather than floating anywhere in the room. Prefers walls with a genuine
+// perpendicular foot (see hasPerpendicularFoot) so a fixture doesn't jump
+// diagonally onto a corner; falls back to any wall only if none qualify
+// (e.g. sitting exactly on a corner). Returns the raw point unchanged if
+// there are no walls at all.
+export function snapToNearestWall(p: Point, walls: WallSegment[]): Point {
+  if (walls.length === 0) return p;
+  const candidates = walls.filter((wall) => hasPerpendicularFoot(p, wall));
+  const pool = candidates.length > 0 ? candidates : walls;
+  let nearestWall = pool[0];
+  let nearestDistance = perpendicularDistanceToWall(p, nearestWall);
+  for (const wall of pool.slice(1)) {
+    const d = perpendicularDistanceToWall(p, wall);
+    if (d < nearestDistance) {
+      nearestDistance = d;
+      nearestWall = wall;
+    }
+  }
+  return closestPointOnWall(p, nearestWall);
+}
+
 // Auto-locks a fitting to its nearest wall(s) (by perpendicular distance) —
 // this is what gets read off with a laser on site, so it must be recomputed
 // any time the fitting moves ("re-lock on any manual adjustment"). GPOs and
@@ -131,13 +186,21 @@ export function perpendicularDistanceToWall(p: Point, wall: WallSegment): number
 // of which wall to lock to is a later enhancement — for now the tradie can
 // hand-edit the resulting distance instead.
 export function computeMeasurementLock(position: Point, walls: WallSegment[], fittingType?: FittingType): MeasurementLock | null {
-  if (walls.length === 0) return null;
-  const ranked = walls
+  // Only walls with a genuine 90° foot qualify — a wall that's numerically
+  // closer but only reachable via a clamped corner would give a diagonal
+  // "measurement", which isn't a real laser reading.
+  const perpendicularWalls = walls.filter((wall) => hasPerpendicularFoot(position, wall));
+  if (perpendicularWalls.length === 0) return null;
+  const ranked = perpendicularWalls
     .map((wall) => ({ wallId: wall.id, distance: perpendicularDistanceToWall(position, wall) }))
     .sort((a, b) => a.distance - b.distance);
   if (fittingType && isSingleWallFitting(fittingType)) {
-    return { wallA: ranked[0] };
+    // These fittings are snapped onto their mounted wall on placement/drag
+    // (see snapToNearestWall), so ranked[0] is that same wall at ~0m — not
+    // useful as "the" measurement. The one real reading is the along-wall
+    // distance to the nearest adjacent wall, i.e. the next-nearest one.
+    return ranked.length > 1 ? { wallA: ranked[1] } : { wallA: ranked[0] };
   }
-  if (ranked.length < 2) return null;
+  if (ranked.length < 2) return { wallA: ranked[0] };
   return { wallA: ranked[0], wallB: ranked[1] };
 }

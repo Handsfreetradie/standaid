@@ -95,7 +95,22 @@ export interface MeasurementLock {
   wallB?: WallLock;
 }
 
-export const SINGLE_WALL_FITTING_TYPES: FittingType[] = ["gpo", "switch"];
+export const SINGLE_WALL_FITTING_TYPES: FittingType[] = [
+  "gpo",
+  "switch",
+  "tv_point",
+  "phone_point",
+  "meter_box",
+  "nbn_box",
+  "ubo_rhood",
+  "data",
+  "wall_batten_holder",
+  "wall_stair_light",
+  "external_light",
+  "thermostat",
+  "ac_head_unit",
+  "vacuum_outlet",
+];
 
 export function isSingleWallFitting(type: FittingType): boolean {
   return SINGLE_WALL_FITTING_TYPES.includes(type);
