@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2, MousePointerClick, Cable } from "lucide-react";
+import { ArrowLeft, Loader2, MousePointerClick, Cable, Download } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import SetoutCanvas, { type SetoutCanvasMode } from "@/components/setout/SetoutCanvas";
@@ -10,6 +11,7 @@ import SwitchLinksPanel from "@/components/setout/SwitchLinksPanel";
 import type { FittingType } from "@/components/setout/symbols";
 import { DEFAULT_LAYER_VISIBILITY, type FittingSpecs, type FittingStatus, type LayerVisibility, type Point } from "@/lib/setoutTypes";
 import { computeMeasurementLock } from "@/lib/setoutGeometry";
+import { generateSetoutReportPdf } from "@/lib/setoutReport";
 import CircuitsPanel from "@/components/setout/CircuitsPanel";
 import MeasurementListPanel from "@/components/setout/MeasurementListPanel";
 import {
@@ -23,6 +25,7 @@ import {
   useToggleSwitchLink,
   useDeleteSetoutFitting,
 } from "@/hooks/useSetoutPlans";
+import { useSetoutCircuits } from "@/hooks/useSetoutCircuits";
 
 type WorkspaceMode = Extract<SetoutCanvasMode, "place-fittings" | "link-switches">;
 
@@ -32,6 +35,8 @@ const SetoutPlan = () => {
 
   const { data: plan, isLoading: planLoading } = useSetoutPlan(planId);
   const { data: fittings = [], isLoading: fittingsLoading } = useSetoutFittings(planId);
+  const { data: circuits = [] } = useSetoutCircuits(planId);
+  const [exporting, setExporting] = useState(false);
 
   const createFitting = useCreateSetoutFitting(planId || "");
   const updateFittingPosition = useUpdateSetoutFittingPosition(planId || "");
@@ -101,6 +106,20 @@ const SetoutPlan = () => {
     toggleSwitchLink.mutate({ switchFitting: activeSwitch, targetId });
   };
 
+  const handleExport = async () => {
+    if (!plan || exporting) return;
+    setExporting(true);
+    try {
+      const doc = await generateSetoutReportPdf({ plan, fittings, circuits });
+      const filename = `${(plan.name || "setout-plan").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.pdf`;
+      doc.save(filename);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not generate the export");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const handleWorkspaceModeChange = (next: WorkspaceMode) => {
     setWorkspaceMode(next);
     setSelectedFittingId(null);
@@ -157,12 +176,18 @@ const SetoutPlan = () => {
   return (
     <div className="h-full overflow-y-auto">
       <div className="px-5 py-6 pb-24 md:pb-8 max-w-2xl mx-auto flex flex-col h-full">
-        <button
-          onClick={() => navigate("/setout")}
-          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4"
-        >
-          <ArrowLeft className="h-4 w-4" /> Back
-        </button>
+        <div className="flex items-center justify-between mb-3">
+          <button
+            onClick={() => navigate("/setout")}
+            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" /> Back
+          </button>
+          <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={handleExport} disabled={exporting}>
+            {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            Export PDF
+          </Button>
+        </div>
         <h2 className="font-sans text-lg font-extrabold text-foreground mb-3">{plan.name}</h2>
 
         <div className="mb-3">
