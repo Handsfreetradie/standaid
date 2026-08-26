@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Calculator, ChevronRight, Loader2 } from "lucide-react";
+import { Calculator, ChevronRight, Loader2, Zap, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { useProfile } from "@/hooks/useData";
@@ -99,6 +99,11 @@ const Tools = () => {
   const navigate = useNavigate();
   const { data: profile } = useProfile();
   const isFree = (profile?.subscription_tier || "free") === "free";
+  const profileTrades = profile?.trade_type ? profile.trade_type.split(",").filter(Boolean) : [];
+  const isElectrical = profileTrades.includes("electrical");
+  // has_setout_addon isn't in the generated Supabase types yet (new column) —
+  // same `as any` escape hatch used elsewhere in this repo for newer columns.
+  const hasSetoutAddon = Boolean((profile as { has_setout_addon?: boolean } | null)?.has_setout_addon);
 
   // Deep-link from Learn's Scenario Walkthrough ("Work this out in the
   // Cable Sizer tool" button) — same ?q= prefill pattern Chat.tsx uses.
@@ -152,6 +157,31 @@ const Tools = () => {
           <p className="text-sm text-muted-foreground">{TOOLS.length} professional calculators</p>
         </div>
       </div>
+
+      {isElectrical && (
+        <Card
+          className="p-4 mb-5 cursor-pointer hover:border-primary/50 transition-colors active:scale-[0.99] border-primary/20 bg-primary/5"
+          onClick={() => (hasSetoutAddon ? navigate("/setout") : navigate("/profile"))}
+        >
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+              <Zap className="h-5 w-5 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-bold text-foreground text-sm flex items-center gap-1.5">
+                Rough-In Setout Assistant
+                {!hasSetoutAddon && <Lock className="h-3.5 w-3.5 text-muted-foreground" />}
+              </p>
+              <p className="text-xs text-muted-foreground truncate">
+                {hasSetoutAddon
+                  ? "Wall-locked measurements, spacing & circuit tagging for laser-up"
+                  : "Add-on — unlock wall-locked setout measurements"}
+              </p>
+            </div>
+            <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+          </div>
+        </Card>
+      )}
 
       {categories.map(cat => (
         <div key={cat} className="mb-5">

@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { ProgressProvider } from "@/hooks/useProgress";
+import { useProfile } from "@/hooks/useData";
 import AppLayout from "./components/AppLayout";
 import { AppLoader } from "./components/AppLoader";
 import Index from "./pages/Index";
@@ -19,6 +20,8 @@ import AuthConfirm from "./pages/AuthConfirm";
 import StandardsUpload from "./pages/StandardsUpload";
 import Audits from "./pages/Audits";
 import AuditDetail from "./pages/AuditDetail";
+import Setout from "./pages/Setout";
+import SetoutPlan from "./pages/SetoutPlan";
 import Onboarding from "./pages/Onboarding";
 import Legal from "./pages/Legal";
 import NotFound from "./pages/NotFound";
@@ -81,6 +84,23 @@ function AuthRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+// Rough-In Setout Assistant is electrical-only and a paid add-on on top of
+// the base subscription — both conditions must hold, independently of each
+// other, so an electrician can see the upsell before buying and a non-
+// electrical trade never sees the module at all.
+function SetoutRoute({ children }: { children: React.ReactNode }) {
+  const { data: profile, isLoading } = useProfile();
+  if (isLoading) return <AppLoader />;
+  const trades = profile?.trade_type ? profile.trade_type.split(",").filter(Boolean) : [];
+  const isElectrical = trades.includes("electrical");
+  // has_setout_addon isn't in the generated Supabase types yet (new column,
+  // types not regenerated) — same `as any` escape hatch used elsewhere in
+  // this repo for newer columns (e.g. AuditDetail.tsx).
+  const hasAddon = (profile as { has_setout_addon?: boolean } | null)?.has_setout_addon;
+  if (!isElectrical || !hasAddon) return <Navigate to="/tools" replace />;
+  return <>{children}</>;
+}
+
 const AppRoutes = () => (
   <Routes>
     <Route path="/onboarding" element={<Onboarding />} />
@@ -114,6 +134,22 @@ const AppRoutes = () => (
       <Route path="/standards/upload" element={<StandardsUpload />} />
       <Route path="/audits" element={<Audits />} />
       <Route path="/audits/:id" element={<AuditDetail />} />
+      <Route
+        path="/setout"
+        element={
+          <SetoutRoute>
+            <Setout />
+          </SetoutRoute>
+        }
+      />
+      <Route
+        path="/setout/:planId"
+        element={
+          <SetoutRoute>
+            <SetoutPlan />
+          </SetoutRoute>
+        }
+      />
     </Route>
     <Route path="*" element={<NotFound />} />
   </Routes>
