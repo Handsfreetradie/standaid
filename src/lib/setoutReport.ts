@@ -118,7 +118,10 @@ function drawPlanPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting[], c
       if (f.measurement_lock) {
         doc.setFontSize(5.5);
         doc.setTextColor(100);
-        const label = `${f.measurement_lock.wallA.distance.toFixed(1)}m / ${f.measurement_lock.wallB.distance.toFixed(1)}m`;
+        const { wallA, wallB } = f.measurement_lock;
+        const label = wallB
+          ? `${wallA.distance.toFixed(1)}m / ${wallB.distance.toFixed(1)}m`
+          : `${wallA.distance.toFixed(1)}m${f.specs.mountingHeight != null ? ` @ ${f.specs.mountingHeight.toFixed(1)}m` : ""}`;
         doc.text(label, p.x + 2, p.y + 2.2);
       }
     }
@@ -182,7 +185,9 @@ function drawMeasurementPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitti
 
   for (const f of locked) {
     const lock = f.measurement_lock!;
-    const measureText = `${wallLabel(lock.wallA.wallId)}: ${lock.wallA.distance.toFixed(2)}m, ${wallLabel(lock.wallB.wallId)}: ${lock.wallB.distance.toFixed(2)}m`;
+    const measureText = lock.wallB
+      ? `${wallLabel(lock.wallA.wallId)}: ${lock.wallA.distance.toFixed(2)}m, ${wallLabel(lock.wallB.wallId)}: ${lock.wallB.distance.toFixed(2)}m`
+      : `${wallLabel(lock.wallA.wallId)}: ${lock.wallA.distance.toFixed(2)}m${f.specs.mountingHeight != null ? `, Height: ${f.specs.mountingHeight.toFixed(2)}m` : ""}`;
     const lines = doc.splitTextToSize(measureText, CONTENT_W - 70);
     ensureSpace(Math.max(5, lines.length * 4));
 

@@ -40,9 +40,18 @@ export interface WallLock {
   distance: number;
 }
 
+// GPOs and switches lock to a single nearest wall (plus a mounting height) —
+// that's how a tradie actually measures them on site. Everything else locks
+// to its two nearest walls. See SINGLE_WALL_FITTING_TYPES.
 export interface MeasurementLock {
   wallA: WallLock;
-  wallB: WallLock;
+  wallB?: WallLock;
+}
+
+export const SINGLE_WALL_FITTING_TYPES: FittingType[] = ["gpo", "switch"];
+
+export function isSingleWallFitting(type: FittingType): boolean {
+  return SINGLE_WALL_FITTING_TYPES.includes(type);
 }
 
 export type FittingStatus = "placed" | "confirmed";

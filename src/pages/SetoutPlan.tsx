@@ -9,8 +9,8 @@ import FittingPalette from "@/components/setout/FittingPalette";
 import LayerVisibilityToggle from "@/components/setout/LayerVisibilityToggle";
 import SwitchLinksPanel from "@/components/setout/SwitchLinksPanel";
 import type { FittingType } from "@/components/setout/symbols";
-import { DEFAULT_LAYER_VISIBILITY, type FittingSpecs, type FittingStatus, type LayerVisibility, type Point } from "@/lib/setoutTypes";
-import { computeMeasurementLock } from "@/lib/setoutGeometry";
+import { DEFAULT_LAYER_VISIBILITY, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type Point } from "@/lib/setoutTypes";
+import { computeMeasurementLock, defaultHeightForType } from "@/lib/setoutGeometry";
 import { generateSetoutReportPdf } from "@/lib/setoutReport";
 import CircuitsPanel from "@/components/setout/CircuitsPanel";
 import MeasurementListPanel from "@/components/setout/MeasurementListPanel";
@@ -21,11 +21,12 @@ import {
   useUpdateSetoutFittingPosition,
   useUpdateSetoutFittingSpecs,
   useUpdateSetoutFittingStatus,
+  useUpdateSetoutFittingMeasurementLock,
   useUpdateSetoutPlanLayerVisibility,
   useToggleSwitchLink,
   useDeleteSetoutFitting,
 } from "@/hooks/useSetoutPlans";
-import { useSetoutCircuits } from "@/hooks/useSetoutCircuits";
+import { useSetoutCircuits, useAssignFittingCircuit } from "@/hooks/useSetoutCircuits";
 
 type WorkspaceMode = Extract<SetoutCanvasMode, "place-fittings" | "link-switches">;
 
@@ -41,10 +42,12 @@ const SetoutPlan = () => {
   const createFitting = useCreateSetoutFitting(planId || "");
   const updateFittingPosition = useUpdateSetoutFittingPosition(planId || "");
   const updateFittingSpecs = useUpdateSetoutFittingSpecs(planId || "");
+  const updateFittingMeasurementLock = useUpdateSetoutFittingMeasurementLock(planId || "");
   const updateLayerVisibility = useUpdateSetoutPlanLayerVisibility(planId || "");
   const toggleSwitchLink = useToggleSwitchLink(planId || "");
   const updateFittingStatus = useUpdateSetoutFittingStatus(planId || "");
   const deleteFitting = useDeleteSetoutFitting(planId || "");
+  const assignFittingCircuit = useAssignFittingCircuit(planId || "");
 
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("place-fittings");
   const [selectedType, setSelectedType] = useState<FittingType | null>(null);
@@ -72,9 +75,25 @@ const SetoutPlan = () => {
     updateFittingSpecs.mutate({ fittingId: selectedFittingId, specs });
   };
 
+  const handleUpdateMeasurementLock = (lock: MeasurementLock) => {
+    if (!selectedFittingId) return;
+    updateFittingMeasurementLock.mutate({ fittingId: selectedFittingId, measurement_lock: lock });
+  };
+
+  const handleAssignCircuit = (circuitId: string | null) => {
+    if (!selectedFittingId) return;
+    assignFittingCircuit.mutate({ fittingId: selectedFittingId, circuitId });
+  };
+
   const handlePlaceFitting = (point: Point) => {
     if (!selectedType || !plan) return;
-    createFitting.mutate({ type: selectedType, position: point, measurement_lock: computeMeasurementLock(point, plan.walls) });
+    const defaultHeight = defaultHeightForType(selectedType);
+    createFitting.mutate({
+      type: selectedType,
+      position: point,
+      measurement_lock: computeMeasurementLock(point, plan.walls, selectedType),
+      specs: defaultHeight != null ? { mountingHeight: defaultHeight } : undefined,
+    });
     // Deliberately kept selected rather than cleared — tradies place several
     // of the same fitting (e.g. a run of downlights) in a row, so forcing a
     // re-tap of the palette after every single placement would be worse UX.
@@ -84,9 +103,10 @@ const SetoutPlan = () => {
 
   const handleFittingDrag = (fittingId: string, position: Point) => {
     if (!plan) return;
+    const fittingType = fittings.find((f) => f.id === fittingId)?.type;
     // Re-lock on every manual adjustment — the whole point of the lock is
     // that it always reflects where the fitting actually is right now.
-    updateFittingPosition.mutate({ fittingId, position, measurement_lock: computeMeasurementLock(position, plan.walls) });
+    updateFittingPosition.mutate({ fittingId, position, measurement_lock: computeMeasurementLock(position, plan.walls, fittingType) });
   };
 
   const handleDeleteSelected = () => {
@@ -244,6 +264,10 @@ const SetoutPlan = () => {
             selectedFitting={selectedFitting}
             onUpdateSpecs={handleUpdateSpecs}
             onUpdateStatus={handleUpdateStatus}
+            walls={plan.walls}
+            onUpdateMeasurementLock={handleUpdateMeasurementLock}
+            circuits={circuits}
+            onAssignCircuit={handleAssignCircuit}
           />
         ) : (
           <SwitchLinksPanel fittings={fittings} activeSwitchId={activeSwitchId} onSelectSwitch={setActiveSwitchId} />

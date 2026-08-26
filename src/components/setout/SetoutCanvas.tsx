@@ -2,7 +2,7 @@ import { useRef, useState, useCallback, useMemo } from "react";
 import { Hand, Minus, Plus, MousePointer2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
-import type { Point, SetoutFitting, WallSegment, LayerVisibility } from "@/lib/setoutTypes";
+import type { Point, SetoutFitting, WallSegment, WallLock, LayerVisibility } from "@/lib/setoutTypes";
 import { snapOrthogonal, isNearFirstPoint, lightPoolRadius, poolsSignificantlyOverlap, closestPointOnWall } from "@/lib/setoutGeometry";
 
 interface ViewBox {
@@ -289,7 +289,8 @@ export default function SetoutCanvas({
     for (const f of fittings) {
       if (!f.measurement_lock) continue;
       const pos = dragPreview?.id === f.id ? dragPreview.position : f.position;
-      for (const lock of [f.measurement_lock.wallA, f.measurement_lock.wallB]) {
+      const locks = [f.measurement_lock.wallA, f.measurement_lock.wallB].filter((l): l is WallLock => !!l);
+      for (const lock of locks) {
         const wall = wallById.get(lock.wallId);
         if (!wall) continue;
         const to = closestPointOnWall(pos, wall);
@@ -436,8 +437,8 @@ export default function SetoutCanvas({
                 cx={12}
                 cy={12}
                 r={13}
-                fill={isActiveSwitch ? "hsl(var(--primary) / 0.15)" : "hsl(var(--background))"}
-                fillOpacity={isActiveSwitch ? 1 : 0.85}
+                fill={isActiveSwitch ? "hsl(var(--primary) / 0.15)" : "transparent"}
+                pointerEvents="all"
                 stroke={isActiveSwitch ? "hsl(var(--primary))" : "none"}
                 strokeWidth={isActiveSwitch ? 1.5 : 0}
               />

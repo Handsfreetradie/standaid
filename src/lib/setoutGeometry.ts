@@ -1,4 +1,5 @@
-import { distance, type Point, type WallSegment, type FittingSpecs, type MeasurementLock } from "./setoutTypes";
+import { distance, isSingleWallFitting, type Point, type WallSegment, type FittingSpecs, type MeasurementLock } from "./setoutTypes";
+import type { FittingType } from "@/components/setout/symbols";
 
 let wallIdCounter = 0;
 function nextWallId(): string {
@@ -70,6 +71,17 @@ export const DEFAULT_BEAM_ANGLE = 36;
 export const DEFAULT_MOUNTING_HEIGHT = 2.4;
 export const BEAM_ANGLE_OPTIONS = [24, 36, 60, 90];
 
+// Standard Australian trade heights, floor to fitting centre — both editable
+// per-fitting via specs.mountingHeight, same field the downlight beam calc uses.
+export const DEFAULT_GPO_HEIGHT = 0.3;
+export const DEFAULT_SWITCH_HEIGHT = 1.2;
+
+export function defaultHeightForType(type: FittingType): number | null {
+  if (type === "gpo") return DEFAULT_GPO_HEIGHT;
+  if (type === "switch") return DEFAULT_SWITCH_HEIGHT;
+  return null;
+}
+
 // Indicative light-pool radius on the floor, from beam angle and mounting
 // height — basic trig (radius = height * tan(halfBeamAngle)), NOT a
 // photometric/lux calculation. Real coverage depends on reflectance,
@@ -110,16 +122,22 @@ export function perpendicularDistanceToWall(p: Point, wall: WallSegment): number
   return distance(p, closestPointOnWall(p, wall));
 }
 
-// Auto-locks a fitting to its two nearest walls (by perpendicular distance)
-// — this is what gets read off with a laser on site, so it must be
-// recomputed any time the fitting moves ("re-lock on any manual adjustment").
-// Picking the two walls a tradie would naturally choose (which two happen to
-// be closest) is the simple, predictable default; manual override of which
-// walls to lock to is a later enhancement.
-export function computeMeasurementLock(position: Point, walls: WallSegment[]): MeasurementLock | null {
-  if (walls.length < 2) return null;
+// Auto-locks a fitting to its nearest wall(s) (by perpendicular distance) —
+// this is what gets read off with a laser on site, so it must be recomputed
+// any time the fitting moves ("re-lock on any manual adjustment"). GPOs and
+// switches lock to a single nearest wall (plus their mounting height);
+// everything else locks to its two nearest walls. Picking whichever wall(s)
+// happen to be closest is the simple, predictable default; manual override
+// of which wall to lock to is a later enhancement — for now the tradie can
+// hand-edit the resulting distance instead.
+export function computeMeasurementLock(position: Point, walls: WallSegment[], fittingType?: FittingType): MeasurementLock | null {
+  if (walls.length === 0) return null;
   const ranked = walls
     .map((wall) => ({ wallId: wall.id, distance: perpendicularDistanceToWall(position, wall) }))
     .sort((a, b) => a.distance - b.distance);
+  if (fittingType && isSingleWallFitting(fittingType)) {
+    return { wallA: ranked[0] };
+  }
+  if (ranked.length < 2) return null;
   return { wallA: ranked[0], wallB: ranked[1] };
 }

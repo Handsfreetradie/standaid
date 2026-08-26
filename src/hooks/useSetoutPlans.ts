@@ -174,7 +174,7 @@ export function useCreateSetoutFitting(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (input: { type: FittingType; position: Point; measurement_lock?: MeasurementLock | null }) => {
+    mutationFn: async (input: { type: FittingType; position: Point; measurement_lock?: MeasurementLock | null; specs?: FittingSpecs }) => {
       const category: FittingCategory = CATEGORY_FOR_TYPE[input.type];
       const { data, error } = await sb
         .from("setout_fittings")
@@ -183,7 +183,7 @@ export function useCreateSetoutFitting(planId: string) {
           type: input.type,
           position: input.position,
           category,
-          specs: {},
+          specs: input.specs ?? {},
           measurement_lock: input.measurement_lock ?? null,
         })
         .select()
@@ -240,6 +240,28 @@ export function useUpdateSetoutFittingPosition(planId: string) {
       const { error } = await sb
         .from("setout_fittings")
         .update({ position: input.position, measurement_lock: input.measurement_lock })
+        .eq("id", input.fittingId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
+    },
+  });
+}
+
+// Hand-entered correction to a fitting's locked measurement(s) — e.g. the
+// laser on site reads slightly different from what the drawn plan implies.
+// Does NOT touch position; a later drag still re-locks from geometry and
+// overwrites this, which is expected since moving the fitting changes the
+// real distance anyway.
+export function useUpdateSetoutFittingMeasurementLock(planId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: { fittingId: string; measurement_lock: MeasurementLock }) => {
+      const { error } = await sb
+        .from("setout_fittings")
+        .update({ measurement_lock: input.measurement_lock })
         .eq("id", input.fittingId);
       if (error) throw error;
     },

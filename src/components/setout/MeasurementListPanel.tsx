@@ -33,7 +33,9 @@ export default function MeasurementListPanel({ fittings, walls }: MeasurementLis
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-foreground">{FITTING_LABELS[f.type]}</p>
               <p className="text-xs text-muted-foreground">
-                {wallLabel(lock.wallA.wallId)}: {lock.wallA.distance.toFixed(2)}m · {wallLabel(lock.wallB.wallId)}: {lock.wallB.distance.toFixed(2)}m
+                {wallLabel(lock.wallA.wallId)}: {lock.wallA.distance.toFixed(2)}m
+                {lock.wallB && ` · ${wallLabel(lock.wallB.wallId)}: ${lock.wallB.distance.toFixed(2)}m`}
+                {!lock.wallB && f.specs.mountingHeight != null && ` · Height: ${f.specs.mountingHeight.toFixed(2)}m`}
               </p>
             </div>
             {f.status === "confirmed" && (
