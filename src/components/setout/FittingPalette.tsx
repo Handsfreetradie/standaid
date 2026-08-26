@@ -1,14 +1,40 @@
 import { useState } from "react";
-import { Trash2, Check, RotateCcw } from "lucide-react";
+import { Trash2, Check, RotateCcw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { FITTING_LABELS, FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
 import { BEAM_ANGLE_OPTIONS, DEFAULT_BEAM_ANGLE, DEFAULT_MOUNTING_HEIGHT, defaultHeightForType } from "@/lib/setoutGeometry";
-import { isSingleWallFitting, type FittingSpecs, type FittingStatus, type MeasurementLock, type SetoutCircuit, type SetoutFitting, type WallSegment } from "@/lib/setoutTypes";
+import {
+  CATEGORY_FOR_TYPE,
+  FITTING_CATEGORY_ORDER,
+  LAYER_LABELS,
+  isSingleWallFitting,
+  type FittingSpecs,
+  type FittingStatus,
+  type MeasurementLock,
+  type SetoutCircuit,
+  type SetoutFitting,
+  type WallSegment,
+} from "@/lib/setoutTypes";
 
 const FITTING_TYPES = Object.keys(FITTING_SYMBOLS) as FittingType[];
+const TYPES_BY_CATEGORY = FITTING_CATEGORY_ORDER.map((category) => ({
+  category,
+  types: FITTING_TYPES.filter((type) => CATEGORY_FOR_TYPE[type] === category),
+})).filter((group) => group.types.length > 0);
+
+const DOWNLIGHT_SIZE_OPTIONS = [90, 70, 50] as const;
+const GPO_VARIANT_OPTIONS: { value: NonNullable<FittingSpecs["gpoVariant"]>; label: string }[] = [
+  { value: "standard", label: "Standard" },
+  { value: "external", label: "External" },
+  { value: "dishwasher", label: "Dishwasher" },
+  { value: "microwave", label: "Microwave" },
+];
+// Fitting types that use the shared single/double glyph convention (GPO,
+// para flood, 1200mm fluoro).
+const COUNT_VARIANT_TYPES: FittingType[] = ["gpo", "para_flood", "fluoro_1200"];
 
 // A plain controlled <input> whose value prop comes straight from the DB
 // fights the user mid-keystroke: every onChange fires a mutation, and the
@@ -115,6 +141,27 @@ const FittingPalette = ({
           {selectedFitting?.type === "downlight" && onUpdateSpecs && (
             <div className="space-y-2 border-t border-destructive/10 pt-2">
               <div>
+                <p className="text-[11px] font-medium text-muted-foreground mb-1">Size</p>
+                <div className="flex gap-1.5">
+                  {DOWNLIGHT_SIZE_OPTIONS.map((sizeMm) => {
+                    const active = (selectedFitting.specs.downlightSizeMm ?? 90) === sizeMm;
+                    return (
+                      <button
+                        key={sizeMm}
+                        type="button"
+                        onClick={() => onUpdateSpecs({ ...selectedFitting.specs, downlightSizeMm: sizeMm })}
+                        className={cn(
+                          "rounded-lg border px-2 py-1 text-[11px] font-medium",
+                          active ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"
+                        )}
+                      >
+                        {sizeMm}mm
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
                 <p className="text-[11px] font-medium text-muted-foreground mb-1">Beam angle</p>
                 <div className="flex gap-1.5">
                   {BEAM_ANGLE_OPTIONS.map((angle) => {
@@ -147,6 +194,54 @@ const FittingPalette = ({
                   initialValue={selectedFitting.specs.mountingHeight ?? DEFAULT_MOUNTING_HEIGHT}
                   onCommit={(value) => onUpdateSpecs({ ...selectedFitting.specs, mountingHeight: value || DEFAULT_MOUNTING_HEIGHT })}
                 />
+              </div>
+            </div>
+          )}
+
+          {selectedFitting?.type === "gpo" && onUpdateSpecs && (
+            <div className="border-t border-destructive/10 pt-2">
+              <p className="text-[11px] font-medium text-muted-foreground mb-1">Variant</p>
+              <div className="flex flex-wrap gap-1.5">
+                {GPO_VARIANT_OPTIONS.map(({ value, label }) => {
+                  const active = (selectedFitting.specs.gpoVariant ?? "standard") === value;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => onUpdateSpecs({ ...selectedFitting.specs, gpoVariant: value })}
+                      className={cn(
+                        "rounded-lg border px-2 py-1 text-[11px] font-medium",
+                        active ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"
+                      )}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {selectedFitting && COUNT_VARIANT_TYPES.includes(selectedFitting.type) && onUpdateSpecs && (
+            <div className="border-t border-destructive/10 pt-2">
+              <p className="text-[11px] font-medium text-muted-foreground mb-1">Single / double</p>
+              <div className="flex gap-1.5">
+                {([1, 2] as const).map((count) => {
+                  const active = (selectedFitting.specs.count ?? 1) === count;
+                  return (
+                    <button
+                      key={count}
+                      type="button"
+                      onClick={() => onUpdateSpecs({ ...selectedFitting.specs, count })}
+                      className={cn(
+                        "rounded-lg border px-2 py-1 text-[11px] font-medium",
+                        active ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"
+                      )}
+                    >
+                      {count === 1 ? "Single" : "Double"}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -235,27 +330,52 @@ const FittingPalette = ({
         </div>
       )}
 
-      <div className="flex gap-2 overflow-x-auto pb-1 md:flex-wrap md:overflow-visible">
-        {FITTING_TYPES.map((type) => {
-          const Icon = FITTING_SYMBOLS[type];
-          const isSelected = selectedType === type;
-          return (
-            <button
-              key={type}
-              type="button"
-              onClick={() => onSelectType(isSelected ? null : type)}
-              className={cn(
-                "flex flex-shrink-0 flex-col items-center gap-1 rounded-xl border px-3 py-2.5 min-w-[72px] transition-colors",
-                isSelected
-                  ? "border-primary/30 bg-primary/10 text-primary"
-                  : "border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted/50"
+      <div className="flex items-center gap-1.5">
+        <Select value={selectedType ?? undefined} onValueChange={(value) => onSelectType(value as FittingType)}>
+          <SelectTrigger className="h-11 flex-1">
+            <SelectValue placeholder="Choose a fitting to place">
+              {selectedType && (
+                <span className="flex items-center gap-2">
+                  {(() => {
+                    const Icon = FITTING_SYMBOLS[selectedType];
+                    return <Icon size={16} className="text-primary flex-shrink-0" strokeWidth={1.5} />;
+                  })()}
+                  {FITTING_LABELS[selectedType]}
+                </span>
               )}
-            >
-              <Icon size={22} className={isSelected ? "text-primary" : "text-foreground"} strokeWidth={isSelected ? 2 : 1.5} />
-              <span className="text-[10px] font-medium leading-tight text-center">{FITTING_LABELS[type]}</span>
-            </button>
-          );
-        })}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {TYPES_BY_CATEGORY.map(({ category, types }) => (
+              <SelectGroup key={category}>
+                <SelectLabel>{LAYER_LABELS[category]}</SelectLabel>
+                {types.map((type) => {
+                  const Icon = FITTING_SYMBOLS[type];
+                  return (
+                    <SelectItem key={type} value={type}>
+                      <span className="flex items-center gap-2">
+                        <Icon size={16} className="text-foreground flex-shrink-0" strokeWidth={1.5} />
+                        {FITTING_LABELS[type]}
+                      </span>
+                    </SelectItem>
+                  );
+                })}
+              </SelectGroup>
+            ))}
+          </SelectContent>
+        </Select>
+        {selectedType && (
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="h-11 w-11 flex-shrink-0 text-muted-foreground"
+            onClick={() => onSelectType(null)}
+            aria-label="Clear selected fitting type"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        )}
       </div>
     </div>
   );

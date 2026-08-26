@@ -1,14 +1,54 @@
 import type { FittingType } from "@/components/setout/symbols";
 
-export type FittingCategory = "lighting" | "power" | "switches" | "data" | "safety";
+export type FittingCategory = "lighting" | "power" | "switches" | "data" | "safety" | "heatCool" | "ductedVacuum";
 
 export const CATEGORY_FOR_TYPE: Record<FittingType, FittingCategory> = {
+  // Lighting
   downlight: "lighting",
-  gpo: "power",
-  switch: "switches",
-  smoke_detector: "safety",
-  data: "data",
+  batten_holder: "lighting",
+  wall_batten_holder: "lighting",
+  wall_stair_light: "lighting",
+  external_light: "lighting",
+  heater_fan_light_2: "lighting",
+  heater_fan_light_4: "lighting",
+  junction_box: "lighting",
+  ceiling_fan: "lighting",
+  ceiling_fan_light: "lighting",
+  para_flood: "lighting",
+  round_fluoro: "lighting",
+  fluoro_1200: "lighting",
+  motion_sensor: "lighting",
   exhaust_fan: "safety",
+  exhaust_fan_light: "lighting",
+  pendant: "lighting",
+  // Switches
+  switch: "switches",
+  // Power
+  gpo: "power",
+  tv_point: "power",
+  phone_point: "power",
+  meter_box: "power",
+  nbn_box: "power",
+  ubo_rhood: "power",
+  // Data
+  data: "data",
+  // Safety
+  smoke_detector: "safety",
+  // Heat/cool
+  heating_duct: "heatCool",
+  ducted_heating_unit: "heatCool",
+  heat_cool_duct: "heatCool",
+  rev_cycle_unit: "heatCool",
+  thermostat: "heatCool",
+  return_air: "heatCool",
+  evap_cooling_duct: "heatCool",
+  evap_cooling_unit: "heatCool",
+  ac_condenser: "heatCool",
+  ac_head_unit: "heatCool",
+  cooling_unit: "heatCool",
+  // Ducted vacuum
+  vacuum_unit: "ductedVacuum",
+  vacuum_outlet: "ductedVacuum",
 };
 
 export interface Point {
@@ -29,10 +69,17 @@ export interface ScaleCalibration {
   realDistanceMetres: number;
 }
 
+export type GpoVariant = "standard" | "external" | "dishwasher" | "microwave";
+
 export interface FittingSpecs {
   beamAngle?: number;
   mountingHeight?: number;
   wattage?: number;
+  // Single/double — shared by GPO, para flood, and 1200mm fluoro (same
+  // single-vs-double glyph convention across all three).
+  count?: 1 | 2;
+  gpoVariant?: GpoVariant;
+  downlightSizeMm?: 50 | 70 | 90;
 }
 
 export interface WallLock {
@@ -79,6 +126,8 @@ export interface LayerVisibility {
   switches: boolean;
   data: boolean;
   safety: boolean;
+  heatCool: boolean;
+  ductedVacuum: boolean;
   coverage: boolean;
   measurements: boolean;
 }
@@ -89,6 +138,8 @@ export const DEFAULT_LAYER_VISIBILITY: LayerVisibility = {
   switches: true,
   data: true,
   safety: true,
+  heatCool: true,
+  ductedVacuum: true,
   coverage: false,
   measurements: true,
 };
@@ -99,6 +150,8 @@ export const LAYER_LABELS: Record<keyof LayerVisibility, string> = {
   switches: "Switches",
   data: "Data",
   safety: "Safety",
+  heatCool: "Heat/Cool",
+  ductedVacuum: "Ducted vacuum",
   coverage: "Coverage overlay",
   measurements: "Measurements",
 };
@@ -115,6 +168,12 @@ export interface SetoutPlan {
   created_at: string;
   updated_at: string;
 }
+
+// Display order for category-grouped UI (fitting picker dropdown, PDF
+// legend) — mirrors the reference sheet's grouping (Lighting, Heat/Cool,
+// Power, Ducted Vacuum) with Switches/Data/Safety, which this app tracks
+// as their own categories, slotted in alongside.
+export const FITTING_CATEGORY_ORDER: FittingCategory[] = ["lighting", "switches", "power", "data", "safety", "heatCool", "ductedVacuum"];
 
 export interface SetoutCircuit {
   id: string;

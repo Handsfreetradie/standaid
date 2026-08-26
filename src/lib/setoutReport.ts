@@ -4,7 +4,7 @@
 import jsPDF from "jspdf";
 import { FITTING_LABELS } from "@/components/setout/symbols";
 import type { FittingType } from "@/components/setout/symbols";
-import type { Point, SetoutCircuit, SetoutFitting, SetoutPlan } from "@/lib/setoutTypes";
+import { CATEGORY_FOR_TYPE, FITTING_CATEGORY_ORDER, LAYER_LABELS, type Point, type SetoutCircuit, type SetoutFitting, type SetoutPlan } from "@/lib/setoutTypes";
 
 const PAGE_W = 210; // A4 mm
 const PAGE_H = 297;
@@ -12,12 +12,52 @@ const MARGIN = 15;
 const CONTENT_W = PAGE_W - MARGIN * 2;
 
 const CODE_PREFIX: Record<FittingType, string> = {
+  // Lighting
   downlight: "DL",
-  gpo: "GPO",
-  switch: "SW",
-  smoke_detector: "SD",
-  data: "DATA",
+  batten_holder: "BH",
+  wall_batten_holder: "WBH",
+  wall_stair_light: "WSL",
+  external_light: "EXL",
+  heater_fan_light_2: "HFL2",
+  heater_fan_light_4: "HFL4",
+  junction_box: "JB",
+  ceiling_fan: "CF",
+  ceiling_fan_light: "CFL",
+  para_flood: "PF",
+  round_fluoro: "RF",
+  fluoro_1200: "FL12",
+  motion_sensor: "MS",
   exhaust_fan: "EF",
+  exhaust_fan_light: "EFL",
+  pendant: "PEN",
+  // Switches
+  switch: "SW",
+  // Power
+  gpo: "GPO",
+  tv_point: "TV",
+  phone_point: "TEL",
+  meter_box: "MB",
+  nbn_box: "NBN",
+  ubo_rhood: "UBO",
+  // Data
+  data: "DATA",
+  // Safety
+  smoke_detector: "SD",
+  // Heat/cool
+  heating_duct: "HD",
+  ducted_heating_unit: "DHU",
+  heat_cool_duct: "HCD",
+  rev_cycle_unit: "RCU",
+  thermostat: "TSTAT",
+  return_air: "RA",
+  evap_cooling_duct: "ECD",
+  evap_cooling_unit: "ECU",
+  ac_condenser: "ACC",
+  ac_head_unit: "ACH",
+  cooling_unit: "CU",
+  // Ducted vacuum
+  vacuum_unit: "DV",
+  vacuum_outlet: "DVO",
 };
 
 // Numbers fittings per-type in array order, e.g. first downlight = "DL1".
@@ -66,9 +106,11 @@ function drawPlanPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting[], c
   doc.text(disclaimerLines, MARGIN, y);
   y += disclaimerLines.length * 3.6 + 4;
 
-  // Legend height depends on fitting count so the plan drawing gets the
-  // rest of the page rather than a fixed, often-wasted, split.
-  const legendRows = Math.max(fittings.length, 1);
+  // Legend height depends on fitting count (plus one header row per
+  // category group actually in use) so the plan drawing gets the rest of
+  // the page rather than a fixed, often-wasted, split.
+  const usedCategories = new Set(fittings.map((f) => CATEGORY_FOR_TYPE[f.type]));
+  const legendRows = Math.max(fittings.length, 1) + usedCategories.size;
   const legendH = 10 + legendRows * 3.6;
   const planTop = y;
   const planBottom = PAGE_H - MARGIN - legendH - 4;
@@ -140,12 +182,20 @@ function drawPlanPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting[], c
     doc.setTextColor(120);
     doc.text("No fittings placed yet.", MARGIN, ly);
   } else {
-    for (const f of fittings) {
-      const code = codes.get(f.id) ?? "?";
-      const status = f.status === "confirmed" ? " (confirmed)" : "";
-      doc.setTextColor(60);
-      doc.text(`${code} — ${FITTING_LABELS[f.type]}${status}`, MARGIN, ly);
+    for (const category of FITTING_CATEGORY_ORDER) {
+      const inGroup = fittings.filter((f) => CATEGORY_FOR_TYPE[f.type] === category);
+      if (inGroup.length === 0) continue;
+      doc.setFontSize(7);
+      doc.setTextColor(20);
+      doc.text(LAYER_LABELS[category], MARGIN, ly);
       ly += 3.6;
+      doc.setTextColor(60);
+      for (const f of inGroup) {
+        const code = codes.get(f.id) ?? "?";
+        const status = f.status === "confirmed" ? " (confirmed)" : "";
+        doc.text(`${code} — ${FITTING_LABELS[f.type]}${status}`, MARGIN + 3, ly);
+        ly += 3.6;
+      }
     }
   }
 }
@@ -231,8 +281,11 @@ function drawCableRunPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting[
       doc.text("Not linked to anything yet", MARGIN + 4, y);
       y += 5;
     } else {
-      // Same N-way derivation as SwitchLinksPanel.tsx: count how many
-      // switches list this target in their own linked_to.
+      // linked_to is a loop-in chain in tap order (switch -> first light ->
+      // second light -> ...), not a set of separate home-runs — same
+      // topology as SetoutCanvas.tsx's switchLinks and SwitchLinksPanel.tsx.
+      // N-way derivation: count how many switches list this target in their
+      // own linked_to.
       const parts = sw.linked_to
         .map((id) => fittings.find((f) => f.id === id))
         .filter((f): f is SetoutFitting => !!f)
@@ -241,7 +294,7 @@ function drawCableRunPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting[
           const ways = switches.filter((s) => s.linked_to.includes(target.id)).length;
           return ways > 1 ? `${code} (${ways}-way)` : code;
         });
-      const lines = doc.splitTextToSize(parts.join(", "), CONTENT_W - 4);
+      const lines = doc.splitTextToSize(`${codes.get(sw.id) ?? "?"} -> ${parts.join(" -> ")}`, CONTENT_W - 4);
       ensureSpace(lines.length * 4.2);
       doc.text(lines, MARGIN + 4, y);
       y += lines.length * 4.2;

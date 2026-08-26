@@ -266,17 +266,25 @@ export default function SetoutCanvas({
     });
   }, [fittings, layerVisibility?.coverage, dragPreview]);
 
+  // A switch's linked_to is a loop-in chain, not a star — the cable runs
+  // switch -> first light -> second light -> ... in tap order, same as a
+  // real 2-core-and-earth loop threaded through each fitting, not a
+  // separate home-run from the switch to every light.
   const switchLinks = useMemo(() => {
     if (layerVisibility && !layerVisibility.switches) return [];
     const switches = fittings.filter((f) => f.type === "switch");
     const links: { key: string; switchPos: Point; targetPos: Point; active: boolean }[] = [];
     for (const sw of switches) {
       const swPos = dragPreview?.id === sw.id ? dragPreview.position : sw.position;
+      let fromPos = swPos;
+      let fromId = sw.id;
       for (const targetId of sw.linked_to) {
         const target = fittings.find((f) => f.id === targetId);
         if (!target) continue;
         const targetPos = dragPreview?.id === target.id ? dragPreview.position : target.position;
-        links.push({ key: `${sw.id}-${targetId}`, switchPos: swPos, targetPos, active: sw.id === linkActiveSwitchId });
+        links.push({ key: `${fromId}-${targetId}`, switchPos: fromPos, targetPos, active: sw.id === linkActiveSwitchId });
+        fromPos = targetPos;
+        fromId = targetId;
       }
     }
     return links;
@@ -423,6 +431,19 @@ export default function SetoutCanvas({
           const selected = selectedFittingId === f.id;
           const isActiveSwitch = mode === "link-switches" && f.id === linkActiveSwitchId;
           const isLinkTarget = mode === "link-switches" && !!linkActiveSwitchId;
+          // GPO/para-flood/1200-fluoro carry a `count` spec and GPO also a
+          // `variant`; downlight carries `downlightSizeMm`. The shared
+          // FITTING_SYMBOLS map is typed to the common SetoutSymbolProps
+          // only, so these per-type extras are passed as a loosely-typed
+          // spread here rather than threading a discriminated prop type
+          // through the whole map — same "as any" escape hatch already used
+          // elsewhere in this repo for similar type-widening spots.
+          const symbolExtraProps: Record<string, unknown> =
+            f.type === "gpo" || f.type === "para_flood" || f.type === "fluoro_1200"
+              ? { count: f.specs.count ?? 1, ...(f.type === "gpo" ? { variant: f.specs.gpoVariant ?? "standard" } : {}) }
+              : f.type === "downlight"
+                ? { sizeMm: f.specs.downlightSizeMm ?? 90 }
+                : {};
           return (
             <g
               key={f.id}
@@ -442,7 +463,12 @@ export default function SetoutCanvas({
                 stroke={isActiveSwitch ? "hsl(var(--primary))" : "none"}
                 strokeWidth={isActiveSwitch ? 1.5 : 0}
               />
-              <Icon size={24} className={selected || isActiveSwitch ? "text-primary" : "text-foreground"} strokeWidth={selected || isActiveSwitch ? 2 : 1.5} />
+              <Icon
+                size={24}
+                className={selected || isActiveSwitch ? "text-primary" : "text-foreground"}
+                strokeWidth={selected || isActiveSwitch ? 2 : 1.5}
+                {...symbolExtraProps}
+              />
               {f.status === "confirmed" && (
                 <g transform="translate(15 -3)">
                   <circle r={5} fill="hsl(var(--primary))" />

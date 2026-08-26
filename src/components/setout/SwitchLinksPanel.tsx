@@ -1,4 +1,4 @@
-import { Cable } from "lucide-react";
+import { ArrowRight, Cable } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { FITTING_LABELS, FITTING_SYMBOLS } from "@/components/setout/symbols";
@@ -41,15 +41,19 @@ export default function SwitchLinksPanel({ fittings, activeSwitchId, onSelectSwi
             {links.length === 0 ? (
               <p className="text-xs text-muted-foreground">Not linked to anything yet</p>
             ) : (
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap items-center gap-1">
+                <span className="text-[10px] font-medium text-muted-foreground">Switch</span>
                 {links.map((target) => {
                   const Icon = FITTING_SYMBOLS[target.type];
                   const ways = wayCountFor(target.id, switches);
                   return (
-                    <span key={target.id} className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/50 px-1.5 py-1 text-[11px] text-foreground">
-                      <Icon size={14} className="text-primary" strokeWidth={1.5} />
-                      {FITTING_LABELS[target.type]}
-                      {ways > 1 && <span className="text-primary font-medium">· {ways}-way</span>}
+                    <span key={target.id} className="contents">
+                      <ArrowRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                      <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/50 px-1.5 py-1 text-[11px] text-foreground">
+                        <Icon size={14} className="text-primary" strokeWidth={1.5} />
+                        {FITTING_LABELS[target.type]}
+                        {ways > 1 && <span className="text-primary font-medium">· {ways}-way</span>}
+                      </span>
                     </span>
                   );
                 })}
