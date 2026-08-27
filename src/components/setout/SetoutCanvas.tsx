@@ -711,16 +711,18 @@ export default function SetoutCanvas({
                 {segments.map((seg, i) => (
                   <g key={i}>
                     {erasable && (
-                      // Fatter transparent hit-stroke so a thin wall line is
-                      // still easy to tap accurately on a phone screen —
-                      // same pattern as the door/window drag hit-stroke.
+                      // Much fatter transparent hit-stroke than the
+                      // door/window one (22px) — a wall is a bare line with
+                      // no glyph to aim at, and confirmed too hard to tap
+                      // accurately on a phone at 22px. 56px gives a real
+                      // fingertip-sized target either side of the line.
                       <line
                         x1={seg.from.x}
                         y1={seg.from.y}
                         x2={seg.to.x}
                         y2={seg.to.y}
                         stroke="transparent"
-                        strokeWidth={22 * px2scene()}
+                        strokeWidth={56 * px2scene()}
                         vectorEffect="non-scaling-stroke"
                         pointerEvents="stroke"
                       />
