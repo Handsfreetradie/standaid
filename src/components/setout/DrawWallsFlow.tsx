@@ -93,7 +93,7 @@ export default function DrawWallsFlow({ plan, onBack, onComplete }: DrawWallsFlo
       <p className="text-xs text-muted-foreground mb-4">Type the tape-measure length of each wall, in metres. The shape redraws true to scale.</p>
 
       <div className="flex-1 min-h-[420px] mb-4">
-        <SetoutCanvas walls={previewWalls} mode="view" />
+        <SetoutCanvas walls={previewWalls} wallThickness={plan.wall_thickness} mode="view" />
       </div>
 
       <div className="grid grid-cols-2 gap-3 mb-6 max-h-48 overflow-y-auto">

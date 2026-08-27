@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./useAuth";
 import {
   DEFAULT_LAYER_VISIBILITY,
+  DEFAULT_WALL_THICKNESS,
   type SetoutFitting,
   type SetoutPlan,
   type WallSegment,
@@ -14,6 +15,7 @@ import {
   type FittingSpecs,
   type MeasurementLock,
   type WallOpening,
+  type WallThickness,
   CATEGORY_FOR_TYPE,
   gangsFor,
 } from "@/lib/setoutTypes";
@@ -90,6 +92,7 @@ export function useCreateSetoutPlan() {
           source_type: input.source_type,
           walls: [],
           layer_visibility: DEFAULT_LAYER_VISIBILITY,
+          wall_thickness: DEFAULT_WALL_THICKNESS,
         })
         .select()
         .single();
@@ -145,6 +148,24 @@ export function useUpdateSetoutPlanLayerVisibility(planId: string) {
       const { error } = await sb
         .from("setout_plans")
         .update({ layer_visibility: layerVisibility })
+        .eq("id", planId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["setout_plan", planId] });
+      queryClient.invalidateQueries({ queryKey: ["setout_plans"] });
+    },
+  });
+}
+
+export function useUpdateSetoutPlanWallThickness(planId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (wallThickness: WallThickness) => {
+      const { error } = await sb
+        .from("setout_plans")
+        .update({ wall_thickness: wallThickness })
         .eq("id", planId);
       if (error) throw error;
     },

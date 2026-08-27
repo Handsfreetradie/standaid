@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download, Undo2, PencilRuler, Image as ImageIcon, EyeOff } from "lucide-react";
+import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download, Undo2, PencilRuler, Ruler, Image as ImageIcon, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import SetoutCanvas, { type SetoutCanvasMode } from "@/components/setout/SetoutCanvas";
@@ -27,6 +30,7 @@ import {
   useUpdateSetoutFittingStatus,
   useUpdateSetoutFittingMeasurementLock,
   useUpdateSetoutPlanLayerVisibility,
+  useUpdateSetoutPlanWallThickness,
   useToggleGangLink,
   useAddSwitchGang,
   useRemoveSwitchGang,
@@ -61,6 +65,7 @@ const SetoutPlan = () => {
   const updateFittingSpecs = useUpdateSetoutFittingSpecs(planId || "");
   const updateFittingMeasurementLock = useUpdateSetoutFittingMeasurementLock(planId || "");
   const updateLayerVisibility = useUpdateSetoutPlanLayerVisibility(planId || "");
+  const updateWallThickness = useUpdateSetoutPlanWallThickness(planId || "");
   const toggleGangLink = useToggleGangLink(planId || "");
   const addSwitchGang = useAddSwitchGang(planId || "");
   const removeSwitchGang = useRemoveSwitchGang(planId || "");
@@ -89,6 +94,27 @@ const SetoutPlan = () => {
       layerSyncedRef.current = true;
     }
   }, [plan]);
+
+  // Kept in millimetres locally (the unit a tradie actually thinks in) and
+  // converted to/from the plan's metre-based wall_thickness only at the
+  // edges — synced once on load same as layerVisibility above, so it
+  // doesn't get clobbered by a refetch while mid-edit.
+  const [wallThicknessMm, setWallThicknessMm] = useState({ exterior: 230, interior: 110 });
+  const wallThicknessSyncedRef = useRef(false);
+
+  useEffect(() => {
+    if (plan && !wallThicknessSyncedRef.current) {
+      setWallThicknessMm({
+        exterior: Math.round(plan.wall_thickness.exterior * 1000),
+        interior: Math.round(plan.wall_thickness.interior * 1000),
+      });
+      wallThicknessSyncedRef.current = true;
+    }
+  }, [plan]);
+
+  const commitWallThickness = (next: { exterior: number; interior: number }) => {
+    updateWallThickness.mutate({ exterior: next.exterior / 1000, interior: next.interior / 1000 });
+  };
 
   // Reference image behind the traced walls/fittings — the original
   // uploaded plan, kept around in storage since import (CalibrationImportFlow.tsx)
@@ -425,6 +451,50 @@ const SetoutPlan = () => {
               <PencilRuler className="h-3.5 w-3.5" />
               Edit walls
             </Button>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8 gap-1.5">
+                  <Ruler className="h-3.5 w-3.5" />
+                  Wall thickness
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64" align="end">
+                <p className="text-xs font-semibold text-foreground mb-1">Wall line thickness</p>
+                <p className="text-[11px] text-muted-foreground mb-3">
+                  How thick each wall draws on the plan and PDF export — set it to match the real construction.
+                </p>
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="ext-wall-thickness" className="text-xs">Exterior walls (mm)</Label>
+                    <Input
+                      id="ext-wall-thickness"
+                      type="number"
+                      inputMode="numeric"
+                      min="10"
+                      step="5"
+                      value={wallThicknessMm.exterior}
+                      onChange={(e) => setWallThicknessMm((prev) => ({ ...prev, exterior: Number(e.target.value) || prev.exterior }))}
+                      onBlur={() => commitWallThickness(wallThicknessMm)}
+                      className="h-9"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="int-wall-thickness" className="text-xs">Interior walls (mm)</Label>
+                    <Input
+                      id="int-wall-thickness"
+                      type="number"
+                      inputMode="numeric"
+                      min="10"
+                      step="5"
+                      value={wallThicknessMm.interior}
+                      onChange={(e) => setWallThicknessMm((prev) => ({ ...prev, interior: Number(e.target.value) || prev.interior }))}
+                      onBlur={() => commitWallThickness(wallThicknessMm)}
+                      className="h-9"
+                    />
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
             <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={handleUndo} disabled={undoStack.length === 0}>
               <Undo2 className="h-3.5 w-3.5" />
               Undo
@@ -454,6 +524,7 @@ const SetoutPlan = () => {
               <SetoutCanvas
                 backgroundImage={showBackgroundReference ? (backgroundImage ?? undefined) : undefined}
                 walls={plan.walls}
+                wallThickness={{ exterior: wallThicknessMm.exterior / 1000, interior: wallThicknessMm.interior / 1000 }}
                 openings={plan.openings}
                 fittings={fittings}
                 mode={pickingMeasurementSlot ? "pick-measurement-ref" : workspaceMode}

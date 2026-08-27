@@ -104,6 +104,7 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
       <div className="flex-1 min-h-[480px] mb-4">
         <SetoutCanvas
           walls={walls}
+          wallThickness={plan.wall_thickness}
           openings={openings}
           mode={tool === "interior" ? "sketch-interior-wall" : "place-opening"}
           interiorWallDraftStart={draftStart}

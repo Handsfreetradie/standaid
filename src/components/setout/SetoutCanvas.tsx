@@ -8,11 +8,13 @@ import {
   gangsFor,
   isSingleWallFitting,
   symbolExtraPropsFor,
+  DEFAULT_WALL_THICKNESS,
   type Point,
   type SetoutCircuit,
   type SetoutFitting,
   type WallSegment,
   type WallOpening,
+  type WallThickness,
   type MeasurementRef,
   type LayerVisibility,
 } from "@/lib/setoutTypes";
@@ -63,6 +65,11 @@ export type SetoutCanvasMode =
 interface SetoutCanvasProps {
   backgroundImage?: BackgroundImage;
   walls: WallSegment[];
+  // Real thickness (metres) drawn straight into the wall line's stroke
+  // width in scene units — deliberately not vector-effect non-scaling like
+  // every other line here, so a wall genuinely reads thicker/thinner as the
+  // tradie zooms, the same way it would on a printed scaled drawing.
+  wallThickness?: WallThickness;
   openings?: WallOpening[];
   fittings?: SetoutFitting[];
   mode: SetoutCanvasMode;
@@ -146,6 +153,7 @@ function initialViewBox(backgroundImage?: BackgroundImage, walls?: WallSegment[]
 export default function SetoutCanvas({
   backgroundImage,
   walls,
+  wallThickness = DEFAULT_WALL_THICKNESS,
   openings = [],
   fittings = [],
   mode,
@@ -670,8 +678,7 @@ export default function SetoutCanvas({
                   x2={seg.to.x}
                   y2={seg.to.y}
                   stroke="currentColor"
-                  strokeWidth={wall.kind === "interior" ? 1.25 : 2}
-                  vectorEffect="non-scaling-stroke"
+                  strokeWidth={wall.kind === "interior" ? wallThickness.interior : wallThickness.exterior}
                   strokeLinecap="square"
                 />
               ))}

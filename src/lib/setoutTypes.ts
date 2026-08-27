@@ -248,6 +248,23 @@ export const LAYER_LABELS: Record<keyof LayerVisibility, string> = {
   measurements: "Measurements",
 };
 
+// Real-world wall thickness (metres), one value per wall kind rather than
+// per individual wall — exterior and interior walls are typically very
+// different builds (e.g. 230mm brick veneer vs 90mm timber stud), but
+// walls of the same kind on the one plan are almost always the same
+// construction, so a per-wall control would be precision the tradie can't
+// actually use. Drives both the on-screen line width (SetoutCanvas.tsx)
+// and the PDF export (setoutReport.ts) — same value, same source.
+export interface WallThickness {
+  exterior: number;
+  interior: number;
+}
+
+export const DEFAULT_WALL_THICKNESS: WallThickness = {
+  exterior: 0.23, // 230mm brick veneer — the common AU external wall
+  interior: 0.11, // 90mm stud + plasterboard both sides — the common AU internal wall
+};
+
 export interface SetoutPlan {
   id: string;
   user_id: string;
@@ -258,6 +275,7 @@ export interface SetoutPlan {
   walls: WallSegment[];
   openings: WallOpening[];
   layer_visibility: LayerVisibility;
+  wall_thickness: WallThickness;
   background_image_path: string | null;
   background_image_content_type: string | null;
   created_at: string;

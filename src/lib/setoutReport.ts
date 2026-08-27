@@ -226,7 +226,12 @@ async function drawPlanPage(
       const wallOpenings = (plan.openings ?? []).filter((o) => o.wallId === wall.id).sort((a, b) => a.offset - b.offset);
       const len = wallLength(wall);
       doc.setDrawColor(60);
-      doc.setLineWidth(wall.kind === "interior" ? 0.3 : 0.5);
+      // Real thickness (metres) converted through the page's plan scale, so
+      // a wall reads true-to-scale on the printed page — same value the
+      // on-screen canvas draws with (see SetoutCanvas.tsx), just floored so
+      // a very tight scale doesn't shrink the line into invisibility.
+      const thicknessMetres = wall.kind === "interior" ? plan.wall_thickness.interior : plan.wall_thickness.exterior;
+      doc.setLineWidth(Math.max(thicknessMetres * scale, 0.15));
       let cursor = 0;
       for (const o of wallOpenings) {
         const start = Math.max(0, Math.min(len, o.offset));

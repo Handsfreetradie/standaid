@@ -429,6 +429,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
           <SetoutCanvas
             backgroundImage={backgroundImage}
             walls={previewWalls}
+            wallThickness={plan.wall_thickness}
             openings={wallOpenings}
             mode={canvasMode}
             sketchPoints={sketchPoints}
@@ -577,7 +578,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
         </p>
 
         <div className="flex-1 min-h-[420px] mb-4">
-          <SetoutCanvas backgroundImage={backgroundImage} walls={previewWalls} mode="view" />
+          <SetoutCanvas backgroundImage={backgroundImage} walls={previewWalls} wallThickness={plan.wall_thickness} mode="view" />
         </div>
 
         <div className="grid grid-cols-2 gap-3 mb-6 max-h-48 overflow-y-auto">
@@ -714,6 +715,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
           <SetoutCanvas
             backgroundImage={{ href: raster.href, width: raster.naturalWidth / pixelsPerMetre, height: raster.naturalHeight / pixelsPerMetre }}
             walls={savedWalls}
+            wallThickness={plan.wall_thickness}
             openings={savedOpenings}
             fittings={previewFittings}
             mode="view"
