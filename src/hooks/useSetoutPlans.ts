@@ -198,6 +198,33 @@ export function useCreateSetoutFitting(planId: string) {
   });
 }
 
+// Bulk variant of useCreateSetoutFitting — a single multi-row insert for
+// when a whole batch of fittings lands at once (AI plan-import extraction),
+// rather than one round trip per fitting.
+export function useCreateSetoutFittingsBulk(planId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (inputs: { type: FittingType; position: Point; measurement_lock?: MeasurementLock | null; specs?: FittingSpecs }[]) => {
+      if (inputs.length === 0) return [] as SetoutFitting[];
+      const rows = inputs.map((input) => ({
+        plan_id: planId,
+        type: input.type,
+        position: input.position,
+        category: CATEGORY_FOR_TYPE[input.type],
+        specs: input.specs ?? {},
+        measurement_lock: input.measurement_lock ?? null,
+      }));
+      const { data, error } = await sb.from("setout_fittings").insert(rows).select();
+      if (error) throw error;
+      return data as SetoutFitting[];
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
+    },
+  });
+}
+
 // Re-inserts a fitting with its original id and all fields intact — used
 // by undo to bring back a just-deleted fitting exactly as it was,
 // including any circuit assignment or switch-gang links pointing at it

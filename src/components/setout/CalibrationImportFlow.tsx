@@ -6,14 +6,34 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import SetoutCanvas from "./SetoutCanvas";
-import { useUpdateSetoutPlanGeometry } from "@/hooks/useSetoutPlans";
-import { distance, type Point, type SetoutPlan } from "@/lib/setoutTypes";
-import { polygonToWalls } from "@/lib/setoutGeometry";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { useUpdateSetoutPlanGeometry, useCreateSetoutFittingsBulk } from "@/hooks/useSetoutPlans";
+import { FITTING_LABELS, FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
+import { CATEGORY_FOR_TYPE, distance, isSingleWallFitting, type FittingSpecs, type Point, type SetoutFitting, type SetoutPlan, type WallSegment } from "@/lib/setoutTypes";
+import { autoRotationForWallMount, computeMeasurementLock, defaultHeightForType, polygonToWalls } from "@/lib/setoutGeometry";
 
 interface RasterSource {
   href: string;
   naturalWidth: number;
   naturalHeight: number;
+  mimeType: string;
+}
+
+// AI extraction result — normalized 0-1 image coordinates throughout, since
+// at extraction time no real-world scale exists yet.
+interface NormalizedPoint {
+  x: number;
+  y: number;
+}
+interface AiFitting extends NormalizedPoint {
+  type: string;
+  confidence: "high" | "medium" | "low";
+}
+interface AiExtraction {
+  corners: NormalizedPoint[];
+  suggested_scale: { corner_a_index: number; corner_b_index: number; real_distance_metres: number } | null;
+  fittings: AiFitting[];
 }
 
 async function renderPdfFirstPage(file: File): Promise<RasterSource> {
@@ -29,20 +49,20 @@ async function renderPdfFirstPage(file: File): Promise<RasterSource> {
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not create canvas context");
   await page.render({ canvasContext: ctx, viewport }).promise;
-  return { href: canvas.toDataURL("image/png"), naturalWidth: canvas.width, naturalHeight: canvas.height };
+  return { href: canvas.toDataURL("image/png"), naturalWidth: canvas.width, naturalHeight: canvas.height, mimeType: "image/png" };
 }
 
 function loadImageFile(file: File): Promise<RasterSource> {
   return new Promise((resolve, reject) => {
     const href = URL.createObjectURL(file);
     const img = new Image();
-    img.onload = () => resolve({ href, naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight });
+    img.onload = () => resolve({ href, naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight, mimeType: file.type || "image/jpeg" });
     img.onerror = () => reject(new Error("Could not read that image file"));
     img.src = href;
   });
 }
 
-type Step = "select-file" | "loading" | "calibrate" | "trace-walls";
+type Step = "select-file" | "loading" | "extracting" | "calibrate" | "trace-walls" | "review-fittings";
 
 interface CalibrationImportFlowProps {
   plan: SetoutPlan;
@@ -51,20 +71,50 @@ interface CalibrationImportFlowProps {
 }
 
 export default function CalibrationImportFlow({ plan, onBack, onComplete }: CalibrationImportFlowProps) {
+  const { user } = useAuth();
   const [step, setStep] = useState<Step>("select-file");
   const [raster, setRaster] = useState<RasterSource | null>(null);
   const [calibPoints, setCalibPoints] = useState<Point[]>([]);
   const [realDistance, setRealDistance] = useState("");
   const [pixelsPerMetre, setPixelsPerMetre] = useState<number | null>(null);
   const [sketchPoints, setSketchPoints] = useState<Point[]>([]);
+  const [savedWalls, setSavedWalls] = useState<WallSegment[] | null>(null);
+  const [aiCorners, setAiCorners] = useState<NormalizedPoint[] | null>(null);
+  const [aiFittings, setAiFittings] = useState<AiFitting[]>([]);
+  const [removedKeys, setRemovedKeys] = useState<Set<string>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
   const saveGeometry = useUpdateSetoutPlanGeometry(plan.id);
+  const createFittingsBulk = useCreateSetoutFittingsBulk(plan.id);
 
   useEffect(() => {
     return () => {
       if (raster?.href.startsWith("blob:")) URL.revokeObjectURL(raster.href);
     };
   }, [raster]);
+
+  // Uploads the raster to the private setout-plan-uploads bucket and asks
+  // the extract-setout-plan edge function to read the wall outline, an
+  // optional scale suggestion, and any existing electrical symbols off it.
+  // Never blocks the flow on failure — the tradie falls back to calibrating
+  // and tracing manually exactly as before this feature existed.
+  const runAiExtraction = async (source: RasterSource): Promise<AiExtraction | null> => {
+    if (!user) return null;
+    try {
+      const blob = await (await fetch(source.href)).blob();
+      const ext = source.mimeType === "image/jpeg" ? "jpg" : "png";
+      const path = `${user.id}/${plan.id}/${crypto.randomUUID()}.${ext}`;
+      const { error: upErr } = await supabase.storage.from("setout-plan-uploads").upload(path, blob, { contentType: source.mimeType, upsert: true });
+      if (upErr) throw upErr;
+      const { data, error } = await supabase.functions.invoke("extract-setout-plan", {
+        body: { storage_path: path, content_type: source.mimeType },
+      });
+      if (error || data?.error) throw new Error(data?.error || "AI extraction failed");
+      return data as AiExtraction;
+    } catch (err) {
+      console.error("[CalibrationImportFlow] AI extraction failed:", err);
+      return null;
+    }
+  };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -73,6 +123,29 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     try {
       const source = file.type === "application/pdf" ? await renderPdfFirstPage(file) : await loadImageFile(file);
       setRaster(source);
+      setStep("extracting");
+      const extraction = await runAiExtraction(source);
+      if (extraction && extraction.corners.length >= 3) {
+        setAiCorners(extraction.corners);
+        setAiFittings(extraction.fittings || []);
+        const scale = extraction.suggested_scale;
+        const a = scale ? extraction.corners[scale.corner_a_index] : null;
+        const b = scale ? extraction.corners[scale.corner_b_index] : null;
+        if (scale && a && b) {
+          setCalibPoints([
+            { x: a.x * source.naturalWidth, y: a.y * source.naturalHeight },
+            { x: b.x * source.naturalWidth, y: b.y * source.naturalHeight },
+          ]);
+          setRealDistance(String(scale.real_distance_metres));
+        }
+        toast.success(
+          extraction.fittings?.length
+            ? `AI traced the walls and found ${extraction.fittings.length} existing fitting${extraction.fittings.length === 1 ? "" : "s"} — check the suggestion below.`
+            : "AI traced the wall outline — check the suggestion below."
+        );
+      } else {
+        toast.error("Couldn't auto-detect this plan — calibrate and trace it manually instead.");
+      }
       setStep("calibrate");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not load that file");
@@ -91,7 +164,14 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
   const confirmCalibration = () => {
     if (!canConfirmCalibration || !raster) return;
     const pixelDist = distance(calibPoints[0], calibPoints[1]);
-    setPixelsPerMetre(pixelDist / distanceMetres);
+    const ppm = pixelDist / distanceMetres;
+    setPixelsPerMetre(ppm);
+    // Seed the trace from the AI's corners the first time through — if the
+    // tradie goes Back and forward again, don't clobber edits they've
+    // already made to the traced shape.
+    if (aiCorners && aiCorners.length >= 3 && sketchPoints.length === 0) {
+      setSketchPoints(aiCorners.map((c) => ({ x: (c.x * raster.naturalWidth) / ppm, y: (c.y * raster.naturalHeight) / ppm })));
+    }
     setStep("trace-walls");
   };
 
@@ -103,8 +183,14 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
         walls,
         scale_calibration: { pointA: calibPoints[0], pointB: calibPoints[1], realDistanceMetres: distanceMetres },
       });
-      toast.success("Walls saved");
-      onComplete();
+      const classifiable = aiFittings.filter((f) => f.type in FITTING_SYMBOLS);
+      if (classifiable.length > 0) {
+        setSavedWalls(walls);
+        setStep("review-fittings");
+      } else {
+        toast.success("Walls saved");
+        onComplete();
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not save the plan");
     }
@@ -117,7 +203,10 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
         <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Upload the builder's plan</h2>
-        <p className="text-xs text-muted-foreground mb-5">PDF or photo of the plan. You'll calibrate it to real scale next.</p>
+        <p className="text-xs text-muted-foreground mb-5">
+          PDF or photo of the plan. AI will trace the walls and pick up any electrical symbols already marked — you'll confirm scale and
+          review everything before it's added.
+        </p>
         <input ref={fileRef} type="file" accept="application/pdf,image/*" className="hidden" onChange={handleFileSelect} />
         <Card
           className="border-dashed border-2 p-10 flex flex-col items-center justify-center cursor-pointer hover:border-primary/50 transition-colors"
@@ -140,6 +229,15 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     );
   }
 
+  if (step === "extracting") {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 gap-3">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground">AI is reading the plan…</p>
+      </div>
+    );
+  }
+
   if (step === "calibrate" && raster) {
     return (
       <div className="flex flex-col h-full px-5 py-6 max-w-3xl mx-auto w-full">
@@ -148,8 +246,10 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
         </button>
         <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Calibrate scale</h2>
         <p className="text-xs text-muted-foreground mb-4">
-          Zoom in and tap two points on the plan that you know the real distance between — a wall length, a door width, a dimension already
-          marked. Use the pan tool (bottom right) to move around once zoomed in.
+          {calibPoints.length === 2
+            ? "AI suggested these two points from a dimension it read on the plan — check them (and the distance below) or clear and pick your own."
+            : "Zoom in and tap two points on the plan that you know the real distance between — a wall length, a door width, a dimension already marked."}{" "}
+          Use the pan tool (bottom right) to move around once zoomed in.
         </p>
         <div className="flex-1 min-h-[360px] mb-4">
           <SetoutCanvas
@@ -198,7 +298,9 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
         </button>
         <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Trace the walls</h2>
         <p className="text-xs text-muted-foreground mb-4">
-          Tap each corner of the room in order. Tap the first corner again (or the button below) to close the shape.
+          {aiCorners
+            ? "AI has traced a starting shape from the plan — drag/add/remove corners to fix anything it got wrong, then close the shape."
+            : "Tap each corner of the room in order. Tap the first corner again (or the button below) to close the shape."}
         </p>
         <div className="flex-1 min-h-[360px] mb-4">
           <SetoutCanvas
@@ -216,6 +318,107 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
           </Button>
           <Button className="flex-1 font-bold" disabled={sketchPoints.length < 3 || saveGeometry.isPending} onClick={finishTrace}>
             {saveGeometry.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Close shape & save"}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (step === "review-fittings" && raster && pixelsPerMetre && savedWalls) {
+    const classifiedCount = aiFittings.filter((f) => f.type in FITTING_SYMBOLS).length;
+    const unclassifiedCount = aiFittings.length - classifiedCount;
+    const draftFittings = aiFittings
+      .map((f, i) => ({ key: String(i), f }))
+      .filter(({ f }) => f.type in FITTING_SYMBOLS)
+      .filter(({ key }) => !removedKeys.has(key))
+      .map(({ key, f }) => ({
+        key,
+        type: f.type as FittingType,
+        position: { x: (f.x * raster.naturalWidth) / pixelsPerMetre, y: (f.y * raster.naturalHeight) / pixelsPerMetre },
+      }));
+
+    const previewFittings: SetoutFitting[] = draftFittings.map((f) => ({
+      id: f.key,
+      plan_id: plan.id,
+      type: f.type,
+      position: f.position,
+      category: CATEGORY_FOR_TYPE[f.type],
+      specs: {},
+      measurement_lock: null,
+      status: "placed",
+      circuit_id: null,
+      linked_to: [],
+      created_at: "",
+      updated_at: "",
+    }));
+
+    const handleAddFittings = async () => {
+      const walls = savedWalls;
+      const inputs = draftFittings.map(({ type, position }) => {
+        const defaultHeight = defaultHeightForType(type);
+        const specs: FittingSpecs = {};
+        if (defaultHeight != null) specs.mountingHeight = defaultHeight;
+        if (isSingleWallFitting(type)) specs.rotation = autoRotationForWallMount(position, walls);
+        return {
+          type,
+          position,
+          measurement_lock: computeMeasurementLock(position, walls, type),
+          specs: Object.keys(specs).length > 0 ? specs : undefined,
+        };
+      });
+      try {
+        await createFittingsBulk.mutateAsync(inputs);
+        toast.success(`Added ${inputs.length} fitting${inputs.length === 1 ? "" : "s"} from the plan`);
+        onComplete();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Could not add the fittings");
+      }
+    };
+
+    return (
+      <div className="flex flex-col h-full px-5 py-6 max-w-3xl mx-auto w-full">
+        <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Review detected fittings</h2>
+        <p className="text-xs text-muted-foreground mb-4">
+          AI found {aiFittings.length} existing electrical symbol{aiFittings.length === 1 ? "" : "s"} on this plan
+          {unclassifiedCount > 0
+            ? `, ${unclassifiedCount} of which it couldn't confidently classify — those aren't shown, you'll need to add ${unclassifiedCount === 1 ? "it" : "them"} manually`
+            : ""}
+          . Remove anything that looks wrong below, then add the rest to the plan with measurements attached automatically.
+        </p>
+        <div className="flex-1 min-h-[300px] mb-4">
+          <SetoutCanvas
+            backgroundImage={{ href: raster.href, width: raster.naturalWidth / pixelsPerMetre, height: raster.naturalHeight / pixelsPerMetre }}
+            walls={savedWalls}
+            fittings={previewFittings}
+            mode="view"
+          />
+        </div>
+        {draftFittings.length > 0 && (
+          <div className="space-y-1.5 mb-4 max-h-40 overflow-y-auto">
+            {draftFittings.map((f) => (
+              <div key={f.key} className="flex items-center justify-between rounded-lg border border-border px-3 py-1.5 text-xs">
+                <span className="font-medium text-foreground">{FITTING_LABELS[f.type]}</span>
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-destructive"
+                  onClick={() => setRemovedKeys((prev) => new Set(prev).add(f.key))}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-2">
+          <Button variant="outline" className="flex-1" onClick={onComplete}>
+            Skip — place manually
+          </Button>
+          <Button className="flex-1 font-bold" disabled={draftFittings.length === 0 || createFittingsBulk.isPending} onClick={handleAddFittings}>
+            {createFittingsBulk.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              `Add ${draftFittings.length} fitting${draftFittings.length === 1 ? "" : "s"}`
+            )}
           </Button>
         </div>
       </div>
