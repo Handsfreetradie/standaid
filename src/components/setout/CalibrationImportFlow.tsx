@@ -17,7 +17,6 @@ import {
   autoRotationForWallMount,
   computeMeasurementLock,
   defaultHeightForType,
-  nearestWallAndOffset,
   nextOpeningId,
   nextWallId,
   polygonToWalls,
@@ -64,20 +63,9 @@ const MARK_COLOR_SWATCH_CLASS: Record<MarkColor, string> = {
 interface AiMark extends NormalizedPoint {
   color: MarkColor;
 }
-interface AiWallSegment {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-}
-interface AiOpening extends AiWallSegment {
-  kind: "door" | "window";
-}
 interface AiExtraction {
   corners: NormalizedPoint[];
   suggested_scale: { corner_a_index: number; corner_b_index: number; real_distance_metres: number } | null;
-  interior_walls: AiWallSegment[];
-  openings: AiOpening[];
   marks: AiMark[];
 }
 
@@ -133,8 +121,6 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
   const [uploadedImagePath, setUploadedImagePath] = useState<string | null>(null);
   const [uploadedImageContentType, setUploadedImageContentType] = useState<string | null>(null);
   const [aiCorners, setAiCorners] = useState<NormalizedPoint[] | null>(null);
-  const [aiInteriorWalls, setAiInteriorWalls] = useState<AiWallSegment[]>([]);
-  const [aiOpenings, setAiOpenings] = useState<AiOpening[]>([]);
   const [aiMarks, setAiMarks] = useState<AiMark[]>([]);
   const [colorAssignments, setColorAssignments] = useState<Record<string, FittingType | "skip">>({});
   const fileRef = useRef<HTMLInputElement>(null);
@@ -187,8 +173,6 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
       const extraction = await runAiExtraction(source);
       if (extraction && extraction.corners.length >= 3) {
         setAiCorners(extraction.corners);
-        setAiInteriorWalls(extraction.interior_walls || []);
-        setAiOpenings(extraction.openings || []);
         setAiMarks(extraction.marks || []);
         const scale = extraction.suggested_scale;
         const a = scale ? extraction.corners[scale.corner_a_index] : null;
@@ -200,11 +184,11 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
           ]);
           setRealDistance(String(scale.real_distance_metres));
         }
-        const extras: string[] = [];
-        if (extraction.interior_walls?.length) extras.push(`${extraction.interior_walls.length} interior wall${extraction.interior_walls.length === 1 ? "" : "s"}`);
-        if (extraction.openings?.length) extras.push(`${extraction.openings.length} door${extraction.openings.length === 1 ? "" : "s"}/window${extraction.openings.length === 1 ? "" : "s"}`);
-        if (extraction.marks?.length) extras.push(`${extraction.marks.length} hand-marked fixture${extraction.marks.length === 1 ? "" : "s"}`);
-        toast.success(extras.length ? `AI traced the walls and found ${extras.join(", ")} — check the suggestion below.` : "AI traced the wall outline — check the suggestion below.");
+        toast.success(
+          extraction.marks?.length
+            ? `AI traced the wall outline and found ${extraction.marks.length} hand-marked fixture${extraction.marks.length === 1 ? "" : "s"} — check the suggestion below.`
+            : "AI traced the wall outline — check the suggestion below."
+        );
       } else {
         toast.error("Couldn't auto-detect this plan — calibrate and trace it manually instead.");
       }
@@ -228,42 +212,14 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     const pixelDist = distance(calibPoints[0], calibPoints[1]);
     const ppm = pixelDist / distanceMetres;
     setPixelsPerMetre(ppm);
-    // Seed the trace from the AI's corners the first time through — if the
-    // tradie goes Back and forward again, don't clobber edits they've
-    // already made to the traced shape.
+    // Seed the perimeter trace from the AI's corners the first time through
+    // — if the tradie goes Back and forward again, don't clobber edits
+    // they've already made to the traced shape. Interior walls/doors/
+    // windows are never AI-seeded (see extract-setout-plan's header
+    // comment) — always added manually with the tools on the next step.
     if (aiCorners && aiCorners.length >= 3 && sketchPoints.length === 0) {
       const toMetres = (p: NormalizedPoint) => ({ x: (p.x * raster.naturalWidth) / ppm, y: (p.y * raster.naturalHeight) / ppm });
-      const seededSketchPoints = aiCorners.map(toMetres);
-      setSketchPoints(seededSketchPoints);
-
-      if ((aiInteriorWalls.length > 0 || aiOpenings.length > 0) && interiorWalls.length === 0 && wallOpenings.length === 0) {
-        const seededInterior: WallSegment[] = aiInteriorWalls.map((w) => ({
-          id: nextWallId(),
-          start: toMetres({ x: w.x1, y: w.y1 }),
-          end: toMetres({ x: w.x2, y: w.y2 }),
-          kind: "interior",
-        }));
-        setInteriorWalls(seededInterior);
-
-        // Resolve each AI-reported opening to a real {wallId, offset}
-        // geometrically (nearest wall to its midpoint), rather than trusting
-        // the AI to name which wall it belongs to — robust to it being
-        // imprecise about that, since the geometry is unambiguous either way.
-        const combinedWalls = [...polygonToWalls(seededSketchPoints), ...seededInterior];
-        const seededOpenings: WallOpening[] = [];
-        for (const o of aiOpenings) {
-          const p1 = toMetres({ x: o.x1, y: o.y1 });
-          const p2 = toMetres({ x: o.x2, y: o.y2 });
-          const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
-          const resolved = nearestWallAndOffset(mid, combinedWalls);
-          if (!resolved) continue;
-          const width = distance(p1, p2);
-          const len = wallLength(resolved.wall);
-          const offset = Math.max(0, Math.min(Math.max(len - width, 0), resolved.offset - width / 2));
-          seededOpenings.push({ id: nextOpeningId(), wallId: resolved.wall.id, offset, width, kind: o.kind });
-        }
-        setWallOpenings(seededOpenings);
-      }
+      setSketchPoints(aiCorners.map(toMetres));
     }
     setStep("trace-walls");
   };
@@ -299,9 +255,10 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
         </button>
         <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Upload the builder's plan</h2>
         <p className="text-xs text-muted-foreground mb-5">
-          PDF or photo of the plan. AI will trace the walls automatically. If you want it to also pick up fixture locations, mark them on
-          the plan first with a highlighter or pen — use a different colour per fixture type (any colours you like), and you'll tell the
-          app what each colour means after upload.
+          PDF or photo of the plan. AI will trace the outer wall outline automatically — internal walls, doors and windows are added
+          manually on the next step. If you want AI to also pick up fixture locations, mark them on the plan first with a highlighter or
+          pen — use a different colour per fixture type (any colours you like), and you'll tell the app what each colour means after
+          upload.
         </p>
         <input ref={fileRef} type="file" accept="application/pdf,image/*" className="hidden" onChange={handleFileSelect} />
         <Card

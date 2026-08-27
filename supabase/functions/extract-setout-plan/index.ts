@@ -10,35 +10,30 @@ import { logTokenUsage } from "../_shared/log-usage.ts";
 // computeMeasurementLock etc.) after the tradie confirms scale, same as
 // every other Setout mutation is client-driven.
 //
-// Two earlier approaches to detecting EXISTING electrical symbols on a plan
-// (a single whole-image pass, then a tiled multi-pass) both failed real
-// testing — asking a vision model to classify which of 39 subtle
-// professional CAD symbol conventions a small mark represents is
-// inherently unreliable, and tiling made it worse by losing the whole-plan
-// context needed to disambiguate an ambiguous mark (e.g. a switch's small
-// tick vs a door swing line vs a dimension tick). This replaces that
-// entirely: the tradie marks fixture locations themselves with bright
-// highlighter/pen marks in whatever colours they choose, and the AI's job
-// shrinks to finding high-contrast hand-marks and grouping them by colour —
-// a well-understood, reliable vision task. The *meaning* of each colour
-// (which fitting type it represents) is a human decision made client-side
-// after extraction, not something the AI has to guess.
+// Every part of this that asked the model for precise line-segment
+// coordinates on a dense real plan proved unreliable across several
+// attempts — existing-symbol classification (39 subtle CAD conventions,
+// replaced with tradie colour-marking below) and interior wall/door/window
+// detection (single-pass was too imprecise, tiling over-detected — see git
+// history). Both got dropped rather than kept as a shaky "AI-seeded, fix it
+// yourself" starting point. What's left is only what's tested reliably at
+// its point-count: the exterior wall outline (a handful of corners), scale
+// (reading one legible dimension), and hand-marks (a simple colour-
+// detection task, not classification). Interior walls, doors, and windows
+// are entirely manual — the tradie adds them with the existing "Add
+// interior wall"/"Add door/window" tools in CalibrationImportFlow.tsx.
 
 const MARK_COLORS = ["red", "orange", "yellow", "green", "blue", "purple", "pink", "black"];
 
 const SYSTEM_PROMPT = `You are reading an Australian residential/commercial electrical or architectural floor plan (a builder's PDF page or a site photo of a plan) for a licensed electrician who will use your output to set out the job. Precision matters — the electrician measures from these positions on site.
 
-TASK 1 — Wall outline: trace the outer perimeter of the room/house as an ordered polygon of corner points, walking the perimeter in one direction (clockwise or counterclockwise, either is fine as long as it's consistent). Use normalized image coordinates: x and y each range 0-1, where (0,0) is the top-left corner of the image and (1,1) is the bottom-right. Only trace what is clearly a wall line on the drawing — do not guess at a wall you can't actually see (e.g. because it's obscured or the plan is cropped).
+TASK 1 — Wall outline: trace the outer perimeter of the room/house as an ordered polygon of corner points, walking the perimeter in one direction (clockwise or counterclockwise, either is fine as long as it's consistent). Use normalized image coordinates: x and y each range 0-1, where (0,0) is the top-left corner of the image and (1,1) is the bottom-right. Only trace what is clearly a wall line on the drawing — do not guess at a wall you can't actually see (e.g. because it's obscured or the plan is cropped). Do not trace internal partition walls, only the outer perimeter.
 
 TASK 2 — Scale: if a dimension is legibly labelled on the drawing spanning two of the corners you traced (e.g. "4200", "3.6m", "4200mm"), report which two corners it spans and the real-world length in metres. Only report this if you can actually read a number on the plan — never estimate or guess a scale from typical room sizes. If no legible dimension is visible, omit this field entirely.
 
-TASK 3 — Internal walls: this plan may show internal partition walls dividing rooms (most real house/building plans do), or it may be a single room with no internal walls — both are normal. For every internal wall line you can actually see, report it as its own line segment (two endpoint points, same normalized 0-1 coordinates) — these don't need to connect into a closed shape like the outer perimeter does, each one is independent. Do not include the exterior perimeter walls here, only genuine internal partitions.
+TASK 3 — Hand-marked fixture locations: the tradie may have marked up this plan themselves with a highlighter or pen to indicate where electrical fixtures go — bright, hand-drawn dots/circles/ticks that are clearly NOT part of the plan's own printed drawing (which is black/grey/blue CAD linework). Completely ignore the plan's own printed electrical symbols, room labels, and dimension marks for this task — only report the tradie's own added marks. For each hand-mark found, report its position (same normalized 0-1 coordinates) and its colour, picked from exactly this list: ${MARK_COLORS.join(", ")}. Pick whichever colour in the list is the closest match — don't invent a colour name outside this list. If the plan has no hand-marks on it at all, that's a normal, valid result — return an empty array.
 
-TASK 4 — Doors and windows: for every door and window opening you can see cut into ANY wall (exterior or internal), report it as its own short line segment spanning the gap in the wall (two endpoint points, same normalized 0-1 coordinates), plus whether it's a "door" or "window". A door is typically drawn as a gap in the wall with a quarter-circle swing arc; a window is typically a gap with a thin line or double-tick across it, sometimes with sill lines. Only report openings you can actually see — don't guess that a wall has a door just because a room needs one.
-
-TASK 5 — Hand-marked fixture locations: the tradie may have marked up this plan themselves with a highlighter or pen to indicate where electrical fixtures go — bright, hand-drawn dots/circles/ticks that are clearly NOT part of the plan's own printed drawing (which is black/grey/blue CAD linework). Completely ignore the plan's own printed electrical symbols, room labels, and dimension marks for this task — only report the tradie's own added marks. For each hand-mark found, report its position (same normalized 0-1 coordinates) and its colour, picked from exactly this list: ${MARK_COLORS.join(", ")}. Pick whichever colour in the list is the closest match — don't invent a colour name outside this list. If the plan has no hand-marks on it at all, that's a normal, valid result — return an empty array.
-
-Never invent a wall, door, window, or mark that isn't actually visible. Call return_plan_extraction with your findings — interior_walls, openings, and marks can all be empty arrays if the plan genuinely has none.`;
+Never invent a wall or mark that isn't actually visible. Call return_plan_extraction with your findings — marks can be an empty array if the plan has none.`;
 
 serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
@@ -110,7 +105,7 @@ serve(async (req) => {
         system: SYSTEM_PROMPT,
         tools: [{
           name: "return_plan_extraction",
-          description: "Return the extracted wall outline, optional scale suggestion, interior walls, openings, and hand-marked fixture locations",
+          description: "Return the extracted exterior wall outline, optional scale suggestion, and hand-marked fixture locations",
           input_schema: {
             type: "object",
             properties: {
@@ -133,30 +128,6 @@ serve(async (req) => {
                 },
                 required: ["corner_a_index", "corner_b_index", "real_distance_metres"],
               },
-              interior_walls: {
-                type: "array",
-                description: "Internal partition walls, each its own independent line segment — empty array if there are none",
-                items: {
-                  type: "object",
-                  properties: { x1: { type: "number" }, y1: { type: "number" }, x2: { type: "number" }, y2: { type: "number" } },
-                  required: ["x1", "y1", "x2", "y2"],
-                },
-              },
-              openings: {
-                type: "array",
-                description: "Doors/windows cut into any wall, each traced as the short segment spanning the gap — empty array if there are none",
-                items: {
-                  type: "object",
-                  properties: {
-                    x1: { type: "number" },
-                    y1: { type: "number" },
-                    x2: { type: "number" },
-                    y2: { type: "number" },
-                    kind: { type: "string", enum: ["door", "window"] },
-                  },
-                  required: ["x1", "y1", "x2", "y2", "kind"],
-                },
-              },
               marks: {
                 type: "array",
                 description: "Hand-marked fixture locations the tradie added themselves (highlighter/pen dots) — empty array if the plan has none",
@@ -171,7 +142,7 @@ serve(async (req) => {
                 },
               },
             },
-            required: ["corners", "interior_walls", "openings", "marks"],
+            required: ["corners", "marks"],
           },
         }],
         tool_choice: { type: "tool", name: "return_plan_extraction" },
@@ -179,7 +150,7 @@ serve(async (req) => {
           role: "user",
           content: [
             { type: "image", source: { type: "base64", media_type: mediaType, data: imageBase64 } },
-            { type: "text", text: "Extract the wall outline, scale (if legibly labelled), interior walls, openings, and any hand-marked fixture locations from this plan." },
+            { type: "text", text: "Extract the exterior wall outline, scale (if legibly labelled), and any hand-marked fixture locations from this plan." },
           ],
         }],
       }),
@@ -220,8 +191,6 @@ serve(async (req) => {
     return json({
       corners: result.corners,
       suggested_scale: result.suggested_scale ?? null,
-      interior_walls: result.interior_walls ?? [],
-      openings: result.openings ?? [],
       marks: result.marks ?? [],
     });
   } catch (e) {
