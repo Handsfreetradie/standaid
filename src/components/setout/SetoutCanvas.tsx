@@ -26,6 +26,7 @@ import {
   pointAtOffset,
   wallsCentroid,
   roomFacingNormal,
+  nearestWallAndOffset,
 } from "@/lib/setoutGeometry";
 
 interface ViewBox {
@@ -44,7 +45,15 @@ interface BackgroundImage {
   height: number;
 }
 
-export type SetoutCanvasMode = "view" | "calibrate" | "sketch-walls" | "place-fittings" | "link-switches" | "select-multiple";
+export type SetoutCanvasMode =
+  | "view"
+  | "calibrate"
+  | "sketch-walls"
+  | "sketch-interior-wall"
+  | "place-opening"
+  | "place-fittings"
+  | "link-switches"
+  | "select-multiple";
 
 interface SetoutCanvasProps {
   backgroundImage?: BackgroundImage;
@@ -61,6 +70,18 @@ interface SetoutCanvasProps {
   // different steps of the import flow.
   calibratePoints?: Point[];
   onCalibratePointAdd?: (point: Point) => void;
+  // "sketch-interior-wall" mode: first tap sets the draft start point
+  // (rendered so the tradie can see it's pending), second tap completes
+  // that one segment and reports both points — the parent owns the growing
+  // list of interior walls, this component only handles one segment's
+  // worth of interaction at a time.
+  interiorWallDraftStart?: Point | null;
+  onInteriorWallDraftPointAdd?: (point: Point) => void;
+  onInteriorWallSegmentAdd?: (start: Point, end: Point) => void;
+  // "place-opening" mode: a tap resolves to the nearest wall + offset along
+  // it (via nearestWallAndOffset) — the parent turns that into a
+  // WallOpening with whatever kind/width is currently selected.
+  onOpeningPlace?: (wallId: string, offset: number) => void;
   snapWalls?: boolean;
   selectedFittingType?: FittingType | null;
   onPlaceFitting?: (point: Point) => void;
@@ -107,6 +128,10 @@ export default function SetoutCanvas({
   onSketchClose,
   calibratePoints = [],
   onCalibratePointAdd,
+  interiorWallDraftStart = null,
+  onInteriorWallDraftPointAdd,
+  onInteriorWallSegmentAdd,
+  onOpeningPlace,
   snapWalls = false,
   selectedFittingType,
   onPlaceFitting,
@@ -230,6 +255,12 @@ export default function SetoutCanvas({
         onSketchPointAdd?.(point);
       } else if (mode === "calibrate") {
         if (calibratePoints.length < 2) onCalibratePointAdd?.(scene);
+      } else if (mode === "sketch-interior-wall") {
+        if (!interiorWallDraftStart) onInteriorWallDraftPointAdd?.(scene);
+        else onInteriorWallSegmentAdd?.(interiorWallDraftStart, scene);
+      } else if (mode === "place-opening") {
+        const result = nearestWallAndOffset(scene, walls);
+        if (result) onOpeningPlace?.(result.wall.id, result.offset);
       } else if (mode === "place-fittings" && selectedFittingType) {
         const point = isSingleWallFitting(selectedFittingType)
           ? snapToNearestWall(scene, walls, openings)
@@ -258,6 +289,10 @@ export default function SetoutCanvas({
       onSketchPointAdd,
       calibratePoints,
       onCalibratePointAdd,
+      interiorWallDraftStart,
+      onInteriorWallDraftPointAdd,
+      onInteriorWallSegmentAdd,
+      onOpeningPlace,
       selectedFittingType,
       onPlaceFitting,
       onFittingSelect,
@@ -585,6 +620,19 @@ export default function SetoutCanvas({
               />
             ))}
           </g>
+        )}
+
+        {interiorWallDraftStart && (
+          <circle
+            cx={interiorWallDraftStart.x}
+            cy={interiorWallDraftStart.y}
+            r={9 * px2scene()}
+            className="text-primary"
+            fill="currentColor"
+            stroke="hsl(var(--background))"
+            strokeWidth={2}
+            vectorEffect="non-scaling-stroke"
+          />
         )}
 
         {lightPools.length > 0 && (

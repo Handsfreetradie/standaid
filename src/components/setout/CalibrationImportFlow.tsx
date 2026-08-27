@@ -10,8 +10,22 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useUpdateSetoutPlanGeometry, useCreateSetoutFittingsBulk } from "@/hooks/useSetoutPlans";
 import { FITTING_LABELS, FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
-import { CATEGORY_FOR_TYPE, distance, isSingleWallFitting, type FittingSpecs, type Point, type SetoutFitting, type SetoutPlan, type WallSegment } from "@/lib/setoutTypes";
-import { autoRotationForWallMount, computeMeasurementLock, defaultHeightForType, polygonToWalls } from "@/lib/setoutGeometry";
+import { CATEGORY_FOR_TYPE, distance, isSingleWallFitting, type FittingSpecs, type Point, type SetoutFitting, type SetoutPlan, type WallOpening, type WallSegment } from "@/lib/setoutTypes";
+import {
+  autoRotationForWallMount,
+  computeMeasurementLock,
+  defaultHeightForType,
+  nextOpeningId,
+  nextWallId,
+  polygonToWalls,
+  snapToNearestWall,
+  wallLength,
+} from "@/lib/setoutGeometry";
+
+// Standard Australian residential door/window widths — used as the default
+// when a door/window is placed, then editable per-opening afterward.
+const DEFAULT_DOOR_WIDTH = 0.82;
+const DEFAULT_WINDOW_WIDTH = 1.2;
 
 interface RasterSource {
   href: string;
@@ -78,7 +92,13 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
   const [realDistance, setRealDistance] = useState("");
   const [pixelsPerMetre, setPixelsPerMetre] = useState<number | null>(null);
   const [sketchPoints, setSketchPoints] = useState<Point[]>([]);
+  const [interiorWalls, setInteriorWalls] = useState<WallSegment[]>([]);
+  const [wallOpenings, setWallOpenings] = useState<WallOpening[]>([]);
+  const [wallTool, setWallTool] = useState<"perimeter" | "interior" | "opening">("perimeter");
+  const [interiorDraftStart, setInteriorDraftStart] = useState<Point | null>(null);
+  const [openingKind, setOpeningKind] = useState<"door" | "window">("door");
   const [savedWalls, setSavedWalls] = useState<WallSegment[] | null>(null);
+  const [savedOpenings, setSavedOpenings] = useState<WallOpening[]>([]);
   const [aiCorners, setAiCorners] = useState<NormalizedPoint[] | null>(null);
   const [aiFittings, setAiFittings] = useState<AiFitting[]>([]);
   const [removedKeys, setRemovedKeys] = useState<Set<string>>(new Set());
@@ -177,15 +197,17 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
 
   const finishTrace = async () => {
     if (sketchPoints.length < 3 || !pixelsPerMetre) return;
-    const walls = polygonToWalls(sketchPoints);
+    const walls = [...polygonToWalls(sketchPoints), ...interiorWalls];
     try {
       await saveGeometry.mutateAsync({
         walls,
         scale_calibration: { pointA: calibPoints[0], pointB: calibPoints[1], realDistanceMetres: distanceMetres },
+        openings: wallOpenings,
       });
       const classifiable = aiFittings.filter((f) => f.type in FITTING_SYMBOLS);
       if (classifiable.length > 0) {
         setSavedWalls(walls);
+        setSavedOpenings(wallOpenings);
         setStep("review-fittings");
       } else {
         toast.success("Walls saved");
@@ -291,6 +313,20 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
       width: raster.naturalWidth / pixelsPerMetre,
       height: raster.naturalHeight / pixelsPerMetre,
     };
+    const perimeterWalls = sketchPoints.length >= 3 ? polygonToWalls(sketchPoints) : [];
+    const previewWalls = [...perimeterWalls, ...interiorWalls];
+    const canAddInteriorOrOpening = perimeterWalls.length > 0;
+    const canvasMode = wallTool === "perimeter" ? "sketch-walls" : wallTool === "interior" ? "sketch-interior-wall" : "place-opening";
+
+    const handleOpeningPlace = (wallId: string, offset: number) => {
+      const wall = previewWalls.find((w) => w.id === wallId);
+      if (!wall) return;
+      const width = openingKind === "door" ? DEFAULT_DOOR_WIDTH : DEFAULT_WINDOW_WIDTH;
+      const len = wallLength(wall);
+      const clampedOffset = Math.max(0, Math.min(Math.max(len - width, 0), offset - width / 2));
+      setWallOpenings((prev) => [...prev, { id: nextOpeningId(), wallId, offset: clampedOffset, width, kind: openingKind }]);
+    };
+
     return (
       <div className="flex flex-col h-full px-5 py-6 max-w-3xl mx-auto w-full">
         <button onClick={() => setStep("calibrate")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
@@ -298,26 +334,112 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
         </button>
         <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Trace the walls</h2>
         <p className="text-xs text-muted-foreground mb-4">
-          {aiCorners
-            ? "AI has traced a starting shape from the plan — drag/add/remove corners to fix anything it got wrong, then close the shape."
-            : "Tap each corner of the room in order. Tap the first corner again (or the button below) to close the shape."}
+          {wallTool === "perimeter"
+            ? aiCorners
+              ? "AI has traced a starting shape from the plan — drag/add/remove corners to fix anything it got wrong, then close the shape."
+              : "Tap each corner of the room in order. Tap the first corner again (or the button below) to close the shape."
+            : wallTool === "interior"
+              ? "Tap the start, then the end, of one internal wall at a time."
+              : `Tap a point on a wall to drop a ${openingKind} there — default width is editable below.`}
         </p>
+
+        <div className="flex gap-1.5 mb-3">
+          <Button size="sm" variant={wallTool === "perimeter" ? "default" : "outline"} onClick={() => setWallTool("perimeter")}>
+            Trace perimeter
+          </Button>
+          <Button size="sm" variant={wallTool === "interior" ? "default" : "outline"} disabled={!canAddInteriorOrOpening} onClick={() => setWallTool("interior")}>
+            Add interior wall
+          </Button>
+          <Button size="sm" variant={wallTool === "opening" ? "default" : "outline"} disabled={!canAddInteriorOrOpening} onClick={() => setWallTool("opening")}>
+            Add door/window
+          </Button>
+        </div>
+
+        {wallTool === "opening" && (
+          <div className="flex gap-1.5 mb-3">
+            <Button size="sm" variant={openingKind === "door" ? "default" : "outline"} onClick={() => setOpeningKind("door")}>
+              Door
+            </Button>
+            <Button size="sm" variant={openingKind === "window" ? "default" : "outline"} onClick={() => setOpeningKind("window")}>
+              Window
+            </Button>
+          </div>
+        )}
+
         <div className="flex-1 min-h-[360px] mb-4">
           <SetoutCanvas
             backgroundImage={backgroundImage}
-            walls={[]}
-            mode="sketch-walls"
+            walls={previewWalls}
+            openings={wallOpenings}
+            mode={canvasMode}
             sketchPoints={sketchPoints}
             onSketchPointAdd={(p) => setSketchPoints((prev) => [...prev, p])}
             onSketchClose={finishTrace}
+            interiorWallDraftStart={interiorDraftStart}
+            onInteriorWallDraftPointAdd={setInteriorDraftStart}
+            onInteriorWallSegmentAdd={(start, end) => {
+              setInteriorWalls((prev) => [...prev, { id: nextWallId(), start, end, kind: "interior" }]);
+              setInteriorDraftStart(null);
+            }}
+            onOpeningPlace={handleOpeningPlace}
           />
         </div>
+
+        {wallTool === "interior" && interiorWalls.length > 0 && (
+          <div className="space-y-1.5 mb-4 max-h-32 overflow-y-auto">
+            {interiorWalls.map((w, i) => (
+              <div key={w.id} className="flex items-center justify-between rounded-lg border border-border px-3 py-1.5 text-xs">
+                <span className="font-medium text-foreground">Interior wall {i + 1}</span>
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-destructive"
+                  onClick={() => setInteriorWalls((prev) => prev.filter((iw) => iw.id !== w.id))}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {wallTool === "opening" && wallOpenings.length > 0 && (
+          <div className="space-y-1.5 mb-4 max-h-32 overflow-y-auto">
+            {wallOpenings.map((o) => (
+              <div key={o.id} className="flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs">
+                <span className="font-medium text-foreground capitalize flex-1">{o.kind}</span>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  min="0.1"
+                  step="0.05"
+                  value={o.width}
+                  onChange={(e) => {
+                    const width = Number(e.target.value) || o.width;
+                    setWallOpenings((prev) => prev.map((p) => (p.id === o.id ? { ...p, width } : p)));
+                  }}
+                  className="h-7 w-20 text-xs"
+                />
+                <span className="text-muted-foreground">m</span>
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-destructive"
+                  onClick={() => setWallOpenings((prev) => prev.filter((p) => p.id !== o.id))}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="flex gap-2">
-          <Button variant="outline" className="flex-1" disabled={sketchPoints.length === 0} onClick={() => setSketchPoints((prev) => prev.slice(0, -1))}>
-            Undo point
-          </Button>
+          {wallTool === "perimeter" && (
+            <Button variant="outline" className="flex-1" disabled={sketchPoints.length === 0} onClick={() => setSketchPoints((prev) => prev.slice(0, -1))}>
+              Undo point
+            </Button>
+          )}
           <Button className="flex-1 font-bold" disabled={sketchPoints.length < 3 || saveGeometry.isPending} onClick={finishTrace}>
-            {saveGeometry.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Close shape & save"}
+            {saveGeometry.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save walls"}
           </Button>
         </div>
       </div>
@@ -331,11 +453,16 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
       .map((f, i) => ({ key: String(i), f }))
       .filter(({ f }) => f.type in FITTING_SYMBOLS)
       .filter(({ key }) => !removedKeys.has(key))
-      .map(({ key, f }) => ({
-        key,
-        type: f.type as FittingType,
-        position: { x: (f.x * raster.naturalWidth) / pixelsPerMetre, y: (f.y * raster.naturalHeight) / pixelsPerMetre },
-      }));
+      .map(({ key, f }) => {
+        const type = f.type as FittingType;
+        const rawPosition = { x: (f.x * raster.naturalWidth) / pixelsPerMetre, y: (f.y * raster.naturalHeight) / pixelsPerMetre };
+        // Snap wall-mounted detections onto the actual wall line (and clear
+        // of any door/window on it) — same treatment a manually-placed
+        // fitting gets, so AI-detected GPOs/switches don't end up floating
+        // just off the wall or sitting mid-doorway.
+        const position = isSingleWallFitting(type) ? snapToNearestWall(rawPosition, savedWalls, savedOpenings) : rawPosition;
+        return { key, type, position };
+      });
 
     const previewFittings: SetoutFitting[] = draftFittings.map((f) => ({
       id: f.key,
@@ -389,6 +516,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
           <SetoutCanvas
             backgroundImage={{ href: raster.href, width: raster.naturalWidth / pixelsPerMetre, height: raster.naturalHeight / pixelsPerMetre }}
             walls={savedWalls}
+            openings={savedOpenings}
             fittings={previewFittings}
             mode="view"
           />

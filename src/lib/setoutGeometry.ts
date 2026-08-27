@@ -2,9 +2,18 @@ import { distance, isSingleWallFitting, type Point, type WallSegment, type WallO
 import type { FittingType } from "@/components/setout/symbols";
 
 let wallIdCounter = 0;
-function nextWallId(): string {
+// For one-at-a-time additions (a manually-added interior wall, an opening)
+// where each call should mint a genuinely new, permanent id — unlike
+// polygonToWalls's deterministic per-call ids, which are for a whole
+// perimeter being re-derived from the same in-progress corner list.
+export function nextWallId(): string {
   wallIdCounter += 1;
   return `wall-${Date.now()}-${wallIdCounter}`;
+}
+
+export function nextOpeningId(): string {
+  wallIdCounter += 1;
+  return `opening-${Date.now()}-${wallIdCounter}`;
 }
 
 // Snaps a freshly-clicked point so the segment from the previous point is
@@ -19,12 +28,20 @@ export function snapOrthogonal(prev: Point, raw: Point): Point {
 }
 
 // Converts a closed polygon (corner points, in order) into wall segments.
+// Ids are deterministic by corner index ("ext-0", "ext-1", ...) rather than
+// from the global counter — a caller that re-derives a live preview from
+// the same in-progress corner list (e.g. while placing doors/windows before
+// the shape is finalised) gets the same ids back each time, so anything
+// already referencing a wallId (a WallOpening, a measurement lock) doesn't
+// silently orphan itself the next time this runs. Only breaks if the corner
+// count/order itself changes between placing something and saving.
 export function polygonToWalls(points: Point[]): WallSegment[] {
   if (points.length < 2) return [];
   return points.map((start, i) => ({
-    id: nextWallId(),
+    id: `ext-${i}`,
     start,
     end: points[(i + 1) % points.length],
+    kind: "exterior" as const,
   }));
 }
 
@@ -202,6 +219,16 @@ function nearestMountWall(p: Point, walls: WallSegment[]): WallSegment | null {
     }
   }
   return nearest;
+}
+
+// Finds the wall a tapped point should be attached to (same "prefer a
+// genuine perpendicular foot" rule as snapToNearestWall/autoRotationForWallMount)
+// plus the scalar offset along it — used by manual door/window placement to
+// resolve a tap into a {wallId, offset} pair.
+export function nearestWallAndOffset(p: Point, walls: WallSegment[]): { wall: WallSegment; offset: number } | null {
+  const wall = nearestMountWall(p, walls);
+  if (!wall) return null;
+  return { wall, offset: projectPointOntoWall(p, wall) };
 }
 
 // Rotation (degrees clockwise) that orients a wall-mounted symbol so its
