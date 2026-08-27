@@ -507,7 +507,23 @@ export default function SetoutCanvas({
     [mode]
   );
 
+  // Deletion fires on pointer UP, not down — mutating the wall list
+  // straight out of the pointerdown handler removes that same element's
+  // DOM node mid-gesture, which on some browsers/devices leaves pointer
+  // capture stuck on the now-vanished node and silently swallows every
+  // tap after the first. Down only claims the gesture (stopPropagation so
+  // the background handler doesn't also treat it as a sketch tap); the
+  // actual delete waits for the matching up, by which point the down/up
+  // pair has finished dispatching normally on a still-present element.
   const handleWallPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (mode !== "erase-wall") return;
+      e.stopPropagation();
+    },
+    [mode]
+  );
+
+  const handleWallPointerUp = useCallback(
     (e: React.PointerEvent, wallId: string) => {
       if (mode !== "erase-wall") return;
       e.stopPropagation();
@@ -689,7 +705,8 @@ export default function SetoutCanvas({
               <g
                 key={wall.id}
                 className={erasable ? "text-destructive cursor-pointer" : wall.kind === "interior" ? "text-foreground/60" : "text-foreground"}
-                onPointerDown={erasable ? (e) => handleWallPointerDown(e, wall.id) : undefined}
+                onPointerDown={erasable ? handleWallPointerDown : undefined}
+                onPointerUp={erasable ? (e) => handleWallPointerUp(e, wall.id) : undefined}
               >
                 {segments.map((seg, i) => (
                   <g key={i}>
