@@ -312,7 +312,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
 
   if (step === "calibrate" && raster) {
     return (
-      <div className="flex flex-col h-full px-5 py-6 max-w-6xl mx-auto w-full">
+      <div className="flex flex-col h-full overflow-y-auto px-5 py-6 max-w-6xl mx-auto w-full">
         <button onClick={() => setStep("select-file")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
@@ -377,7 +377,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     };
 
     return (
-      <div className="flex flex-col h-full px-5 py-6 max-w-6xl mx-auto w-full">
+      <div className="flex flex-col h-full overflow-y-auto px-5 py-6 max-w-6xl mx-auto w-full">
         <button onClick={() => setStep("calibrate")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
@@ -563,7 +563,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     };
 
     return (
-      <div className="flex flex-col h-full px-5 py-6 max-w-6xl mx-auto w-full">
+      <div className="flex flex-col h-full overflow-y-auto px-5 py-6 max-w-6xl mx-auto w-full">
         <button
           onClick={() => setStep("trace-walls")}
           className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4"
@@ -672,7 +672,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     };
 
     return (
-      <div className="flex flex-col h-full px-5 py-6 max-w-6xl mx-auto w-full">
+      <div className="flex flex-col h-full overflow-y-auto px-5 py-6 max-w-6xl mx-auto w-full">
         <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">What does each colour mean?</h2>
         <p className="text-xs text-muted-foreground mb-4">
           AI found {aiMarks.length} hand-marked location{aiMarks.length === 1 ? "" : "s"} across {colors.length} colour
