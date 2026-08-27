@@ -312,7 +312,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
 
   if (step === "calibrate" && raster) {
     return (
-      <div className="flex flex-col h-full px-5 py-6 max-w-3xl mx-auto w-full">
+      <div className="flex flex-col h-full px-5 py-6 max-w-6xl mx-auto w-full">
         <button onClick={() => setStep("select-file")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
@@ -323,7 +323,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
             : "Zoom in and tap two points on the plan that you know the real distance between — a wall length, a door width, a dimension already marked."}{" "}
           Use the pan tool (bottom right) to move around once zoomed in.
         </p>
-        <div className="flex-1 min-h-[360px] mb-4">
+        <div className="flex-1 min-h-[480px] mb-4">
           <SetoutCanvas
             backgroundImage={{ href: raster.href, width: raster.naturalWidth, height: raster.naturalHeight }}
             walls={[]}
@@ -377,7 +377,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     };
 
     return (
-      <div className="flex flex-col h-full px-5 py-6 max-w-3xl mx-auto w-full">
+      <div className="flex flex-col h-full px-5 py-6 max-w-6xl mx-auto w-full">
         <button onClick={() => setStep("calibrate")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
@@ -425,7 +425,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
           </div>
         )}
 
-        <div className="flex-1 min-h-[360px] mb-4">
+        <div className="flex-1 min-h-[480px] mb-4">
           <SetoutCanvas
             backgroundImage={backgroundImage}
             walls={previewWalls}
@@ -510,6 +510,28 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
                 Close shape
               </Button>
             </>
+          ) : wallTool === "interior" ? (
+            <>
+              <Button
+                variant="outline"
+                className="flex-1"
+                disabled={interiorWalls.length === 0 && !interiorDraftStart}
+                onClick={() => {
+                  if (interiorWalls.length > 0) {
+                    const last = interiorWalls[interiorWalls.length - 1];
+                    setInteriorWalls((prev) => prev.slice(0, -1));
+                    setInteriorDraftStart(last.start);
+                  } else {
+                    setInteriorDraftStart(null);
+                  }
+                }}
+              >
+                Undo wall
+              </Button>
+              <Button className="flex-1 font-bold" disabled={saveGeometry.isPending} onClick={() => finishTrace()}>
+                {saveGeometry.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save walls"}
+              </Button>
+            </>
           ) : (
             <Button className="flex-1 font-bold" disabled={saveGeometry.isPending} onClick={() => finishTrace()}>
               {saveGeometry.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save walls"}
@@ -541,7 +563,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     };
 
     return (
-      <div className="flex flex-col h-full px-5 py-6 max-w-3xl mx-auto w-full">
+      <div className="flex flex-col h-full px-5 py-6 max-w-6xl mx-auto w-full">
         <button
           onClick={() => setStep("trace-walls")}
           className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4"
@@ -554,7 +576,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
           exact, not the tapping. The preview redraws true to scale as you type.
         </p>
 
-        <div className="flex-1 min-h-[280px] mb-4">
+        <div className="flex-1 min-h-[420px] mb-4">
           <SetoutCanvas backgroundImage={backgroundImage} walls={previewWalls} mode="view" />
         </div>
 
@@ -650,7 +672,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     };
 
     return (
-      <div className="flex flex-col h-full px-5 py-6 max-w-3xl mx-auto w-full">
+      <div className="flex flex-col h-full px-5 py-6 max-w-6xl mx-auto w-full">
         <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">What does each colour mean?</h2>
         <p className="text-xs text-muted-foreground mb-4">
           AI found {aiMarks.length} hand-marked location{aiMarks.length === 1 ? "" : "s"} across {colors.length} colour
@@ -688,7 +710,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
           })}
         </div>
 
-        <div className="flex-1 min-h-[260px] mb-4">
+        <div className="flex-1 min-h-[400px] mb-4">
           <SetoutCanvas
             backgroundImage={{ href: raster.href, width: raster.naturalWidth / pixelsPerMetre, height: raster.naturalHeight / pixelsPerMetre }}
             walls={savedWalls}

@@ -54,7 +54,7 @@ export default function DrawWallsFlow({ plan, onBack, onComplete }: DrawWallsFlo
 
   if (step === "sketch") {
     return (
-      <div className="flex flex-col h-full px-5 py-6 max-w-3xl mx-auto w-full">
+      <div className="flex flex-col h-full px-5 py-6 max-w-6xl mx-auto w-full">
         <button onClick={onBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
@@ -62,7 +62,7 @@ export default function DrawWallsFlow({ plan, onBack, onComplete }: DrawWallsFlo
         <p className="text-xs text-muted-foreground mb-4">
           Tap each corner as you see it on the frame, in order — walls snap square automatically. Tap the first corner again (or the button below) to close the shape.
         </p>
-        <div className="flex-1 min-h-[360px] mb-4">
+        <div className="flex-1 min-h-[480px] mb-4">
           <SetoutCanvas
             walls={[]}
             mode="sketch-walls"
@@ -85,14 +85,14 @@ export default function DrawWallsFlow({ plan, onBack, onComplete }: DrawWallsFlo
   }
 
   return (
-    <div className="flex flex-col h-full px-5 py-6 max-w-3xl mx-auto w-full">
+    <div className="flex flex-col h-full px-5 py-6 max-w-6xl mx-auto w-full">
       <button onClick={() => setStep("sketch")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
         <ArrowLeft className="h-4 w-4" /> Back to sketch
       </button>
       <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Enter real wall lengths</h2>
       <p className="text-xs text-muted-foreground mb-4">Type the tape-measure length of each wall, in metres. The shape redraws true to scale.</p>
 
-      <div className="flex-1 min-h-[280px] mb-4">
+      <div className="flex-1 min-h-[420px] mb-4">
         <SetoutCanvas walls={previewWalls} mode="view" />
       </div>
 

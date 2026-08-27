@@ -57,7 +57,7 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
   };
 
   return (
-    <div className="flex flex-col h-full px-5 py-6 max-w-3xl mx-auto w-full">
+    <div className="flex flex-col h-full px-5 py-6 max-w-6xl mx-auto w-full">
       <button onClick={onClose} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
         <ArrowLeft className="h-4 w-4" /> Back
       </button>
@@ -101,7 +101,7 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
         </div>
       )}
 
-      <div className="flex-1 min-h-[360px] mb-4">
+      <div className="flex-1 min-h-[480px] mb-4">
         <SetoutCanvas
           walls={walls}
           openings={openings}
@@ -120,6 +120,25 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
           }
         />
       </div>
+
+      {tool === "interior" && (interiorWalls.length > 0 || draftStart) && (
+        <Button
+          variant="outline"
+          className="w-full mb-3"
+          disabled={interiorWalls.length === 0 && !draftStart}
+          onClick={() => {
+            if (interiorWalls.length > 0) {
+              const last = interiorWalls[interiorWalls.length - 1];
+              setInteriorWalls((prev) => prev.slice(0, -1));
+              setDraftStart(last.start);
+            } else {
+              setDraftStart(null);
+            }
+          }}
+        >
+          Undo wall
+        </Button>
+      )}
 
       {tool === "interior" && interiorWalls.length > 0 && (
         <div className="space-y-1.5 mb-4 max-h-32 overflow-y-auto">
