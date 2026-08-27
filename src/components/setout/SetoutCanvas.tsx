@@ -2,7 +2,17 @@ import { useRef, useState, useCallback, useMemo, useEffect } from "react";
 import { Hand, Minus, Plus, MousePointer2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
-import { gangsFor, isSingleWallFitting, type Point, type SetoutFitting, type WallSegment, type WallLock, type LayerVisibility } from "@/lib/setoutTypes";
+import {
+  colorForCircuit,
+  gangsFor,
+  isSingleWallFitting,
+  type Point,
+  type SetoutCircuit,
+  type SetoutFitting,
+  type WallSegment,
+  type WallLock,
+  type LayerVisibility,
+} from "@/lib/setoutTypes";
 import { snapOrthogonal, isNearFirstPoint, lightPoolRadius, poolsSignificantlyOverlap, closestPointOnWall, snapToNearestWall, alignToExistingPoints } from "@/lib/setoutGeometry";
 
 interface ViewBox {
@@ -50,6 +60,7 @@ interface SetoutCanvasProps {
   onLinkTargetTap?: (fittingId: string) => void;
   multiSelectIds?: Set<string>;
   onMultiSelectToggle?: (fittingId: string) => void;
+  circuits?: SetoutCircuit[];
   className?: string;
 }
 
@@ -92,6 +103,7 @@ export default function SetoutCanvas({
   onLinkTargetTap,
   multiSelectIds,
   onMultiSelectToggle,
+  circuits = [],
   className,
 }: SetoutCanvasProps) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -521,6 +533,12 @@ export default function SetoutCanvas({
           // icon visibly drifts off-position at anything but 0°/360°.
           const anchorX = 12;
           const anchorY = isSingleWallFitting(f.type) ? 20.5 : 12;
+          // Once a fitting is assigned to a circuit, its icon takes on that
+          // circuit's colour (see colorForCircuit) instead of the default
+          // foreground — a quick visual "which circuit is this on" cue that
+          // doesn't require opening the circuits panel. Selection/active
+          // states still win over the circuit tint since they're transient.
+          const circuitColor = colorForCircuit(circuits, f.circuit_id);
           return (
             <g
               key={f.id}
@@ -542,7 +560,8 @@ export default function SetoutCanvas({
               />
               <Icon
                 size={24}
-                className={selected || isActiveSwitch ? "text-primary" : "text-foreground"}
+                className={selected || isActiveSwitch || circuitColor ? "text-primary" : "text-foreground"}
+                style={circuitColor && !selected && !isActiveSwitch ? { color: circuitColor } : undefined}
                 strokeWidth={selected || isActiveSwitch ? 2 : 1.5}
                 {...symbolExtraProps}
               />

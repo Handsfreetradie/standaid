@@ -393,6 +393,7 @@ const SetoutPlan = () => {
                 onLinkTargetTap={handleLinkTargetTap}
                 multiSelectIds={multiSelectIds}
                 onMultiSelectToggle={handleMultiSelectToggle}
+                circuits={circuits}
                 className="h-full"
               />
             </div>

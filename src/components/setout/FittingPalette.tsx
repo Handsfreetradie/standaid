@@ -103,8 +103,8 @@ const FittingPalette = ({
     <div className="space-y-2">
       {selectedFittingId && (
         <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 space-y-2">
-          <div className="flex items-start justify-between flex-wrap gap-y-1">
-            <span className="text-xs font-medium text-muted-foreground py-1.5">
+          <div className="space-y-1.5">
+            <span className="text-xs font-medium text-muted-foreground">
               Fitting selected
               {selectedFitting?.status === "confirmed" && (
                 <span className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-medium text-primary bg-primary/10 rounded px-1.5 py-0.5">
@@ -112,12 +112,12 @@ const FittingPalette = ({
                 </span>
               )}
             </span>
-            <div className="flex items-center gap-1 flex-wrap justify-end">
+            <div className="grid grid-cols-2 gap-1">
               {onUpdateStatus && selectedFitting && (
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-8 gap-1.5 text-muted-foreground"
+                  className="h-8 gap-1.5 justify-start text-muted-foreground"
                   onClick={() => onUpdateStatus(selectedFitting.status === "confirmed" ? "placed" : "confirmed")}
                 >
                   {selectedFitting.status === "confirmed" ? (
@@ -132,7 +132,7 @@ const FittingPalette = ({
                 </Button>
               )}
               {onRotate && selectedFitting && (
-                <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-muted-foreground" onClick={onRotate}>
+                <Button variant="ghost" size="sm" className="h-8 gap-1.5 justify-start text-muted-foreground" onClick={onRotate}>
                   <RotateCw className="h-3.5 w-3.5" />
                   Rotate
                 </Button>
@@ -141,7 +141,7 @@ const FittingPalette = ({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-8 gap-1.5 text-muted-foreground"
+                  className="h-8 gap-1.5 justify-start text-muted-foreground"
                   onClick={() => onUpdateSpecs({ ...selectedFitting.specs, locked: !selectedFitting.specs.locked })}
                 >
                   {selectedFitting.specs.locked ? (
@@ -155,7 +155,12 @@ const FittingPalette = ({
                   )}
                 </Button>
               )}
-              <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-destructive hover:text-destructive" onClick={onDeleteSelected}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 gap-1.5 justify-start text-destructive hover:text-destructive"
+                onClick={onDeleteSelected}
+              >
                 <Trash2 className="h-3.5 w-3.5" />
                 Delete
               </Button>

@@ -15,7 +15,7 @@ import {
   useDeleteSetoutCircuit,
   useAssignFittingCircuit,
 } from "@/hooks/useSetoutCircuits";
-import type { SetoutCircuit } from "@/lib/setoutTypes";
+import { colorForCircuit, type SetoutCircuit } from "@/lib/setoutTypes";
 
 interface CircuitsPanelProps {
   planId: string;
@@ -189,14 +189,20 @@ export default function CircuitsPanel({ planId }: CircuitsPanelProps) {
                     </div>
                   ) : (
                     <div className="flex items-start justify-between gap-2">
-                      <button type="button" className="flex-1 min-w-0 text-left" onClick={() => startEdit(circuit)}>
-                        <p className="text-sm font-semibold text-foreground truncate">{circuit.label}</p>
-                        {circuit.description && <p className="text-xs text-muted-foreground truncate">{circuit.description}</p>}
-                        {circuit.breaker_rating && (
-                          <span className="inline-block mt-1 text-[10px] font-medium text-primary bg-primary/10 rounded px-1.5 py-0.5">
-                            {circuit.breaker_rating}
-                          </span>
-                        )}
+                      <button type="button" className="flex-1 min-w-0 text-left flex items-start gap-2" onClick={() => startEdit(circuit)}>
+                        <span
+                          className="mt-1.5 h-2.5 w-2.5 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: colorForCircuit(circuits, circuit.id) ?? undefined }}
+                        />
+                        <span className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-foreground truncate">{circuit.label}</p>
+                          {circuit.description && <p className="text-xs text-muted-foreground truncate">{circuit.description}</p>}
+                          {circuit.breaker_rating && (
+                            <span className="inline-block mt-1 text-[10px] font-medium text-primary bg-primary/10 rounded px-1.5 py-0.5">
+                              {circuit.breaker_rating}
+                            </span>
+                          )}
+                        </span>
                       </button>
                       <div className="flex items-center gap-1 flex-shrink-0">
                         <Button
@@ -241,10 +247,14 @@ export default function CircuitsPanel({ planId }: CircuitsPanelProps) {
           <div className="space-y-2">
             {circuits.map((circuit) => {
               const assigned = fittingsByCircuit(circuit.id);
+              const color = colorForCircuit(circuits, circuit.id);
               return (
                 <Card key={circuit.id} className="p-3 rounded-xl">
                   <div className="flex items-center justify-between mb-1.5">
-                    <p className="text-sm font-semibold text-foreground">{circuit.label}</p>
+                    <p className="text-sm font-semibold text-foreground flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color ?? undefined }} />
+                      {circuit.label}
+                    </p>
                     <div className="flex items-center gap-2">
                       {circuit.breaker_rating && (
                         <span className="text-[10px] font-medium text-primary bg-primary/10 rounded px-1.5 py-0.5">
@@ -265,9 +275,10 @@ export default function CircuitsPanel({ planId }: CircuitsPanelProps) {
                         return (
                           <span
                             key={fitting.id}
-                            className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/50 px-1.5 py-1 text-[11px] text-foreground"
+                            className="inline-flex items-center gap-1 rounded-md border px-1.5 py-1 text-[11px] text-foreground"
+                            style={color ? { borderColor: `${color}66`, backgroundColor: `${color}14` } : undefined}
                           >
-                            <Icon size={14} className="text-primary" strokeWidth={1.5} />
+                            <Icon size={14} strokeWidth={1.5} style={color ? { color } : undefined} className={color ? undefined : "text-primary"} />
                             {FITTING_LABELS[fitting.type]}
                           </span>
                         );

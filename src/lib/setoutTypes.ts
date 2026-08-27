@@ -226,6 +226,31 @@ export interface SetoutCircuit {
   created_at: string;
 }
 
+// Circuits have no stored colour (no DB column for it) — instead each
+// circuit gets a stable colour derived from its position in the plan's
+// circuit list, which is itself stably ordered by created_at. Every
+// consumer (canvas icons, circuit legend) calls this rather than picking
+// colours independently, so a fitting always matches its circuit's swatch.
+const CIRCUIT_COLOR_PALETTE = [
+  "#e11d48", // rose
+  "#2563eb", // blue
+  "#16a34a", // green
+  "#d97706", // amber
+  "#7c3aed", // violet
+  "#0891b2", // cyan
+  "#db2777", // pink
+  "#65a30d", // lime
+  "#ea580c", // orange
+  "#4f46e5", // indigo
+];
+
+export function colorForCircuit(circuits: Pick<SetoutCircuit, "id">[], circuitId: string | null | undefined): string | null {
+  if (!circuitId) return null;
+  const index = circuits.findIndex((c) => c.id === circuitId);
+  if (index === -1) return null;
+  return CIRCUIT_COLOR_PALETTE[index % CIRCUIT_COLOR_PALETTE.length];
+}
+
 export function distance(a: Point, b: Point): number {
   return Math.hypot(b.x - a.x, b.y - a.y);
 }
