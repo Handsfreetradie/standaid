@@ -2,15 +2,81 @@
 // plain data (no React/DB/Supabase calls) so the caller decides how the
 // plan/fittings/circuits were fetched. Follows the pattern in auditReport.ts.
 import jsPDF from "jspdf";
-import { FITTING_LABELS } from "@/components/setout/symbols";
+import { createElement } from "react";
+import { FITTING_LABELS, FITTING_SYMBOLS } from "@/components/setout/symbols";
 import type { FittingType } from "@/components/setout/symbols";
-import { CATEGORY_FOR_TYPE, FITTING_CATEGORY_ORDER, gangsFor, LAYER_LABELS, type Point, type SetoutCircuit, type SetoutFitting, type SetoutPlan } from "@/lib/setoutTypes";
+import {
+  CATEGORY_FOR_TYPE,
+  FITTING_CATEGORY_ORDER,
+  colorForCircuit,
+  gangsFor,
+  symbolExtraPropsFor,
+  LAYER_LABELS,
+  type Point,
+  type SetoutCircuit,
+  type SetoutFitting,
+  type SetoutPlan,
+} from "@/lib/setoutTypes";
 import { wallLength, pointAtOffset, wallsCentroid, roomFacingNormal } from "@/lib/setoutGeometry";
 
 const PAGE_W = 210; // A4 mm
 const PAGE_H = 297;
 const MARGIN = 15;
 const CONTENT_W = PAGE_W - MARGIN * 2;
+const SYMBOL_SIZE_MM = 5;
+const UNASSIGNED_SYMBOL_COLOR = "#1a1a1a";
+
+function hexToRgb(hex: string): [number, number, number] {
+  const clean = hex.replace("#", "");
+  const num = parseInt(clean, 16);
+  return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+}
+
+// Both svg2pdf.js and react-dom/server are only ever needed for this one
+// export action, not on every app load — dynamically imported once per
+// generateSetoutReportPdf call (below) and threaded through, rather than
+// statically imported at module scope, which pushed the main JS bundle
+// over the PWA precache size limit and broke the production build.
+type Svg2Pdf = (element: Element, pdf: jsPDF, options?: { x?: number; y?: number; width?: number; height?: number }) => Promise<jsPDF>;
+type RenderToStaticMarkup = (element: ReturnType<typeof createElement>) => string;
+
+// Renders a fitting's actual on-screen symbol (FITTING_SYMBOLS) as real
+// vector paths in the PDF, instead of a generic dot — reuses the exact same
+// React components the canvas uses (renderToStaticMarkup, no live DOM
+// needed) rather than hand-redrawing 39 shapes with jsPDF primitives, so
+// the two stay in sync automatically. currentColor is substituted with a
+// literal hex value (not left to CSS resolution) since the parsed SVG is a
+// detached document — computed-style/cascade resolution isn't reliable for
+// an element that was never attached to the visible page.
+async function drawFittingSymbol(
+  doc: jsPDF,
+  fitting: SetoutFitting,
+  pagePos: Point,
+  color: string,
+  svg2pdf: Svg2Pdf,
+  renderToStaticMarkup: RenderToStaticMarkup,
+): Promise<void> {
+  const Icon = FITTING_SYMBOLS[fitting.type];
+  if (!Icon) return;
+  const extraProps = symbolExtraPropsFor(fitting);
+  const markup = renderToStaticMarkup(createElement(Icon, { size: 24, strokeWidth: 1.5, ...extraProps }));
+  const colored = markup.replace(/currentColor/g, color);
+  const parsed = new DOMParser().parseFromString(colored, "image/svg+xml");
+  const svgEl = parsed.documentElement;
+  const rotation = fitting.specs.rotation ?? 0;
+  if (rotation) {
+    const g = parsed.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.setAttribute("transform", `rotate(${rotation} 12 12)`);
+    while (svgEl.firstChild) g.appendChild(svgEl.firstChild);
+    svgEl.appendChild(g);
+  }
+  await svg2pdf(svgEl, doc, {
+    x: pagePos.x - SYMBOL_SIZE_MM / 2,
+    y: pagePos.y - SYMBOL_SIZE_MM / 2,
+    width: SYMBOL_SIZE_MM,
+    height: SYMBOL_SIZE_MM,
+  });
+}
 
 const CODE_PREFIX: Record<FittingType, string> = {
   // Lighting
@@ -95,7 +161,15 @@ function drawPageHeader(doc: jsPDF, plan: SetoutPlan, sectionTitle: string): num
   return y;
 }
 
-function drawPlanPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting[], codes: Map<string, string>): void {
+async function drawPlanPage(
+  doc: jsPDF,
+  plan: SetoutPlan,
+  fittings: SetoutFitting[],
+  circuits: SetoutCircuit[],
+  codes: Map<string, string>,
+  svg2pdf: Svg2Pdf,
+  renderToStaticMarkup: RenderToStaticMarkup,
+): Promise<void> {
   let y = drawPageHeader(doc, plan, "Marked-up plan");
 
   doc.setFontSize(8);
@@ -200,17 +274,16 @@ function drawPlanPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting[], c
       }
     }
 
-    doc.setLineWidth(0.2);
     for (const f of fittings) {
       const p = toPage(f.position);
       const code = codes.get(f.id) ?? "?";
-      doc.setFillColor(30, 100, 200);
-      doc.setDrawColor(30, 100, 200);
-      doc.circle(p.x, p.y, 1.3, "FD");
+      const color = colorForCircuit(circuits, f.circuit_id) ?? UNASSIGNED_SYMBOL_COLOR;
+      await drawFittingSymbol(doc, f, p, color, svg2pdf, renderToStaticMarkup);
 
       doc.setFontSize(6.5);
-      doc.setTextColor(20);
-      doc.text(code, p.x + 2, p.y - 1.2);
+      const [r, g, b] = hexToRgb(color);
+      doc.setTextColor(r, g, b);
+      doc.text(code, p.x + 3, p.y - 1.2);
 
       if (f.measurement_lock) {
         doc.setFontSize(5.5);
@@ -365,6 +438,10 @@ function drawCableRunPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting[
   }
 }
 
+// A proper ruled circuit schedule / switchboard directory card — the AU
+// trade convention — rather than a plain text list: Circuit | Breaker |
+// Points served columns, a colour swatch per row matching that circuit's
+// on-screen colour (colorForCircuit), shaded header, banded rows.
 function drawSwitchboardPage(
   doc: jsPDF,
   plan: SetoutPlan,
@@ -373,71 +450,102 @@ function drawSwitchboardPage(
   codes: Map<string, string>,
 ): void {
   let y = drawPageHeader(doc, plan, "Switchboard legend");
+
+  const unassigned = fittings.filter((f) => !f.circuit_id);
+  if (circuits.length === 0 && unassigned.length === 0) {
+    doc.setFontSize(10);
+    doc.setTextColor(120);
+    doc.text("No circuits set up yet.", MARGIN, y + 4);
+    return;
+  }
+
+  const colSwatchW = 6;
+  const colCircuitW = 48;
+  const colBreakerW = 20;
+  const colPointsW = CONTENT_W - colSwatchW - colCircuitW - colBreakerW;
+  const xSwatch = MARGIN;
+  const xCircuit = xSwatch + colSwatchW + 2;
+  const xBreaker = xCircuit + colCircuitW;
+  const xPoints = xBreaker + colBreakerW;
+
+  const drawHeaderRow = () => {
+    doc.setFillColor(235, 237, 240);
+    doc.rect(MARGIN, y, CONTENT_W, 7, "F");
+    doc.setFontSize(8.5);
+    doc.setTextColor(60);
+    doc.text("Circuit", xCircuit, y + 5);
+    doc.text("Breaker", xBreaker, y + 5);
+    doc.text("Points served", xPoints, y + 5);
+    y += 7;
+  };
+
   const ensureSpace = (needed: number) => {
     if (y + needed > PAGE_H - MARGIN) {
       doc.addPage();
       y = MARGIN;
+      drawHeaderRow();
     }
   };
 
-  if (circuits.length === 0) {
-    doc.setFontSize(10);
-    doc.setTextColor(120);
-    doc.text("No circuits set up yet.", MARGIN, y + 4);
-    y += 10;
-  } else {
-    for (const c of circuits) {
-      ensureSpace(10);
-      doc.setFontSize(10);
-      doc.setTextColor(20);
-      const rating = c.breaker_rating ? ` (${c.breaker_rating})` : "";
-      doc.text(`${c.label}${rating}`, MARGIN, y);
-      y += 5;
+  drawHeaderRow();
 
-      if (c.description) {
-        doc.setFontSize(8.5);
-        doc.setTextColor(90);
-        const lines = doc.splitTextToSize(c.description, CONTENT_W);
-        ensureSpace(lines.length * 4);
-        doc.text(lines, MARGIN, y);
-        y += lines.length * 4;
-      }
+  let rowIndex = 0;
+  const drawRow = (label: string, breaker: string, pointsText: string, description: string | null, color: string | null) => {
+    doc.setFontSize(8.5);
+    const pointsLines: string[] = doc.splitTextToSize(pointsText || "—", colPointsW - 2);
+    const descLines: string[] = description ? doc.splitTextToSize(description, colCircuitW + colBreakerW - 2) : [];
+    const bodyLines = Math.max(pointsLines.length, 1 + descLines.length);
+    const rowH = Math.max(7, bodyLines * 4 + 2);
 
-      const assigned = fittings.filter((f) => f.circuit_id === c.id);
-      doc.setFontSize(9);
-      doc.setTextColor(60);
-      if (assigned.length === 0) {
-        ensureSpace(5);
-        doc.text("No fittings assigned.", MARGIN + 4, y);
-        y += 5;
-      } else {
-        const codesText = assigned.map((f) => codes.get(f.id) ?? "?").join(", ");
-        const lines = doc.splitTextToSize(codesText, CONTENT_W - 4);
-        ensureSpace(lines.length * 4.2);
-        doc.text(lines, MARGIN + 4, y);
-        y += lines.length * 4.2;
-      }
-      y += 4;
-      doc.setDrawColor(235);
-      doc.line(MARGIN, y - 2, PAGE_W - MARGIN, y - 2);
+    ensureSpace(rowH);
+
+    if (rowIndex % 2 === 1) {
+      doc.setFillColor(248, 248, 249);
+      doc.rect(MARGIN, y, CONTENT_W, rowH, "F");
     }
+
+    if (color) {
+      const [r, g, b] = hexToRgb(color);
+      doc.setFillColor(r, g, b);
+    } else {
+      doc.setFillColor(200, 200, 200);
+    }
+    doc.circle(xSwatch + colSwatchW / 2, y + rowH / 2, 1.8, "F");
+
+    doc.setFontSize(9);
+    doc.setTextColor(20);
+    doc.text(label, xCircuit, y + 4.5);
+    if (descLines.length > 0) {
+      doc.setFontSize(7.5);
+      doc.setTextColor(110);
+      doc.text(descLines, xCircuit, y + 4.5 + 4);
+    }
+
+    doc.setFontSize(8.5);
+    doc.setTextColor(60);
+    doc.text(breaker || "—", xBreaker, y + 4.5);
+    doc.text(pointsLines, xPoints, y + 4.5);
+
+    doc.setDrawColor(225);
+    doc.setLineWidth(0.15);
+    doc.line(MARGIN, y + rowH, MARGIN + CONTENT_W, y + rowH);
+    doc.line(xCircuit - 2, y, xCircuit - 2, y + rowH);
+    doc.line(xBreaker - 2, y, xBreaker - 2, y + rowH);
+    doc.line(xPoints - 2, y, xPoints - 2, y + rowH);
+
+    y += rowH;
+    rowIndex++;
+  };
+
+  for (const c of circuits) {
+    const assigned = fittings.filter((f) => f.circuit_id === c.id);
+    const pointsText = assigned.length === 0 ? "None assigned" : assigned.map((f) => codes.get(f.id) ?? "?").join(", ");
+    drawRow(c.label, c.breaker_rating || "—", pointsText, c.description || null, colorForCircuit(circuits, c.id));
   }
 
-  const unassigned = fittings.filter((f) => !f.circuit_id);
   if (unassigned.length > 0) {
-    ensureSpace(10);
-    y += 2;
-    doc.setFontSize(10);
-    doc.setTextColor(20);
-    doc.text("Unassigned", MARGIN, y);
-    y += 5;
-    doc.setFontSize(9);
-    doc.setTextColor(60);
-    const codesText = unassigned.map((f) => codes.get(f.id) ?? "?").join(", ");
-    const lines = doc.splitTextToSize(codesText, CONTENT_W);
-    ensureSpace(lines.length * 4.2);
-    doc.text(lines, MARGIN, y);
-    y += lines.length * 4.2;
+    const pointsText = unassigned.map((f) => codes.get(f.id) ?? "?").join(", ");
+    drawRow("Unassigned", "—", pointsText, null, null);
   }
 }
 
@@ -447,10 +555,11 @@ export async function generateSetoutReportPdf(opts: {
   circuits: SetoutCircuit[];
 }): Promise<jsPDF> {
   const { plan, fittings, circuits } = opts;
+  const [{ svg2pdf }, { renderToStaticMarkup }] = await Promise.all([import("svg2pdf.js"), import("react-dom/server")]);
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const codes = buildFittingCodes(fittings);
 
-  drawPlanPage(doc, plan, fittings, codes);
+  await drawPlanPage(doc, plan, fittings, circuits, codes, svg2pdf, renderToStaticMarkup);
   doc.addPage();
   drawMeasurementPage(doc, plan, fittings, codes);
   doc.addPage();

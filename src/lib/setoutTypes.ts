@@ -159,6 +159,23 @@ export function gangsFor(fitting: Pick<SetoutFitting, "specs">): string[][] {
   return fitting.specs.gangs && fitting.specs.gangs.length > 0 ? fitting.specs.gangs : [[]];
 }
 
+// GPO/para-flood/1200-fluoro carry a `count` spec and GPO also a `variant`;
+// downlight carries `downlightSizeMm`; switch derives `gangCount` from its
+// gangs. The shared FITTING_SYMBOLS map (symbols/fittingSymbolMap.ts) is
+// typed to the common SetoutSymbolProps only, so these per-type extras are
+// resolved here as a single source of truth — both the on-screen canvas
+// (SetoutCanvas.tsx) and the PDF export (setoutReport.ts) call this rather
+// than each keeping their own copy of this switch statement.
+export function symbolExtraPropsFor(fitting: Pick<SetoutFitting, "type" | "specs">): Record<string, unknown> {
+  const { type, specs } = fitting;
+  if (type === "gpo" || type === "para_flood" || type === "fluoro_1200") {
+    return { count: specs.count ?? 1, ...(type === "gpo" ? { variant: specs.gpoVariant ?? "standard" } : {}) };
+  }
+  if (type === "downlight") return { sizeMm: specs.downlightSizeMm ?? 90 };
+  if (type === "switch") return { gangCount: Math.min(4, gangsFor(fitting).length) };
+  return {};
+}
+
 export type FittingStatus = "placed" | "confirmed";
 
 export interface SetoutFitting {

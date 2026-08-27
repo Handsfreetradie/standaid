@@ -6,6 +6,7 @@ import {
   colorForCircuit,
   gangsFor,
   isSingleWallFitting,
+  symbolExtraPropsFor,
   type Point,
   type SetoutCircuit,
   type SetoutFitting,
@@ -730,21 +731,7 @@ export default function SetoutCanvas({
           const isActiveSwitch = mode === "link-switches" && f.id === linkActiveSwitchId;
           const isLinkTarget = mode === "link-switches" && !!linkActiveSwitchId;
           const isMultiSelected = mode === "select-multiple" && !!multiSelectIds?.has(f.id);
-          // GPO/para-flood/1200-fluoro carry a `count` spec and GPO also a
-          // `variant`; downlight carries `downlightSizeMm`. The shared
-          // FITTING_SYMBOLS map is typed to the common SetoutSymbolProps
-          // only, so these per-type extras are passed as a loosely-typed
-          // spread here rather than threading a discriminated prop type
-          // through the whole map — same "as any" escape hatch already used
-          // elsewhere in this repo for similar type-widening spots.
-          const symbolExtraProps: Record<string, unknown> =
-            f.type === "gpo" || f.type === "para_flood" || f.type === "fluoro_1200"
-              ? { count: f.specs.count ?? 1, ...(f.type === "gpo" ? { variant: f.specs.gpoVariant ?? "standard" } : {}) }
-              : f.type === "downlight"
-                ? { sizeMm: f.specs.downlightSizeMm ?? 90 }
-                : f.type === "switch"
-                  ? { gangCount: Math.min(4, gangsFor(f).length) }
-                  : {};
+          const symbolExtraProps = symbolExtraPropsFor(f);
           const rotation = f.specs.rotation ?? 0;
           // Wall-mounted symbols anchor at their base (bottom-centre, where
           // GpoSymbol/SwitchSymbol and friends draw their wall baseline)
