@@ -61,6 +61,22 @@ export interface WallSegment {
   id: string;
   start: Point;
   end: Point;
+  // Absent/undefined means "exterior" — every wall created before this field
+  // existed (the single-perimeter trace/draw flows) is exterior, so this
+  // keeps old saved plans rendering and measuring exactly as before.
+  kind?: "exterior" | "interior";
+}
+
+// A door or window cut into a wall, parametric against that wall (robust to
+// the wall being nudged later) — same convention as MeasurementLock's
+// {wallId, distance}, rather than storing raw coordinates that would drift
+// out of sync if the wall ever moved.
+export interface WallOpening {
+  id: string;
+  wallId: string;
+  offset: number; // metres from wall.start to the opening's near edge
+  width: number; // metres
+  kind: "door" | "window";
 }
 
 export interface ScaleCalibration {
@@ -206,6 +222,7 @@ export interface SetoutPlan {
   source_type: PlanSourceType;
   scale_calibration: ScaleCalibration | null;
   walls: WallSegment[];
+  openings: WallOpening[];
   layer_visibility: LayerVisibility;
   created_at: string;
   updated_at: string;

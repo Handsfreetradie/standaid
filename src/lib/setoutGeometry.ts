@@ -1,4 +1,4 @@
-import { distance, isSingleWallFitting, type Point, type WallSegment, type FittingSpecs, type MeasurementLock } from "./setoutTypes";
+import { distance, isSingleWallFitting, type Point, type WallSegment, type WallOpening, type FittingSpecs, type MeasurementLock } from "./setoutTypes";
 import type { FittingType } from "@/components/setout/symbols";
 
 let wallIdCounter = 0;
@@ -139,6 +139,30 @@ export function perpendicularDistanceToWall(p: Point, wall: WallSegment): number
   return distance(p, closestPointOnWall(p, wall));
 }
 
+// Scalar distance along the wall (from wall.start) to p's perpendicular
+// foot — unclamped, so a caller can tell a point actually past the wall's
+// end from one that just landed at 0/length. This is how a door/window
+// opening's {offset, width} get derived from two raw AI/tap points, and how
+// "does this point fall inside an opening" gets checked in snapToNearestWall.
+export function projectPointOntoWall(p: Point, wall: WallSegment): number {
+  const dx = wall.end.x - wall.start.x;
+  const dy = wall.end.y - wall.start.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const t = ((p.x - wall.start.x) * dx + (p.y - wall.start.y) * dy) / (len * len);
+  return t * len;
+}
+
+function pointAtOffset(wall: WallSegment, offset: number): Point {
+  const len = wallLength(wall) || 1;
+  const t = Math.max(0, Math.min(1, offset / len));
+  return { x: wall.start.x + (wall.end.x - wall.start.x) * t, y: wall.start.y + (wall.end.y - wall.start.y) * t };
+}
+
+// Clearance kept from a door/window opening's edge when a fitting snaps
+// onto the wall it's cut into — a GPO or switch mounted mid-doorway isn't
+// usable, so it gets nudged just clear of the opening instead.
+const OPENING_CLEARANCE_METRES = 0.1;
+
 // True only when `p` has a genuine 90° foot on this wall's segment (not
 // past either end) — i.e. a laser held square to the wall would actually
 // land on it. `closestPointOnWall` clamps to the nearest endpoint once the
@@ -220,7 +244,11 @@ export function autoRotationForWallMount(position: Point, walls: WallSegment[]):
 // diagonally onto a corner; falls back to any wall only if none qualify
 // (e.g. sitting exactly on a corner). Returns the raw point unchanged if
 // there are no walls at all.
-export function snapToNearestWall(p: Point, walls: WallSegment[]): Point {
+//
+// If the snapped spot falls inside a door/window opening on that wall (plus
+// a small clearance either side), it's nudged out to whichever edge of the
+// opening is closer — a GPO or switch mounted mid-doorway isn't usable.
+export function snapToNearestWall(p: Point, walls: WallSegment[], openings: WallOpening[] = []): Point {
   if (walls.length === 0) return p;
   const candidates = walls.filter((wall) => hasPerpendicularFoot(p, wall));
   const pool = candidates.length > 0 ? candidates : walls;
@@ -233,7 +261,20 @@ export function snapToNearestWall(p: Point, walls: WallSegment[]): Point {
       nearestWall = wall;
     }
   }
-  return closestPointOnWall(p, nearestWall);
+  const snapped = closestPointOnWall(p, nearestWall);
+  const wallOpenings = openings.filter((o) => o.wallId === nearestWall.id);
+  if (wallOpenings.length === 0) return snapped;
+  const offset = projectPointOntoWall(snapped, nearestWall);
+  const len = wallLength(nearestWall);
+  for (const o of wallOpenings) {
+    const lo = o.offset - OPENING_CLEARANCE_METRES;
+    const hi = o.offset + o.width + OPENING_CLEARANCE_METRES;
+    if (offset > lo && offset < hi) {
+      const nudgedOffset = offset - lo <= hi - offset ? Math.max(0, lo) : Math.min(len, hi);
+      return pointAtOffset(nearestWall, nudgedOffset);
+    }
+  }
+  return snapped;
 }
 
 // Smart-guide style row/column snapping for downlights: if a downlight

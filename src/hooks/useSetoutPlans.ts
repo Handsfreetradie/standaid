@@ -13,6 +13,7 @@ import {
   type LayerVisibility,
   type FittingSpecs,
   type MeasurementLock,
+  type WallOpening,
   CATEGORY_FOR_TYPE,
   gangsFor,
 } from "@/lib/setoutTypes";
@@ -105,10 +106,10 @@ export function useUpdateSetoutPlanGeometry(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (input: { walls: WallSegment[]; scale_calibration: ScaleCalibration | null }) => {
+    mutationFn: async (input: { walls: WallSegment[]; scale_calibration: ScaleCalibration | null; openings?: WallOpening[] }) => {
       const { data, error } = await sb
         .from("setout_plans")
-        .update({ walls: input.walls, scale_calibration: input.scale_calibration })
+        .update({ walls: input.walls, scale_calibration: input.scale_calibration, openings: input.openings ?? [] })
         .eq("id", planId)
         .select()
         .single();
