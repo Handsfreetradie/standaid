@@ -1,6 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { Image } from "https://deno.land/x/imagescript@1.2.17/mod.ts";
 import { getAllowedOrigin } from "../_shared/cors.ts";
 import { logTokenUsage } from "../_shared/log-usage.ts";
 
@@ -11,166 +10,35 @@ import { logTokenUsage } from "../_shared/log-usage.ts";
 // computeMeasurementLock etc.) after the tradie confirms scale, same as
 // every other Setout mutation is client-driven.
 //
-// Existing-symbol classification (what's this circle-with-a-cross?) proved
-// unreliable in two earlier attempts — see MARK_COLORS below, which
-// replaces that entirely with tradie-applied colour marking instead.
-// Interior walls/openings don't have that classification-ambiguity problem
-// (a wall is unambiguously a wall regardless of how much context is
-// visible), but DO suffer the same "too many precise coordinates in one
-// pass" precision loss a dense real plan can have 15-20+ wall/opening
-// segments. So this task is tiled (Pass 2, below) while corners/scale/marks
-// stay a single whole-image pass (Pass 1) — they're already reliable at
-// their point-counts.
+// Two earlier approaches to detecting EXISTING electrical symbols on a plan
+// (a single whole-image pass, then a tiled multi-pass) both failed real
+// testing — asking a vision model to classify which of 39 subtle
+// professional CAD symbol conventions a small mark represents is
+// inherently unreliable, and tiling made it worse by losing the whole-plan
+// context needed to disambiguate an ambiguous mark (e.g. a switch's small
+// tick vs a door swing line vs a dimension tick). This replaces that
+// entirely: the tradie marks fixture locations themselves with bright
+// highlighter/pen marks in whatever colours they choose, and the AI's job
+// shrinks to finding high-contrast hand-marks and grouping them by colour —
+// a well-understood, reliable vision task. The *meaning* of each colour
+// (which fitting type it represents) is a human decision made client-side
+// after extraction, not something the AI has to guess.
 
 const MARK_COLORS = ["red", "orange", "yellow", "green", "blue", "purple", "pink", "black"];
 
-const GEOMETRY_SYSTEM_PROMPT = `You are reading an Australian residential/commercial electrical or architectural floor plan (a builder's PDF page or a site photo of a plan) for a licensed electrician who will use your output to set out the job. Precision matters — the electrician measures from these positions on site.
+const SYSTEM_PROMPT = `You are reading an Australian residential/commercial electrical or architectural floor plan (a builder's PDF page or a site photo of a plan) for a licensed electrician who will use your output to set out the job. Precision matters — the electrician measures from these positions on site.
 
 TASK 1 — Wall outline: trace the outer perimeter of the room/house as an ordered polygon of corner points, walking the perimeter in one direction (clockwise or counterclockwise, either is fine as long as it's consistent). Use normalized image coordinates: x and y each range 0-1, where (0,0) is the top-left corner of the image and (1,1) is the bottom-right. Only trace what is clearly a wall line on the drawing — do not guess at a wall you can't actually see (e.g. because it's obscured or the plan is cropped).
 
 TASK 2 — Scale: if a dimension is legibly labelled on the drawing spanning two of the corners you traced (e.g. "4200", "3.6m", "4200mm"), report which two corners it spans and the real-world length in metres. Only report this if you can actually read a number on the plan — never estimate or guess a scale from typical room sizes. If no legible dimension is visible, omit this field entirely.
 
-TASK 3 — Hand-marked fixture locations: the tradie may have marked up this plan themselves with a highlighter or pen to indicate where electrical fixtures go — bright, hand-drawn dots/circles/ticks that are clearly NOT part of the plan's own printed drawing (which is black/grey/blue CAD linework). Completely ignore the plan's own printed electrical symbols, room labels, and dimension marks for this task — only report the tradie's own added marks. For each hand-mark found, report its position (same normalized 0-1 coordinates) and its colour, picked from exactly this list: ${MARK_COLORS.join(", ")}. Pick whichever colour in the list is the closest match — don't invent a colour name outside this list. If the plan has no hand-marks on it at all, that's a normal, valid result — return an empty array.
+TASK 3 — Internal walls: this plan may show internal partition walls dividing rooms (most real house/building plans do), or it may be a single room with no internal walls — both are normal. For every internal wall line you can actually see, report it as its own line segment (two endpoint points, same normalized 0-1 coordinates) — these don't need to connect into a closed shape like the outer perimeter does, each one is independent. Do not include the exterior perimeter walls here, only genuine internal partitions.
 
-Never invent a wall or mark that isn't actually visible. Call return_geometry with your findings — marks can be an empty array if the plan has none.`;
+TASK 4 — Doors and windows: for every door and window opening you can see cut into ANY wall (exterior or internal), report it as its own short line segment spanning the gap in the wall (two endpoint points, same normalized 0-1 coordinates), plus whether it's a "door" or "window". A door is typically drawn as a gap in the wall with a quarter-circle swing arc; a window is typically a gap with a thin line or double-tick across it, sometimes with sill lines. Only report openings you can actually see — don't guess that a wall has a door just because a room needs one.
 
-function wallTileSystemPrompt(): string {
-  return `You are reading a cropped region of a larger Australian residential/commercial electrical or architectural floor plan. Precision matters — an electrician measures from these positions on site.
+TASK 5 — Hand-marked fixture locations: the tradie may have marked up this plan themselves with a highlighter or pen to indicate where electrical fixtures go — bright, hand-drawn dots/circles/ticks that are clearly NOT part of the plan's own printed drawing (which is black/grey/blue CAD linework). Completely ignore the plan's own printed electrical symbols, room labels, and dimension marks for this task — only report the tradie's own added marks. For each hand-mark found, report its position (same normalized 0-1 coordinates) and its colour, picked from exactly this list: ${MARK_COLORS.join(", ")}. Pick whichever colour in the list is the closest match — don't invent a colour name outside this list. If the plan has no hand-marks on it at all, that's a normal, valid result — return an empty array.
 
-TASK — Internal walls: for every internal partition wall line clearly visible within THIS cropped image, report it as its own line segment (two endpoints), normalized 0-1 coordinates relative to THIS crop (where (0,0) is this crop's top-left and (1,1) is its bottom-right) — not the full plan. These don't need to connect into a closed shape, each is independent. Do not report the exterior perimeter wall lines, only genuine internal partitions. If a wall continues beyond this crop's edge, still report the portion of it that's visible here — a wall doesn't need to be fully contained in this crop to be reported.
-
-TASK — Doors and windows: for every door/window opening visible within this crop, cut into ANY wall (exterior or internal), report it the same way — a short segment spanning the gap in the wall, plus whether it's a "door" or "window". A door is typically a gap with a quarter-circle swing arc; a window is typically a gap with a thin line or double-tick across it. Only report openings you can actually see.
-
-This image is one of several overlapping crops from the same plan — it's fine, expected even, for something visible here to also appear in a neighbouring crop; duplicates are merged afterward, so report anything genuinely visible in this crop rather than trying to guess whether it "belongs" here.
-
-Never invent a wall or opening that isn't actually visible. Call return_wall_tile with your findings — interior_walls and openings can both be empty arrays if this crop shows neither.`;
-}
-
-interface ClaudeToolCallParams {
-  apiKey: string;
-  maxTokens: number;
-  system: string;
-  toolName: string;
-  toolDescription: string;
-  schema: Record<string, unknown>;
-  imageBase64: string;
-  mediaType: string;
-  userText: string;
-}
-
-async function callClaudeTool(params: ClaudeToolCallParams): Promise<{ result: any; usage: any } | { error: string }> {
-  const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "x-api-key": params.apiKey, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({
-      model: "claude-opus-4-8",
-      max_tokens: params.maxTokens,
-      system: params.system,
-      tools: [{ name: params.toolName, description: params.toolDescription, input_schema: params.schema }],
-      tool_choice: { type: "tool", name: params.toolName },
-      messages: [{
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: params.mediaType, data: params.imageBase64 } },
-          { type: "text", text: params.userText },
-        ],
-      }],
-    }),
-  });
-  if (!aiRes.ok) {
-    const errText = await aiRes.text();
-    console.error(`[extract-setout-plan] AI error (${params.toolName}):`, aiRes.status, errText);
-    return { error: "AI call failed" };
-  }
-  const aiData = await aiRes.json();
-  const block = aiData.content?.find?.((b: any) => b.type === "tool_use");
-  return { result: block?.input, usage: aiData.usage };
-}
-
-interface TileBounds {
-  x0: number;
-  y0: number;
-  x1: number;
-  y1: number;
-}
-
-// 2x2 grid, each tile covering 60% of the image with a 20% overlap band on
-// every shared edge — the same grid used (and proven workable to compute
-// and crop) in the earlier fitting-tiling attempt, just applied to a task
-// where tiling should actually help instead of hurt.
-const WALL_TILES: TileBounds[] = [
-  { x0: 0, y0: 0, x1: 0.6, y1: 0.6 },
-  { x0: 0.4, y0: 0, x1: 1, y1: 0.6 },
-  { x0: 0, y0: 0.4, x1: 0.6, y1: 1 },
-  { x0: 0.4, y0: 0.4, x1: 1, y1: 1 },
-];
-
-interface Segment {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-}
-interface OpeningSegment extends Segment {
-  kind: "door" | "window";
-}
-
-const SEGMENT_DEDUPE_THRESHOLD = 0.02; // ~2% of image span
-
-function segmentsNearlyMatch(a: Segment, b: Segment): boolean {
-  const d = (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax - bx, ay - by);
-  const sameOrder = d(a.x1, a.y1, b.x1, b.y1) < SEGMENT_DEDUPE_THRESHOLD && d(a.x2, a.y2, b.x2, b.y2) < SEGMENT_DEDUPE_THRESHOLD;
-  const reversed = d(a.x1, a.y1, b.x2, b.y2) < SEGMENT_DEDUPE_THRESHOLD && d(a.x2, a.y2, b.x1, b.y1) < SEGMENT_DEDUPE_THRESHOLD;
-  return sameOrder || reversed;
-}
-
-// Overlapping tiles commonly detect the exact same short wall/opening twice
-// (both endpoints land very close once remapped to full-image coordinates)
-// — collapse those. A wall long enough to genuinely span a tile boundary
-// isn't stitched back together here (that's a harder problem — matching
-// partial, non-identical segments) and instead lands as two collinear
-// segments, an acceptable minor imperfection fixable with the existing
-// "Add interior wall" tool if it looks wrong.
-function dedupeSegments<T extends Segment>(segments: T[], sameKind: (a: T, b: T) => boolean = () => true): T[] {
-  const accepted: T[] = [];
-  for (const s of segments) {
-    if (!accepted.some((a) => sameKind(a, s) && segmentsNearlyMatch(a, s))) accepted.push(s);
-  }
-  return accepted;
-}
-
-function remapSegment<T extends Segment>(seg: T, bounds: TileBounds): T {
-  return {
-    ...seg,
-    x1: bounds.x0 + seg.x1 * (bounds.x1 - bounds.x0),
-    y1: bounds.y0 + seg.y1 * (bounds.y1 - bounds.y0),
-    x2: bounds.x0 + seg.x2 * (bounds.x1 - bounds.x0),
-    y2: bounds.y0 + seg.y2 * (bounds.y1 - bounds.y0),
-  };
-}
-
-const SEGMENT_SCHEMA = { type: "object", properties: { x1: { type: "number" }, y1: { type: "number" }, x2: { type: "number" }, y2: { type: "number" } }, required: ["x1", "y1", "x2", "y2"] };
-
-const WALL_TILE_SCHEMA = {
-  type: "object",
-  properties: {
-    interior_walls: {
-      type: "array",
-      description: "Internal partition walls visible in this crop — empty array if none",
-      items: SEGMENT_SCHEMA,
-    },
-    openings: {
-      type: "array",
-      description: "Doors/windows visible in this crop — empty array if none",
-      items: {
-        type: "object",
-        properties: { ...SEGMENT_SCHEMA.properties, kind: { type: "string", enum: ["door", "window"] } },
-        required: [...SEGMENT_SCHEMA.required, "kind"],
-      },
-    },
-  },
-  required: ["interior_walls", "openings"],
-};
+Never invent a wall, door, window, or mark that isn't actually visible. Call return_plan_extraction with your findings — interior_walls, openings, and marks can all be empty arrays if the plan genuinely has none.`;
 
 serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
@@ -204,8 +72,8 @@ serve(async (req) => {
       return json({ error: "Rough-In Setout is a paid add-on for electrical trades." }, 403);
     }
 
-    // ── Atomic rate limit — one check per extraction REQUEST, even though
-    // it fans out into 5 AI calls internally ──
+    // ── Atomic rate limit — lower cap than photo audits since this is a
+    // heavier, per-plan action rather than a per-photo one ──
     const { data: used } = await supabase.rpc("check_and_record_ai_usage", {
       p_user_id: userId, p_kind: "setout_import", p_max: 20, p_window_seconds: 3600,
     });
@@ -227,145 +95,134 @@ serve(async (req) => {
     const { data: fileData, error: dlError } = await supabase.storage.from("setout-plan-uploads").download(storage_path);
     if (dlError || !fileData) return json({ error: "Could not load the uploaded plan" }, 500);
     const bytes = new Uint8Array(await fileData.arrayBuffer());
-    const toBase64 = (b: Uint8Array) => {
-      let binary = "";
-      const SLICE = 0x8000;
-      for (let i = 0; i < b.length; i += SLICE) binary += String.fromCharCode.apply(null, b.subarray(i, i + SLICE) as unknown as number[]);
-      return btoa(binary);
-    };
+    let binary = "";
+    const SLICE = 0x8000;
+    for (let i = 0; i < bytes.length; i += SLICE) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + SLICE) as unknown as number[]);
+    const imageBase64 = btoa(binary);
     const mediaType = content_type === "image/jpeg" ? "image/jpeg" : "image/png";
-    const fullImageBase64 = toBase64(bytes);
 
-    // ── Pass 1: corners, scale, hand-marks (whole image — few enough
-    // points at this task that a single pass holds up) ──
-    const geometryCall = callClaudeTool({
-      apiKey: ANTHROPIC_API_KEY,
-      maxTokens: 3000,
-      system: GEOMETRY_SYSTEM_PROMPT,
-      toolName: "return_geometry",
-      toolDescription: "Return the wall outline, optional scale suggestion, and hand-marked fixture locations",
-      schema: {
-        type: "object",
-        properties: {
-          corners: {
-            type: "array",
-            description: "Ordered polygon of the room/house outline, normalized 0-1 image coordinates",
-            items: { type: "object", properties: { x: { type: "number" }, y: { type: "number" } }, required: ["x", "y"] },
-          },
-          suggested_scale: {
+    const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": ANTHROPIC_API_KEY, "Content-Type": "application/json", "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model: "claude-opus-4-8",
+        max_tokens: 4000,
+        system: SYSTEM_PROMPT,
+        tools: [{
+          name: "return_plan_extraction",
+          description: "Return the extracted wall outline, optional scale suggestion, interior walls, openings, and hand-marked fixture locations",
+          input_schema: {
             type: "object",
-            description: "Only include if a dimension is legibly labelled on the plan spanning two of the reported corners",
             properties: {
-              corner_a_index: { type: "integer" },
-              corner_b_index: { type: "integer" },
-              real_distance_metres: { type: "number" },
+              corners: {
+                type: "array",
+                description: "Ordered polygon of the room/house outline, normalized 0-1 image coordinates",
+                items: {
+                  type: "object",
+                  properties: { x: { type: "number" }, y: { type: "number" } },
+                  required: ["x", "y"],
+                },
+              },
+              suggested_scale: {
+                type: "object",
+                description: "Only include if a dimension is legibly labelled on the plan spanning two of the reported corners",
+                properties: {
+                  corner_a_index: { type: "integer" },
+                  corner_b_index: { type: "integer" },
+                  real_distance_metres: { type: "number" },
+                },
+                required: ["corner_a_index", "corner_b_index", "real_distance_metres"],
+              },
+              interior_walls: {
+                type: "array",
+                description: "Internal partition walls, each its own independent line segment — empty array if there are none",
+                items: {
+                  type: "object",
+                  properties: { x1: { type: "number" }, y1: { type: "number" }, x2: { type: "number" }, y2: { type: "number" } },
+                  required: ["x1", "y1", "x2", "y2"],
+                },
+              },
+              openings: {
+                type: "array",
+                description: "Doors/windows cut into any wall, each traced as the short segment spanning the gap — empty array if there are none",
+                items: {
+                  type: "object",
+                  properties: {
+                    x1: { type: "number" },
+                    y1: { type: "number" },
+                    x2: { type: "number" },
+                    y2: { type: "number" },
+                    kind: { type: "string", enum: ["door", "window"] },
+                  },
+                  required: ["x1", "y1", "x2", "y2", "kind"],
+                },
+              },
+              marks: {
+                type: "array",
+                description: "Hand-marked fixture locations the tradie added themselves (highlighter/pen dots) — empty array if the plan has none",
+                items: {
+                  type: "object",
+                  properties: {
+                    x: { type: "number" },
+                    y: { type: "number" },
+                    color: { type: "string", enum: MARK_COLORS },
+                  },
+                  required: ["x", "y", "color"],
+                },
+              },
             },
-            required: ["corner_a_index", "corner_b_index", "real_distance_metres"],
+            required: ["corners", "interior_walls", "openings", "marks"],
           },
-          marks: {
-            type: "array",
-            description: "Hand-marked fixture locations the tradie added themselves — empty array if none",
-            items: {
-              type: "object",
-              properties: { x: { type: "number" }, y: { type: "number" }, color: { type: "string", enum: MARK_COLORS } },
-              required: ["x", "y", "color"],
-            },
-          },
-        },
-        required: ["corners", "marks"],
-      },
-      imageBase64: fullImageBase64,
-      mediaType,
-      userText: "Extract the wall outline, scale (if legibly labelled), and any hand-marked fixture locations from this plan.",
+        }],
+        tool_choice: { type: "tool", name: "return_plan_extraction" },
+        messages: [{
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: mediaType, data: imageBase64 } },
+            { type: "text", text: "Extract the wall outline, scale (if legibly labelled), interior walls, openings, and any hand-marked fixture locations from this plan." },
+          ],
+        }],
+      }),
     });
 
-    // ── Pass 2: interior walls + openings, tiled — crop into 4 overlapping
-    // regions and run each as its own smaller, less-cluttered detection.
-    // Each tile decodes its own fresh Image instance from the source bytes
-    // rather than cropping a shared decoded instance 4 times — avoids
-    // depending on crop() being non-mutating/cloneable, not worth assuming
-    // without being able to check the library's docs; decoding a small PNG
-    // 4 times instead of once is a negligible cost either way. ──
-    const tileCalls = WALL_TILES.map(async (bounds) => {
-      const tileSource = await Image.decode(bytes);
-      const px0 = Math.round(bounds.x0 * tileSource.width);
-      const py0 = Math.round(bounds.y0 * tileSource.height);
-      const pw = Math.round((bounds.x1 - bounds.x0) * tileSource.width);
-      const ph = Math.round((bounds.y1 - bounds.y0) * tileSource.height);
-      const tileImage = tileSource.crop(px0, py0, pw, ph);
-      const tileBytes = await tileImage.encode();
-      const call = await callClaudeTool({
-        apiKey: ANTHROPIC_API_KEY,
-        maxTokens: 2000,
-        system: wallTileSystemPrompt(),
-        toolName: "return_wall_tile",
-        toolDescription: "Return internal walls and openings visible in this cropped region",
-        schema: WALL_TILE_SCHEMA,
-        imageBase64: toBase64(tileBytes),
-        mediaType: "image/png",
-        userText: "List every internal wall and door/window opening visible in this cropped region of the plan.",
-      });
-      return { bounds, call };
-    });
+    if (!aiRes.ok) {
+      const errText = await aiRes.text();
+      console.error("[extract-setout-plan] AI error:", aiRes.status, errText);
+      return json({ error: "Extraction failed — please try again." }, 502);
+    }
 
-    const [geometryOutcome, ...tileOutcomes] = await Promise.all([geometryCall, ...tileCalls]);
-
-    // Log cost per call — separate kinds so the geometry/wall-tile cost
-    // split stays visible in token_usage, same multi-kind-per-feature
-    // pattern analyze-audit-photo already uses for its own sub-calls.
-    // Awaited (not fire-and-forget) — nothing else happens after this, so
-    // an unawaited insert would race the response being sent and the edge
-    // runtime tearing the isolate down before it completes.
-    const logCalls: Promise<void>[] = [];
-    if ("usage" in geometryOutcome && geometryOutcome.usage) {
-      logCalls.push(logTokenUsage(supabase, {
-        userId, kind: "setout_import_geometry", model: "claude-opus-4-8", refId: plan_id,
+    const aiData = await aiRes.json();
+    if (aiData.usage) {
+      // Awaited (unlike the fire-and-forget style elsewhere) — there's
+      // nothing else for this function to do afterward, so an unawaited
+      // call here races the response being sent and the edge runtime
+      // tearing the isolate down before the insert completes.
+      // ref_id is a UUID column — pass the plan id (not storage_path, which
+      // isn't a UUID and would fail the insert silently, since logTokenUsage
+      // swallows its own errors).
+      await logTokenUsage(supabase, {
+        userId, kind: "setout_import", model: "claude-opus-4-8", refId: plan_id,
         usage: {
-          input_tokens: geometryOutcome.usage.input_tokens ?? 0,
-          output_tokens: geometryOutcome.usage.output_tokens ?? 0,
-          cache_read_tokens: geometryOutcome.usage.cache_read_input_tokens ?? 0,
-          cache_creation_tokens: geometryOutcome.usage.cache_creation_input_tokens ?? 0,
+          input_tokens: aiData.usage.input_tokens ?? 0,
+          output_tokens: aiData.usage.output_tokens ?? 0,
+          cache_read_tokens: aiData.usage.cache_read_input_tokens ?? 0,
+          cache_creation_tokens: aiData.usage.cache_creation_input_tokens ?? 0,
         },
-      }));
+      });
     }
-    for (const { call } of tileOutcomes) {
-      if ("usage" in call && call.usage) {
-        logCalls.push(logTokenUsage(supabase, {
-          userId, kind: "setout_import_walls", model: "claude-opus-4-8", refId: plan_id,
-          usage: {
-            input_tokens: call.usage.input_tokens ?? 0,
-            output_tokens: call.usage.output_tokens ?? 0,
-            cache_read_tokens: call.usage.cache_read_input_tokens ?? 0,
-            cache_creation_tokens: call.usage.cache_creation_input_tokens ?? 0,
-          },
-        }));
-      }
-    }
-    await Promise.all(logCalls);
 
-    const geometryResult = "result" in geometryOutcome ? geometryOutcome.result : null;
-    if (!geometryResult || !Array.isArray(geometryResult.corners) || geometryResult.corners.length < 3) {
+    const block = aiData.content?.find?.((b: any) => b.type === "tool_use");
+    const result = block?.input;
+    if (!result || !Array.isArray(result.corners) || result.corners.length < 3) {
       return json({ error: "Could not make out a wall outline on that plan — try tracing it manually instead." }, 502);
     }
 
-    // Remap each tile's segments back to full-image normalized coordinates,
-    // then dedupe overlapping detections.
-    const remappedWalls: Segment[] = [];
-    const remappedOpenings: OpeningSegment[] = [];
-    for (const { bounds, call } of tileOutcomes) {
-      if (!("result" in call) || !call.result) continue;
-      for (const seg of (call.result.interior_walls ?? []) as Segment[]) remappedWalls.push(remapSegment(seg, bounds));
-      for (const seg of (call.result.openings ?? []) as OpeningSegment[]) remappedOpenings.push(remapSegment(seg, bounds));
-    }
-    const interiorWalls = dedupeSegments(remappedWalls);
-    const openings = dedupeSegments(remappedOpenings, (a, b) => a.kind === b.kind);
-
     return json({
-      corners: geometryResult.corners,
-      suggested_scale: geometryResult.suggested_scale ?? null,
-      interior_walls: interiorWalls,
-      openings,
-      marks: geometryResult.marks ?? [],
+      corners: result.corners,
+      suggested_scale: result.suggested_scale ?? null,
+      interior_walls: result.interior_walls ?? [],
+      openings: result.openings ?? [],
+      marks: result.marks ?? [],
     });
   } catch (e) {
     console.error("[extract-setout-plan] error:", e);
