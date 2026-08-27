@@ -77,12 +77,17 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
       </div>
 
       {tool === "interior" && (
-        <div className="flex items-center gap-2 mb-3">
-          <Switch id="edit-straight-interior-walls" checked={straightInteriorWalls} onCheckedChange={setStraightInteriorWalls} />
-          <Label htmlFor="edit-straight-interior-walls" className="text-xs font-normal text-muted-foreground">
-            Keep walls straight (90°) — turn off to draw an angled wall
-          </Label>
-        </div>
+        <>
+          <p className="text-xs text-muted-foreground mb-2">
+            Tap point to point along the internal wall run — tap (or click) the same spot twice to finish it.
+          </p>
+          <div className="flex items-center gap-2 mb-3">
+            <Switch id="edit-straight-interior-walls" checked={straightInteriorWalls} onCheckedChange={setStraightInteriorWalls} />
+            <Label htmlFor="edit-straight-interior-walls" className="text-xs font-normal text-muted-foreground">
+              Keep walls straight (90°) — turn off to draw an angled wall
+            </Label>
+          </div>
+        </>
       )}
 
       {tool === "opening" && (
@@ -106,8 +111,9 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
           snapInteriorWalls={straightInteriorWalls}
           onInteriorWallSegmentAdd={(start, end) => {
             setInteriorWalls((prev) => [...prev, { id: nextWallId(), start, end, kind: "interior" }]);
-            setDraftStart(null);
+            setDraftStart(end);
           }}
+          onInteriorWallChainEnd={() => setDraftStart(null)}
           onOpeningPlace={handleOpeningPlace}
           onOpeningDrag={(openingId, offset) =>
             setOpenings((prev) => prev.map((o) => (o.id === openingId ? { ...o, offset } : o)))

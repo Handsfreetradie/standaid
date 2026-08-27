@@ -75,14 +75,19 @@ interface SetoutCanvasProps {
   // different steps of the import flow.
   calibratePoints?: Point[];
   onCalibratePointAdd?: (point: Point) => void;
-  // "sketch-interior-wall" mode: first tap sets the draft start point
-  // (rendered so the tradie can see it's pending), second tap completes
-  // that one segment and reports both points — the parent owns the growing
-  // list of interior walls, this component only handles one segment's
-  // worth of interaction at a time.
+  // "sketch-interior-wall" mode: point-to-point chain, same interaction as
+  // sketch-walls' perimeter tracing. First tap sets the draft start point
+  // (rendered so the tradie can see it's pending); each further tap
+  // completes a segment from the previous point and immediately continues
+  // the chain from there — the parent owns the growing list of interior
+  // walls, this component only reports one segment at a time. A second tap
+  // landing close in time and space to the previous one (a double-click or
+  // double-tap) ends the chain instead of adding another near-duplicate
+  // point — see onInteriorWallChainEnd.
   interiorWallDraftStart?: Point | null;
   onInteriorWallDraftPointAdd?: (point: Point) => void;
   onInteriorWallSegmentAdd?: (start: Point, end: Point) => void;
+  onInteriorWallChainEnd?: () => void;
   // Interior walls default to square (horizontal/vertical off the start
   // point) same as the perimeter's snapWalls — a tradie's rough second tap
   // gets straightened automatically. Set false to let a wall land exactly
@@ -152,6 +157,7 @@ export default function SetoutCanvas({
   interiorWallDraftStart = null,
   onInteriorWallDraftPointAdd,
   onInteriorWallSegmentAdd,
+  onInteriorWallChainEnd,
   snapInteriorWalls = true,
   onOpeningPlace,
   onOpeningDrag,
@@ -193,6 +199,11 @@ export default function SetoutCanvas({
   const [alignGuides, setAlignGuides] = useState<{ x?: number; y?: number } | null>(null);
   const openingDragState = useRef<{ openingId: string; wall: WallSegment; width: number } | null>(null);
   const [openingDragPreview, setOpeningDragPreview] = useState<{ id: string; offset: number } | null>(null);
+  // Tracks the previous interior-wall tap so a second one landing close in
+  // time and space to it can be recognised as a double-click/double-tap
+  // (browsers don't reliably surface dblclick for touch on a manually
+  // pointer-driven SVG) — see the sketch-interior-wall branch below.
+  const lastInteriorTapRef = useRef<{ time: number; point: Point } | null>(null);
 
   const clampSpan = useCallback((v: number) => {
     const bounds = spanBoundsRef.current;
@@ -282,8 +293,19 @@ export default function SetoutCanvas({
       } else if (mode === "calibrate") {
         if (calibratePoints.length < 2) onCalibratePointAdd?.(scene);
       } else if (mode === "sketch-interior-wall") {
-        if (!interiorWallDraftStart) onInteriorWallDraftPointAdd?.(scene);
-        else {
+        const DOUBLE_TAP_MS = 400;
+        const DOUBLE_TAP_TOLERANCE_PX = 20;
+        const now = Date.now();
+        const lastTap = lastInteriorTapRef.current;
+        const isDoubleTap =
+          !!lastTap && now - lastTap.time < DOUBLE_TAP_MS && distance(scene, lastTap.point) < DOUBLE_TAP_TOLERANCE_PX * px2scene();
+        lastInteriorTapRef.current = { time: now, point: scene };
+        if (isDoubleTap) {
+          lastInteriorTapRef.current = null;
+          onInteriorWallChainEnd?.();
+        } else if (!interiorWallDraftStart) {
+          onInteriorWallDraftPointAdd?.(scene);
+        } else {
           const end = snapInteriorWalls ? snapOrthogonal(interiorWallDraftStart, scene) : scene;
           onInteriorWallSegmentAdd?.(interiorWallDraftStart, end);
         }
@@ -345,6 +367,7 @@ export default function SetoutCanvas({
       interiorWallDraftStart,
       onInteriorWallDraftPointAdd,
       onInteriorWallSegmentAdd,
+      onInteriorWallChainEnd,
       snapInteriorWalls,
       onOpeningPlace,
       onMeasurementRefPick,

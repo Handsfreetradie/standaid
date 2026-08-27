@@ -390,7 +390,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
               ? "AI has traced a starting shape from the plan — drag/add/remove corners to fix anything it got wrong, then close the shape. You'll enter the real wall lengths next."
               : "Tap each corner of the room in order. Tap the first corner again (or the button below) to close the shape — you'll enter the real wall lengths next."
             : wallTool === "interior"
-              ? `Tap the start, then the end, of one internal wall at a time.${straightInteriorWalls ? " It'll square up to horizontal/vertical automatically." : ""}`
+              ? `Tap point to point along the internal wall run — tap (or click) the same spot twice to finish it.${straightInteriorWalls ? " Each segment squares up to horizontal/vertical automatically." : ""}`
               : `Tap a point on a wall to drop a ${openingKind} there — drag an existing one to reposition it, default width is editable below.`}
         </p>
 
@@ -440,8 +440,12 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
             snapInteriorWalls={straightInteriorWalls}
             onInteriorWallSegmentAdd={(start, end) => {
               setInteriorWalls((prev) => [...prev, { id: nextWallId(), start, end, kind: "interior" }]);
-              setInteriorDraftStart(null);
+              // Continue the chain from this segment's end rather than
+              // resetting — the next tap starts a new segment from here,
+              // finishing only once the tradie double-taps/double-clicks.
+              setInteriorDraftStart(end);
             }}
+            onInteriorWallChainEnd={() => setInteriorDraftStart(null)}
             onOpeningPlace={handleOpeningPlace}
             onOpeningDrag={(openingId, offset) =>
               setWallOpenings((prev) => prev.map((o) => (o.id === openingId ? { ...o, offset } : o)))
