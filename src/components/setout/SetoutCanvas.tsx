@@ -37,7 +37,7 @@ interface BackgroundImage {
   height: number;
 }
 
-export type SetoutCanvasMode = "view" | "sketch-walls" | "place-fittings" | "link-switches" | "select-multiple";
+export type SetoutCanvasMode = "view" | "calibrate" | "sketch-walls" | "place-fittings" | "link-switches" | "select-multiple";
 
 interface SetoutCanvasProps {
   backgroundImage?: BackgroundImage;
@@ -47,6 +47,12 @@ interface SetoutCanvasProps {
   sketchPoints?: Point[];
   onSketchPointAdd?: (point: Point) => void;
   onSketchClose?: () => void;
+  // "calibrate" mode: up to two taps to pick the scale-reference points,
+  // rendered as its own marker pair rather than reusing sketchPoints, since
+  // a calibration pair and a wall trace can coexist on the same screen at
+  // different steps of the import flow.
+  calibratePoints?: Point[];
+  onCalibratePointAdd?: (point: Point) => void;
   snapWalls?: boolean;
   selectedFittingType?: FittingType | null;
   onPlaceFitting?: (point: Point) => void;
@@ -90,6 +96,8 @@ export default function SetoutCanvas({
   sketchPoints = [],
   onSketchPointAdd,
   onSketchClose,
+  calibratePoints = [],
+  onCalibratePointAdd,
   snapWalls = false,
   selectedFittingType,
   onPlaceFitting,
@@ -193,6 +201,8 @@ export default function SetoutCanvas({
         const last = sketchPoints[sketchPoints.length - 1];
         const point = snapWalls && last ? snapOrthogonal(last, scene) : scene;
         onSketchPointAdd?.(point);
+      } else if (mode === "calibrate") {
+        if (calibratePoints.length < 2) onCalibratePointAdd?.(scene);
       } else if (mode === "place-fittings" && selectedFittingType) {
         const point = isSingleWallFitting(selectedFittingType)
           ? snapToNearestWall(scene, walls)
@@ -209,7 +219,25 @@ export default function SetoutCanvas({
         onSwitchTap?.(null);
       }
     },
-    [panMode, mode, viewBox, px2scene, sceneFromClient, sketchPoints, onSketchClose, snapWalls, onSketchPointAdd, selectedFittingType, onPlaceFitting, onFittingSelect, onSwitchTap, walls, fittings]
+    [
+      panMode,
+      mode,
+      viewBox,
+      px2scene,
+      sceneFromClient,
+      sketchPoints,
+      onSketchClose,
+      snapWalls,
+      onSketchPointAdd,
+      calibratePoints,
+      onCalibratePointAdd,
+      selectedFittingType,
+      onPlaceFitting,
+      onFittingSelect,
+      onSwitchTap,
+      walls,
+      fittings,
+    ]
   );
 
   const handlePointerMove = useCallback(
@@ -421,6 +449,35 @@ export default function SetoutCanvas({
             />
             {sketchPoints.map((p, i) => (
               <circle key={i} cx={p.x} cy={p.y} r={CORNER_MARKER_METRES} fill="currentColor" />
+            ))}
+          </g>
+        )}
+
+        {calibratePoints.length > 0 && (
+          <g className="text-primary">
+            {calibratePoints.length === 2 && (
+              <line
+                x1={calibratePoints[0].x}
+                y1={calibratePoints[0].y}
+                x2={calibratePoints[1].x}
+                y2={calibratePoints[1].y}
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeDasharray="6 4"
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+            {calibratePoints.map((p, i) => (
+              <circle
+                key={i}
+                cx={p.x}
+                cy={p.y}
+                r={9 * px2scene()}
+                fill="currentColor"
+                stroke="hsl(var(--background))"
+                strokeWidth={2}
+                vectorEffect="non-scaling-stroke"
+              />
             ))}
           </g>
         )}

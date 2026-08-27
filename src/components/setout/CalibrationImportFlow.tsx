@@ -58,7 +58,6 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
   const [pixelsPerMetre, setPixelsPerMetre] = useState<number | null>(null);
   const [sketchPoints, setSketchPoints] = useState<Point[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
-  const imgRef = useRef<HTMLImageElement>(null);
   const saveGeometry = useUpdateSetoutPlanGeometry(plan.id);
 
   useEffect(() => {
@@ -81,12 +80,8 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     }
   };
 
-  const handleImageClick = (e: React.MouseEvent<HTMLImageElement>) => {
-    if (calibPoints.length >= 2 || !imgRef.current) return;
-    const img = imgRef.current;
-    const scaleX = img.naturalWidth / img.clientWidth;
-    const scaleY = img.naturalHeight / img.clientHeight;
-    const point: Point = { x: e.nativeEvent.offsetX * scaleX, y: e.nativeEvent.offsetY * scaleY };
+  const handleCalibratePointAdd = (point: Point) => {
+    if (calibPoints.length >= 2) return;
     setCalibPoints((prev) => [...prev, point]);
   };
 
@@ -147,26 +142,26 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
 
   if (step === "calibrate" && raster) {
     return (
-      <div className="px-5 py-6 max-w-md mx-auto">
-        <button onClick={() => setStep("select-file")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-6">
+      <div className="flex flex-col h-full px-5 py-6 max-w-3xl mx-auto w-full">
+        <button onClick={() => setStep("select-file")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
         <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Calibrate scale</h2>
         <p className="text-xs text-muted-foreground mb-4">
-          Tap two points on the plan that you know the real distance between — a wall length, a door width, a dimension already marked.
+          Zoom in and tap two points on the plan that you know the real distance between — a wall length, a door width, a dimension already
+          marked. Use the pan tool (bottom right) to move around once zoomed in.
         </p>
-        <div className="relative rounded-xl border border-border overflow-hidden mb-4">
-          <img ref={imgRef} src={raster.href} onClick={handleImageClick} className="block w-full h-auto cursor-crosshair" />
-          {calibPoints.map((p, i) => (
-            <div
-              key={i}
-              className="absolute h-3 w-3 rounded-full bg-primary border-2 border-background -translate-x-1/2 -translate-y-1/2 pointer-events-none"
-              style={{ left: `${(p.x / raster.naturalWidth) * 100}%`, top: `${(p.y / raster.naturalHeight) * 100}%` }}
-            />
-          ))}
+        <div className="flex-1 min-h-[360px] mb-4">
+          <SetoutCanvas
+            backgroundImage={{ href: raster.href, width: raster.naturalWidth, height: raster.naturalHeight }}
+            walls={[]}
+            mode="calibrate"
+            calibratePoints={calibPoints}
+            onCalibratePointAdd={handleCalibratePointAdd}
+          />
         </div>
         {calibPoints.length > 0 && (
-          <Button variant="outline" size="sm" className="mb-4" onClick={() => setCalibPoints([])}>
+          <Button variant="outline" size="sm" className="mb-4 self-start" onClick={() => setCalibPoints([])}>
             Clear points
           </Button>
         )}
