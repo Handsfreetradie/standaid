@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -6,8 +6,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import SetoutCanvas from "./SetoutCanvas";
+import { supabase } from "@/integrations/supabase/client";
 import { useUpdateSetoutPlanGeometry } from "@/hooks/useSetoutPlans";
-import type { Point, SetoutPlan, WallOpening, WallSegment } from "@/lib/setoutTypes";
+import { distance, type Point, type SetoutPlan, type WallOpening, type WallSegment } from "@/lib/setoutTypes";
 import { nextOpeningId, nextWallId, wallLength } from "@/lib/setoutGeometry";
 
 // Standard Australian residential door/window widths — used as the default
@@ -33,6 +34,35 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
   const [openingKind, setOpeningKind] = useState<"door" | "window">("door");
   const [draftStart, setDraftStart] = useState<Point | null>(null);
   const saveGeometry = useUpdateSetoutPlanGeometry(plan.id);
+
+  // The originally-uploaded plan raster, shown behind the walls being
+  // edited — same signed-URL + natural-dimension lookup as the main
+  // workspace (SetoutPlan.tsx), just without a show/hide toggle since this
+  // is a dedicated editing screen where seeing the reference is the point.
+  const [backgroundImage, setBackgroundImage] = useState<{ href: string; width: number; height: number } | null>(null);
+
+  useEffect(() => {
+    if (!plan.background_image_path || !plan.scale_calibration) {
+      setBackgroundImage(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data: signed } = await supabase.storage.from("setout-plan-uploads").createSignedUrl(plan.background_image_path!, 3600);
+      if (!signed?.signedUrl || cancelled) return;
+      const img = new Image();
+      img.onload = () => {
+        if (cancelled) return;
+        const { pointA, pointB, realDistanceMetres } = plan.scale_calibration!;
+        const pixelsPerMetre = distance(pointA, pointB) / realDistanceMetres;
+        setBackgroundImage({ href: signed.signedUrl, width: img.naturalWidth / pixelsPerMetre, height: img.naturalHeight / pixelsPerMetre });
+      };
+      img.src = signed.signedUrl;
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [plan.background_image_path, plan.scale_calibration]);
 
   const exteriorWalls = plan.walls.filter((w) => w.kind !== "interior");
   const walls = [...exteriorWalls, ...interiorWalls];
@@ -119,6 +149,7 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
 
       <div className="flex-1 min-h-[480px] mb-4">
         <SetoutCanvas
+          backgroundImage={backgroundImage ?? undefined}
           walls={walls}
           wallThickness={plan.wall_thickness}
           openings={openings}
