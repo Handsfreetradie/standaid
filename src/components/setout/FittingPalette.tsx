@@ -29,8 +29,6 @@ const DOWNLIGHT_SIZE_OPTIONS = [90, 70, 50] as const;
 const GPO_VARIANT_OPTIONS: { value: NonNullable<FittingSpecs["gpoVariant"]>; label: string }[] = [
   { value: "standard", label: "Standard" },
   { value: "external", label: "External" },
-  { value: "dishwasher", label: "Dishwasher" },
-  { value: "microwave", label: "Microwave" },
 ];
 // Fitting types that use the shared single/double glyph convention (GPO,
 // para flood, 1200mm fluoro).
@@ -105,8 +103,8 @@ const FittingPalette = ({
     <div className="space-y-2">
       {selectedFittingId && (
         <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-muted-foreground">
+          <div className="flex items-start justify-between flex-wrap gap-y-1">
+            <span className="text-xs font-medium text-muted-foreground py-1.5">
               Fitting selected
               {selectedFitting?.status === "confirmed" && (
                 <span className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-medium text-primary bg-primary/10 rounded px-1.5 py-0.5">
@@ -114,7 +112,7 @@ const FittingPalette = ({
                 </span>
               )}
             </span>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 flex-wrap justify-end">
               {onUpdateStatus && selectedFitting && (
                 <Button
                   variant="ghost"

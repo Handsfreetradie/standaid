@@ -69,7 +69,7 @@ export interface ScaleCalibration {
   realDistanceMetres: number;
 }
 
-export type GpoVariant = "standard" | "external" | "dishwasher" | "microwave";
+export type GpoVariant = "standard" | "external";
 
 export interface FittingSpecs {
   beamAngle?: number;

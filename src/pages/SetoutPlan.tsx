@@ -363,16 +363,17 @@ const SetoutPlan = () => {
         </div>
         <h2 className="font-sans text-lg font-extrabold text-foreground mb-3">{plan.name}</h2>
 
-        {/* Mobile only: layer/mode controls stay in their original compact
-            spot above the canvas — there's no sidebar to move them into on
-            a phone screen. */}
-        <div className="md:hidden mb-3">{layerToggleUI}</div>
+        {/* Layer toggle sits above the canvas on every breakpoint — on
+            desktop/iPad it stays above the grid plan rather than the
+            sidebar so it's visible without scrolling. Mode toggle stays
+            mobile-only here; desktop keeps it in the sidebar instead. */}
+        <div className="mb-3">{layerToggleUI}</div>
         <div className="md:hidden mb-3">{modeToggleUI}</div>
 
         {/* Canvas dominates the left column on desktop/iPad, with the
-            layer/mode controls moved into the sidebar there instead of
-            stacked above it — frees up real vertical space for a full
-            house plan rather than just one room. */}
+            mode toggle moved into the sidebar there instead of stacked
+            above it — frees up real vertical space for a full house plan
+            rather than just one room. */}
         <div className="md:flex md:gap-4 md:items-start">
           <div className="md:flex-1 md:min-w-0">
             <div className="h-[65vh] md:h-[85vh] mb-4 md:mb-0">
@@ -398,10 +399,7 @@ const SetoutPlan = () => {
           </div>
 
           <div className="md:w-80 md:flex-shrink-0 space-y-4">
-            <div className="hidden md:block space-y-3">
-              {layerToggleUI}
-              {modeToggleUI}
-            </div>
+            <div className="hidden md:block space-y-3">{modeToggleUI}</div>
 
             {workspaceMode === "place-fittings" ? (
               <FittingPalette
