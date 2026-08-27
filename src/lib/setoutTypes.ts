@@ -232,16 +232,26 @@ export interface SetoutCircuit {
 // consumer (canvas icons, circuit legend) calls this rather than picking
 // colours independently, so a fitting always matches its circuit's swatch.
 const CIRCUIT_COLOR_PALETTE = [
-  "#e11d48", // rose
-  "#2563eb", // blue
-  "#16a34a", // green
-  "#d97706", // amber
-  "#7c3aed", // violet
-  "#0891b2", // cyan
-  "#db2777", // pink
-  "#65a30d", // lime
+  "#dc2626", // red
   "#ea580c", // orange
+  "#d97706", // amber
+  "#ca8a04", // yellow
+  "#65a30d", // lime
+  "#16a34a", // green
+  "#059669", // emerald
+  "#0d9488", // teal
+  "#0891b2", // cyan
+  "#0284c7", // sky
+  "#2563eb", // blue
   "#4f46e5", // indigo
+  "#7c3aed", // violet
+  "#9333ea", // purple
+  "#c026d3", // fuchsia
+  "#db2777", // pink
+  "#e11d48", // rose
+  "#7f1d1d", // maroon
+  "#1e3a8a", // navy
+  "#14532d", // forest
 ];
 
 export function colorForCircuit(circuits: Pick<SetoutCircuit, "id">[], circuitId: string | null | undefined): string | null {
