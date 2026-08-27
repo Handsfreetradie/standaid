@@ -1,17 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download, Undo2, PencilRuler } from "lucide-react";
+import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download, Undo2, PencilRuler, Image as ImageIcon, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
 import SetoutCanvas, { type SetoutCanvasMode } from "@/components/setout/SetoutCanvas";
 import FittingPalette from "@/components/setout/FittingPalette";
 import LayerVisibilityToggle from "@/components/setout/LayerVisibilityToggle";
 import SwitchLinksPanel from "@/components/setout/SwitchLinksPanel";
 import type { FittingType } from "@/components/setout/symbols";
-import { DEFAULT_LAYER_VISIBILITY, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type Point, type SetoutFitting } from "@/lib/setoutTypes";
+import { DEFAULT_LAYER_VISIBILITY, distance, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type Point, type SetoutFitting } from "@/lib/setoutTypes";
 import { autoRotationForWallMount, computeMeasurementLock, defaultHeightForType } from "@/lib/setoutGeometry";
 import { generateSetoutReportPdf } from "@/lib/setoutReport";
 import CircuitsPanel from "@/components/setout/CircuitsPanel";
@@ -87,6 +88,39 @@ const SetoutPlan = () => {
       layerSyncedRef.current = true;
     }
   }, [plan]);
+
+  // Reference image behind the traced walls/fittings — the original
+  // uploaded plan, kept around in storage since import (CalibrationImportFlow.tsx)
+  // specifically so the tradie can always cross-check against the real
+  // drawing even where the AI's own tracing is imperfect. Signed URL +
+  // natural pixel dimensions are both fetched client-side rather than
+  // stored, re-deriving pixelsPerMetre from the already-stored
+  // scale_calibration — same formula used when this image was first traced.
+  const [backgroundImage, setBackgroundImage] = useState<{ href: string; width: number; height: number } | null>(null);
+  const [showBackgroundReference, setShowBackgroundReference] = useState(true);
+
+  useEffect(() => {
+    if (!plan?.background_image_path || !plan.scale_calibration) {
+      setBackgroundImage(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data: signed } = await supabase.storage.from("setout-plan-uploads").createSignedUrl(plan.background_image_path!, 3600);
+      if (!signed?.signedUrl || cancelled) return;
+      const img = new Image();
+      img.onload = () => {
+        if (cancelled) return;
+        const { pointA, pointB, realDistanceMetres } = plan.scale_calibration!;
+        const pixelsPerMetre = distance(pointA, pointB) / realDistanceMetres;
+        setBackgroundImage({ href: signed.signedUrl, width: img.naturalWidth / pixelsPerMetre, height: img.naturalHeight / pixelsPerMetre });
+      };
+      img.src = signed.signedUrl;
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [plan?.background_image_path, plan?.scale_calibration]);
 
   const handleLayerVisibilityChange = (next: LayerVisibility) => {
     setLayerVisibility(next);
@@ -366,6 +400,12 @@ const SetoutPlan = () => {
             <ArrowLeft className="h-4 w-4" /> Back
           </button>
           <div className="flex items-center gap-1.5">
+            {plan.background_image_path && (
+              <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setShowBackgroundReference((v) => !v)}>
+                {showBackgroundReference ? <EyeOff className="h-3.5 w-3.5" /> : <ImageIcon className="h-3.5 w-3.5" />}
+                {showBackgroundReference ? "Hide plan" : "Show plan"}
+              </Button>
+            )}
             <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setEditingWalls(true)}>
               <PencilRuler className="h-3.5 w-3.5" />
               Edit walls
@@ -397,6 +437,7 @@ const SetoutPlan = () => {
           <div className="md:flex-1 md:min-w-0">
             <div className="h-[65vh] md:h-[85vh] mb-4 md:mb-0">
               <SetoutCanvas
+                backgroundImage={showBackgroundReference ? (backgroundImage ?? undefined) : undefined}
                 walls={plan.walls}
                 openings={plan.openings}
                 fittings={fittings}

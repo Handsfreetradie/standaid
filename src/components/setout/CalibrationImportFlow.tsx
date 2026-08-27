@@ -130,6 +130,8 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
   const [openingKind, setOpeningKind] = useState<"door" | "window">("door");
   const [savedWalls, setSavedWalls] = useState<WallSegment[] | null>(null);
   const [savedOpenings, setSavedOpenings] = useState<WallOpening[]>([]);
+  const [uploadedImagePath, setUploadedImagePath] = useState<string | null>(null);
+  const [uploadedImageContentType, setUploadedImageContentType] = useState<string | null>(null);
   const [aiCorners, setAiCorners] = useState<NormalizedPoint[] | null>(null);
   const [aiInteriorWalls, setAiInteriorWalls] = useState<AiWallSegment[]>([]);
   const [aiOpenings, setAiOpenings] = useState<AiOpening[]>([]);
@@ -158,6 +160,11 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
       const path = `${user.id}/${plan.id}/${crypto.randomUUID()}.${ext}`;
       const { error: upErr } = await supabase.storage.from("setout-plan-uploads").upload(path, blob, { contentType: source.mimeType, upsert: true });
       if (upErr) throw upErr;
+      // Captured regardless of whether the AI call below succeeds — the
+      // upload itself is enough to keep this image around as a permanent
+      // reference in the main workspace (see finishTrace).
+      setUploadedImagePath(path);
+      setUploadedImageContentType(source.mimeType);
       const { data, error } = await supabase.functions.invoke("extract-setout-plan", {
         body: { storage_path: path, content_type: source.mimeType, plan_id: plan.id },
       });
@@ -269,6 +276,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
         walls,
         scale_calibration: { pointA: calibPoints[0], pointB: calibPoints[1], realDistanceMetres: distanceMetres },
         openings: wallOpenings,
+        ...(uploadedImagePath ? { background_image_path: uploadedImagePath, background_image_content_type: uploadedImageContentType ?? "image/png" } : {}),
       });
       if (aiMarks.length > 0) {
         setSavedWalls(walls);

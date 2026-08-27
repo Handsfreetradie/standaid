@@ -241,6 +241,8 @@ export interface SetoutPlan {
   walls: WallSegment[];
   openings: WallOpening[];
   layer_visibility: LayerVisibility;
+  background_image_path: string | null;
+  background_image_content_type: string | null;
   created_at: string;
   updated_at: string;
 }

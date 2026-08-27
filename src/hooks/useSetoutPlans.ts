@@ -106,10 +106,24 @@ export function useUpdateSetoutPlanGeometry(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (input: { walls: WallSegment[]; scale_calibration: ScaleCalibration | null; openings?: WallOpening[] }) => {
+    mutationFn: async (input: {
+      walls: WallSegment[];
+      scale_calibration: ScaleCalibration | null;
+      openings?: WallOpening[];
+      background_image_path?: string;
+      background_image_content_type?: string;
+    }) => {
+      // background_image_path/content_type are only ever set once, at
+      // initial import save (CalibrationImportFlow.tsx) — later geometry-
+      // only saves (e.g. EditWallsFlow.tsx) don't pass them, and must not
+      // wipe out an already-saved reference image, so they're only
+      // included in the update when actually provided.
+      const update: Record<string, unknown> = { walls: input.walls, scale_calibration: input.scale_calibration, openings: input.openings ?? [] };
+      if (input.background_image_path !== undefined) update.background_image_path = input.background_image_path;
+      if (input.background_image_content_type !== undefined) update.background_image_content_type = input.background_image_content_type;
       const { data, error } = await sb
         .from("setout_plans")
-        .update({ walls: input.walls, scale_calibration: input.scale_calibration, openings: input.openings ?? [] })
+        .update(update)
         .eq("id", planId)
         .select()
         .single();
