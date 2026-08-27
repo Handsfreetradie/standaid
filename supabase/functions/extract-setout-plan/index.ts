@@ -82,7 +82,7 @@ serve(async (req) => {
       return json({ error: "Hourly limit reached — please try again later." }, 429);
     }
 
-    const { storage_path, content_type } = await req.json();
+    const { storage_path, content_type, plan_id } = await req.json();
     if (!storage_path) return json({ error: "storage_path is required" }, 400);
     // storage_path must be the caller's own folder — belt-and-braces on top
     // of the storage RLS policy, since we're downloading with the service
@@ -171,8 +171,15 @@ serve(async (req) => {
 
     const aiData = await aiRes.json();
     if (aiData.usage) {
-      logTokenUsage(supabase, {
-        userId, kind: "setout_import", model: "claude-opus-4-8", refId: storage_path,
+      // Awaited (unlike the fire-and-forget style elsewhere) — there's
+      // nothing else for this function to do afterward, so an unawaited
+      // call here races the response being sent and the edge runtime
+      // tearing the isolate down before the insert completes.
+      // ref_id is a UUID column — pass the plan id (not storage_path, which
+      // isn't a UUID and would fail the insert silently, since logTokenUsage
+      // swallows its own errors).
+      await logTokenUsage(supabase, {
+        userId, kind: "setout_import", model: "claude-opus-4-8", refId: plan_id,
         usage: {
           input_tokens: aiData.usage.input_tokens ?? 0,
           output_tokens: aiData.usage.output_tokens ?? 0,

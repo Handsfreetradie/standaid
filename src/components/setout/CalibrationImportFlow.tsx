@@ -106,7 +106,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
       const { error: upErr } = await supabase.storage.from("setout-plan-uploads").upload(path, blob, { contentType: source.mimeType, upsert: true });
       if (upErr) throw upErr;
       const { data, error } = await supabase.functions.invoke("extract-setout-plan", {
-        body: { storage_path: path, content_type: source.mimeType },
+        body: { storage_path: path, content_type: source.mimeType, plan_id: plan.id },
       });
       if (error || data?.error) throw new Error(data?.error || "AI extraction failed");
       return data as AiExtraction;
