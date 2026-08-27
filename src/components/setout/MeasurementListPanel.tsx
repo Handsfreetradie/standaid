@@ -1,7 +1,7 @@
 import { Ruler } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { FITTING_LABELS, FITTING_SYMBOLS } from "@/components/setout/symbols";
-import type { SetoutFitting, WallSegment } from "@/lib/setoutTypes";
+import type { MeasurementRef, SetoutFitting, WallSegment } from "@/lib/setoutTypes";
 
 interface MeasurementListPanelProps {
   fittings: SetoutFitting[];
@@ -12,6 +12,12 @@ export default function MeasurementListPanel({ fittings, walls }: MeasurementLis
   const wallLabel = (wallId: string) => {
     const index = walls.findIndex((w) => w.id === wallId);
     return index === -1 ? "Wall" : `Wall ${index + 1}`;
+  };
+
+  const refLabel = (ref: MeasurementRef) => {
+    if (ref.kind === "wall") return wallLabel(ref.wallId);
+    const target = fittings.find((f) => f.id === ref.fittingId);
+    return target ? FITTING_LABELS[target.type] : "another fitting";
   };
 
   const locked = fittings.filter((f) => f.measurement_lock);
@@ -33,9 +39,9 @@ export default function MeasurementListPanel({ fittings, walls }: MeasurementLis
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-foreground">{FITTING_LABELS[f.type]}</p>
               <p className="text-xs text-muted-foreground">
-                {wallLabel(lock.wallA.wallId)}: {lock.wallA.distance.toFixed(2)}m
-                {lock.wallB && ` · ${wallLabel(lock.wallB.wallId)}: ${lock.wallB.distance.toFixed(2)}m`}
-                {!lock.wallB && f.specs.mountingHeight != null && ` · Height: ${f.specs.mountingHeight.toFixed(2)}m`}
+                {refLabel(lock.refA)}: {lock.refA.distance.toFixed(2)}m
+                {lock.refB && ` · ${refLabel(lock.refB)}: ${lock.refB.distance.toFixed(2)}m`}
+                {!lock.refB && f.specs.mountingHeight != null && ` · Height: ${f.specs.mountingHeight.toFixed(2)}m`}
               </p>
             </div>
             {f.status === "confirmed" && (
@@ -46,7 +52,8 @@ export default function MeasurementListPanel({ fittings, walls }: MeasurementLis
       })}
       <div className="flex items-start gap-1.5 pt-1 text-[11px] text-muted-foreground">
         <Ruler className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
-        Wall-locked distances, read straight off a laser from the two nearest walls. Re-locks automatically whenever a fitting moves.
+        Distances lock to the two nearest walls automatically, read straight off a laser — re-locks whenever a fitting moves. Either
+        reference can be changed to a different wall or another fitting from the fitting's own measurement fields.
       </div>
     </div>
   );

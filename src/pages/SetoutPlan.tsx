@@ -12,7 +12,7 @@ import FittingPalette from "@/components/setout/FittingPalette";
 import LayerVisibilityToggle from "@/components/setout/LayerVisibilityToggle";
 import SwitchLinksPanel from "@/components/setout/SwitchLinksPanel";
 import type { FittingType } from "@/components/setout/symbols";
-import { DEFAULT_LAYER_VISIBILITY, distance, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type Point, type SetoutFitting } from "@/lib/setoutTypes";
+import { DEFAULT_LAYER_VISIBILITY, distance, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type MeasurementRef, type Point, type SetoutFitting } from "@/lib/setoutTypes";
 import { autoRotationForWallMount, computeMeasurementLock, defaultHeightForType } from "@/lib/setoutGeometry";
 import { generateSetoutReportPdf } from "@/lib/setoutReport";
 import CircuitsPanel from "@/components/setout/CircuitsPanel";
@@ -79,6 +79,7 @@ const SetoutPlan = () => {
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
   const pushUndo = (entry: UndoEntry) => setUndoStack((prev) => [...prev.slice(-19), entry]);
   const [editingWalls, setEditingWalls] = useState(false);
+  const [pickingMeasurementSlot, setPickingMeasurementSlot] = useState<"refA" | "refB" | null>(null);
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>(DEFAULT_LAYER_VISIBILITY);
   const layerSyncedRef = useRef(false);
 
@@ -138,6 +139,19 @@ const SetoutPlan = () => {
   const handleUpdateMeasurementLock = (lock: MeasurementLock) => {
     if (!selectedFittingId) return;
     updateFittingMeasurementLock.mutate({ fittingId: selectedFittingId, measurement_lock: lock });
+  };
+
+  const handlePickMeasurementRef = (slot: "refA" | "refB") => {
+    setPickingMeasurementSlot((prev) => (prev === slot ? null : slot));
+  };
+
+  const handleMeasurementRefPick = (ref: MeasurementRef) => {
+    if (!selectedFittingId || !selectedFitting?.measurement_lock || !pickingMeasurementSlot) return;
+    updateFittingMeasurementLock.mutate({
+      fittingId: selectedFittingId,
+      measurement_lock: { ...selectedFitting.measurement_lock, [pickingMeasurementSlot]: ref },
+    });
+    setPickingMeasurementSlot(null);
   };
 
   const handleAssignCircuit = (circuitId: string | null) => {
@@ -256,6 +270,7 @@ const SetoutPlan = () => {
     setActiveSwitchId(null);
     setActiveGangIndex(0);
     setMultiSelectIds(new Set());
+    setPickingMeasurementSlot(null);
   };
 
   const handleMultiSelectToggle = (fittingId: string) => {
@@ -441,7 +456,8 @@ const SetoutPlan = () => {
                 walls={plan.walls}
                 openings={plan.openings}
                 fittings={fittings}
-                mode={workspaceMode}
+                mode={pickingMeasurementSlot ? "pick-measurement-ref" : workspaceMode}
+                onMeasurementRefPick={handleMeasurementRefPick}
                 selectedFittingType={selectedType}
                 onPlaceFitting={handlePlaceFitting}
                 onFittingDrag={handleFittingDrag}
@@ -473,8 +489,9 @@ const SetoutPlan = () => {
                 onUpdateSpecs={handleUpdateSpecs}
                 onUpdateStatus={handleUpdateStatus}
                 onRotate={handleRotate}
-                walls={plan.walls}
                 onUpdateMeasurementLock={handleUpdateMeasurementLock}
+                onPickMeasurementRef={handlePickMeasurementRef}
+                pickingMeasurementSlot={pickingMeasurementSlot}
                 circuits={circuits}
                 onAssignCircuit={handleAssignCircuit}
               />

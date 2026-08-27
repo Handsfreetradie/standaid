@@ -116,17 +116,34 @@ export interface FittingSpecs {
   rotationLocked?: boolean;
 }
 
-export interface WallLock {
+export interface WallRef {
+  kind: "wall";
   wallId: string;
   distance: number;
 }
 
+// A measurement can also be taken off another fitting instead of a wall
+// (e.g. "this downlight is 1.2m from that one") — genuinely useful on site
+// where a wall isn't the most practical reference, and necessary once the
+// tradie can re-point a measurement at anything on the plan (see the
+// tap-to-pick flow in SetoutCanvas.tsx/FittingPalette.tsx).
+export interface FittingRef {
+  kind: "fitting";
+  fittingId: string;
+  distance: number;
+}
+
+export type MeasurementRef = WallRef | FittingRef;
+
 // GPOs and switches lock to a single nearest wall (plus a mounting height) —
 // that's how a tradie actually measures them on site. Everything else locks
-// to its two nearest walls. See SINGLE_WALL_FITTING_TYPES.
+// to its two nearest walls. See SINGLE_WALL_FITTING_TYPES. Auto-derivation
+// (computeMeasurementLock) always produces wall refs — a tradie's laser
+// reading is naturally wall-to-fitting — but either slot can be re-pointed
+// at a fitting afterward instead.
 export interface MeasurementLock {
-  wallA: WallLock;
-  wallB?: WallLock;
+  refA: MeasurementRef;
+  refB?: MeasurementRef;
 }
 
 export const SINGLE_WALL_FITTING_TYPES: FittingType[] = [

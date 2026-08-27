@@ -14,6 +14,7 @@ import {
   symbolExtraPropsFor,
   LAYER_LABELS,
   type Point,
+  type MeasurementRef,
   type SetoutCircuit,
   type SetoutFitting,
   type SetoutPlan,
@@ -296,10 +297,10 @@ async function drawPlanPage(
       if (f.measurement_lock) {
         doc.setFontSize(5.5);
         doc.setTextColor(100);
-        const { wallA, wallB } = f.measurement_lock;
-        const label = wallB
-          ? `${wallA.distance.toFixed(1)}m / ${wallB.distance.toFixed(1)}m`
-          : `${wallA.distance.toFixed(1)}m${f.specs.mountingHeight != null ? ` @ ${f.specs.mountingHeight.toFixed(1)}m` : ""}`;
+        const { refA, refB } = f.measurement_lock;
+        const label = refB
+          ? `${refA.distance.toFixed(1)}m / ${refB.distance.toFixed(1)}m`
+          : `${refA.distance.toFixed(1)}m${f.specs.mountingHeight != null ? ` @ ${f.specs.mountingHeight.toFixed(1)}m` : ""}`;
         doc.text(label, p.x + 2, p.y + 2.2);
       }
     }
@@ -358,6 +359,11 @@ function drawMeasurementPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitti
     const idx = plan.walls.findIndex((w) => w.id === wallId);
     return idx === -1 ? "Wall" : `Wall ${idx + 1}`;
   };
+  const refLabel = (ref: MeasurementRef) => {
+    if (ref.kind === "wall") return wallLabel(ref.wallId);
+    const target = fittings.find((f) => f.id === ref.fittingId);
+    return target ? codes.get(target.id) ?? FITTING_LABELS[target.type] : "another fitting";
+  };
 
   doc.setFontSize(9);
   doc.setTextColor(20);
@@ -371,9 +377,9 @@ function drawMeasurementPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitti
 
   for (const f of locked) {
     const lock = f.measurement_lock!;
-    const measureText = lock.wallB
-      ? `${wallLabel(lock.wallA.wallId)}: ${lock.wallA.distance.toFixed(2)}m, ${wallLabel(lock.wallB.wallId)}: ${lock.wallB.distance.toFixed(2)}m`
-      : `${wallLabel(lock.wallA.wallId)}: ${lock.wallA.distance.toFixed(2)}m${f.specs.mountingHeight != null ? `, Height: ${f.specs.mountingHeight.toFixed(2)}m` : ""}`;
+    const measureText = lock.refB
+      ? `${refLabel(lock.refA)}: ${lock.refA.distance.toFixed(2)}m, ${refLabel(lock.refB)}: ${lock.refB.distance.toFixed(2)}m`
+      : `${refLabel(lock.refA)}: ${lock.refA.distance.toFixed(2)}m${f.specs.mountingHeight != null ? `, Height: ${f.specs.mountingHeight.toFixed(2)}m` : ""}`;
     const lines = doc.splitTextToSize(measureText, CONTENT_W - 70);
     ensureSpace(Math.max(5, lines.length * 4));
 

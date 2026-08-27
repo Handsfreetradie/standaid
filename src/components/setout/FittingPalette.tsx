@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { FITTING_LABELS, FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
-import { BEAM_ANGLE_OPTIONS, DEFAULT_BEAM_ANGLE, DEFAULT_MOUNTING_HEIGHT, defaultHeightForType, perpendicularDistanceToWall } from "@/lib/setoutGeometry";
+import { BEAM_ANGLE_OPTIONS, DEFAULT_BEAM_ANGLE, DEFAULT_MOUNTING_HEIGHT, defaultHeightForType } from "@/lib/setoutGeometry";
 import {
   CATEGORY_FOR_TYPE,
   FITTING_CATEGORY_ORDER,
@@ -14,9 +14,9 @@ import {
   type FittingSpecs,
   type FittingStatus,
   type MeasurementLock,
+  type MeasurementRef,
   type SetoutCircuit,
   type SetoutFitting,
-  type WallSegment,
 } from "@/lib/setoutTypes";
 
 const FITTING_TYPES = Object.keys(FITTING_SYMBOLS) as FittingType[];
@@ -75,8 +75,9 @@ interface FittingPaletteProps {
   onUpdateSpecs?: (specs: FittingSpecs) => void;
   onUpdateStatus?: (status: FittingStatus) => void;
   onRotate?: () => void;
-  walls?: WallSegment[];
   onUpdateMeasurementLock?: (lock: MeasurementLock) => void;
+  onPickMeasurementRef?: (slot: "refA" | "refB") => void;
+  pickingMeasurementSlot?: "refA" | "refB" | null;
   circuits?: SetoutCircuit[];
   onAssignCircuit?: (circuitId: string | null) => void;
 }
@@ -90,31 +91,14 @@ const FittingPalette = ({
   onUpdateSpecs,
   onUpdateStatus,
   onRotate,
-  walls = [],
   onUpdateMeasurementLock,
+  onPickMeasurementRef,
+  pickingMeasurementSlot,
   circuits = [],
   onAssignCircuit,
 }: FittingPaletteProps) => {
-  const wallLabel = (wallId: string) => {
-    const index = walls.findIndex((w) => w.id === wallId);
-    return index === -1 ? "Wall" : `Wall ${index + 1}`;
-  };
+  const refLabel = (ref: MeasurementRef) => (ref.kind === "wall" ? "Wall" : "Another fitting");
 
-  // Re-points a measurement at a different wall — e.g. the tradie wants a
-  // GPO measured off the wall it's actually more useful to reference from
-  // on site, not just whichever wall happens to be geometrically nearest.
-  // Distance is recomputed fresh against the newly chosen wall (still just
-  // a starting point — the distance field itself stays hand-editable).
-  const handleMeasurementWallChange = (slot: "wallA" | "wallB", newWallId: string) => {
-    if (!selectedFitting?.measurement_lock || !onUpdateMeasurementLock) return;
-    const wall = walls.find((w) => w.id === newWallId);
-    if (!wall) return;
-    const distance = Number(perpendicularDistanceToWall(selectedFitting.position, wall).toFixed(2));
-    onUpdateMeasurementLock({
-      ...selectedFitting.measurement_lock,
-      [slot]: { wallId: newWallId, distance },
-    });
-  };
   return (
     <div className="space-y-2">
       {selectedFittingId && (
@@ -309,72 +293,46 @@ const FittingPalette = ({
 
           {selectedFitting?.measurement_lock && onUpdateMeasurementLock && (
             <div className="space-y-2 border-t border-destructive/10 pt-2">
-              <p className="text-[11px] font-medium text-muted-foreground">Measurements (edit if the laser reads different)</p>
+              <p className="text-[11px] font-medium text-muted-foreground">
+                Measurements (edit if the laser reads different, or pick a different reference from the plan)
+              </p>
               <div className="flex gap-2">
-                <div className="flex-1">
-                  <Select
-                    value={selectedFitting.measurement_lock.wallA.wallId}
-                    onValueChange={(v) => handleMeasurementWallChange("wallA", v)}
-                  >
-                    <SelectTrigger className="h-6 px-1.5 mb-1 text-[10px] text-muted-foreground">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {walls.map((w, i) => (
-                        <SelectItem key={w.id} value={w.id}>
-                          Wall {i + 1}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <DraftNumberInput
-                    key={`wallA-${selectedFitting.id}-${selectedFitting.measurement_lock.wallA.wallId}-${selectedFitting.measurement_lock.wallA.distance.toFixed(2)}`}
-                    type="number"
-                    inputMode="decimal"
-                    step="0.01"
-                    className="h-8 text-xs"
-                    initialValue={Number(selectedFitting.measurement_lock.wallA.distance.toFixed(2))}
-                    onCommit={(value) =>
-                      onUpdateMeasurementLock({
-                        ...selectedFitting.measurement_lock!,
-                        wallA: { ...selectedFitting.measurement_lock!.wallA, distance: value },
-                      })
-                    }
-                  />
-                </div>
-                {selectedFitting.measurement_lock.wallB && (
-                  <div className="flex-1">
-                    <Select
-                      value={selectedFitting.measurement_lock.wallB.wallId}
-                      onValueChange={(v) => handleMeasurementWallChange("wallB", v)}
-                    >
-                      <SelectTrigger className="h-6 px-1.5 mb-1 text-[10px] text-muted-foreground">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {walls.map((w, i) => (
-                          <SelectItem key={w.id} value={w.id}>
-                            Wall {i + 1}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <DraftNumberInput
-                      key={`wallB-${selectedFitting.id}-${selectedFitting.measurement_lock.wallB.wallId}-${selectedFitting.measurement_lock.wallB.distance.toFixed(2)}`}
-                      type="number"
-                      inputMode="decimal"
-                      step="0.01"
-                      className="h-8 text-xs"
-                      initialValue={Number(selectedFitting.measurement_lock.wallB.distance.toFixed(2))}
-                      onCommit={(value) =>
-                        onUpdateMeasurementLock({
-                          ...selectedFitting.measurement_lock!,
-                          wallB: { ...selectedFitting.measurement_lock!.wallB!, distance: value },
-                        })
-                      }
-                    />
-                  </div>
-                )}
+                {(["refA", "refB"] as const).map((slot) => {
+                  const ref = selectedFitting.measurement_lock![slot];
+                  if (!ref) return null;
+                  const isPicking = pickingMeasurementSlot === slot;
+                  return (
+                    <div key={slot} className="flex-1 space-y-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-[10px] text-muted-foreground">{refLabel(ref)}</span>
+                        <button
+                          type="button"
+                          className={cn(
+                            "text-[10px] font-medium rounded px-1.5 py-0.5 border",
+                            isPicking ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground"
+                          )}
+                          onClick={() => onPickMeasurementRef?.(slot)}
+                        >
+                          {isPicking ? "Tap plan…" : "Change"}
+                        </button>
+                      </div>
+                      <DraftNumberInput
+                        key={`${slot}-${selectedFitting.id}-${ref.kind}-${ref.kind === "wall" ? ref.wallId : ref.fittingId}-${ref.distance.toFixed(2)}`}
+                        type="number"
+                        inputMode="decimal"
+                        step="0.01"
+                        className="h-8 text-xs"
+                        initialValue={Number(ref.distance.toFixed(2))}
+                        onCommit={(value) =>
+                          onUpdateMeasurementLock({
+                            ...selectedFitting.measurement_lock!,
+                            [slot]: { ...ref, distance: value },
+                          })
+                        }
+                      />
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

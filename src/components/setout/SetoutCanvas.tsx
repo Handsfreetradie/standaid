@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
 import {
   colorForCircuit,
+  distance,
   gangsFor,
   isSingleWallFitting,
   symbolExtraPropsFor,
@@ -12,7 +13,7 @@ import {
   type SetoutFitting,
   type WallSegment,
   type WallOpening,
-  type WallLock,
+  type MeasurementRef,
   type LayerVisibility,
 } from "@/lib/setoutTypes";
 import {
@@ -28,6 +29,7 @@ import {
   wallsCentroid,
   roomFacingNormal,
   nearestWallAndOffset,
+  perpendicularDistanceToWall,
 } from "@/lib/setoutGeometry";
 
 interface ViewBox {
@@ -54,7 +56,8 @@ export type SetoutCanvasMode =
   | "place-opening"
   | "place-fittings"
   | "link-switches"
-  | "select-multiple";
+  | "select-multiple"
+  | "pick-measurement-ref";
 
 interface SetoutCanvasProps {
   backgroundImage?: BackgroundImage;
@@ -83,6 +86,13 @@ interface SetoutCanvasProps {
   // it (via nearestWallAndOffset) — the parent turns that into a
   // WallOpening with whatever kind/width is currently selected.
   onOpeningPlace?: (wallId: string, offset: number) => void;
+  // "pick-measurement-ref" mode: re-points selectedFittingId's measurement
+  // at whatever the tradie taps next — a wall (if the tap lands close
+  // enough to one) or another fitting — rather than a labelled dropdown,
+  // since walls have no visible label on the plan to pick from. Resolves
+  // the distance here (same division of responsibility as onOpeningPlace:
+  // this component has the geometry, the parent just persists the result).
+  onMeasurementRefPick?: (ref: MeasurementRef) => void;
   snapWalls?: boolean;
   selectedFittingType?: FittingType | null;
   onPlaceFitting?: (point: Point) => void;
@@ -133,6 +143,7 @@ export default function SetoutCanvas({
   onInteriorWallDraftPointAdd,
   onInteriorWallSegmentAdd,
   onOpeningPlace,
+  onMeasurementRefPick,
   snapWalls = false,
   selectedFittingType,
   onPlaceFitting,
@@ -262,6 +273,28 @@ export default function SetoutCanvas({
       } else if (mode === "place-opening") {
         const result = nearestWallAndOffset(scene, walls);
         if (result) onOpeningPlace?.(result.wall.id, result.offset);
+      } else if (mode === "pick-measurement-ref") {
+        // Background tap = pick a wall, but only if the tap actually landed
+        // close to one — walls aren't labelled on the plan, so a tap in
+        // open space should do nothing rather than silently snapping to
+        // whatever wall happens to be nearest, however far away.
+        const TAP_TOLERANCE_PX = 20;
+        const tolerance = TAP_TOLERANCE_PX * px2scene();
+        let nearestWall: WallSegment | null = null;
+        let nearestDistance = Infinity;
+        for (const wall of walls) {
+          const d = perpendicularDistanceToWall(scene, wall);
+          if (d < nearestDistance) {
+            nearestDistance = d;
+            nearestWall = wall;
+          }
+        }
+        if (nearestWall && nearestDistance <= tolerance) {
+          const selectedFitting = fittings.find((f) => f.id === selectedFittingId);
+          if (selectedFitting) {
+            onMeasurementRefPick?.({ kind: "wall", wallId: nearestWall.id, distance: perpendicularDistanceToWall(selectedFitting.position, nearestWall) });
+          }
+        }
       } else if (mode === "place-fittings" && selectedFittingType) {
         // Alignment applies to every ceiling/surface-mounted fitting (not
         // just downlights) — a smoke alarm or exhaust fan lining up with
@@ -296,6 +329,8 @@ export default function SetoutCanvas({
       onInteriorWallDraftPointAdd,
       onInteriorWallSegmentAdd,
       onOpeningPlace,
+      onMeasurementRefPick,
+      selectedFittingId,
       selectedFittingType,
       onPlaceFitting,
       onFittingSelect,
@@ -367,6 +402,13 @@ export default function SetoutCanvas({
         onMultiSelectToggle?.(fitting.id);
         return;
       }
+      if (mode === "pick-measurement-ref") {
+        if (fitting.id === selectedFittingId) return;
+        const selectedFitting = fittings.find((f) => f.id === selectedFittingId);
+        if (!selectedFitting) return;
+        onMeasurementRefPick?.({ kind: "fitting", fittingId: fitting.id, distance: distance(selectedFitting.position, fitting.position) });
+        return;
+      }
       onFittingSelect?.(fitting.id);
       if (mode !== "place-fittings" || panMode || fitting.specs.locked) return;
       dragState.current = {
@@ -380,7 +422,7 @@ export default function SetoutCanvas({
       setDragPreview({ id: fitting.id, position: fitting.position });
       (e.target as Element).setPointerCapture(e.pointerId);
     },
-    [mode, panMode, px2scene, onFittingSelect, linkActiveSwitchId, onSwitchTap, onLinkTargetTap]
+    [mode, panMode, px2scene, onFittingSelect, linkActiveSwitchId, onSwitchTap, onLinkTargetTap, selectedFittingId, fittings, onMeasurementRefPick]
   );
 
   const gridLines = useMemo(() => {
@@ -486,6 +528,7 @@ export default function SetoutCanvas({
   const measurementLines = useMemo(() => {
     if (!layerVisibility?.measurements) return [];
     const wallById = new Map(walls.map((w) => [w.id, w]));
+    const fittingById = new Map(fittings.map((f) => [f.id, f]));
     const lines: { key: string; from: Point; to: Point; label: string }[] = [];
     // visibleFittings, not the raw fittings list — a fitting whose category
     // layer is toggled off should have its measurement line disappear too,
@@ -494,12 +537,19 @@ export default function SetoutCanvas({
     for (const f of visibleFittings) {
       if (!f.measurement_lock) continue;
       const pos = dragPreview?.id === f.id ? dragPreview.position : f.position;
-      const locks = [f.measurement_lock.wallA, f.measurement_lock.wallB].filter((l): l is WallLock => !!l);
-      for (const lock of locks) {
-        const wall = wallById.get(lock.wallId);
-        if (!wall) continue;
-        const to = closestPointOnWall(pos, wall);
-        lines.push({ key: `${f.id}-${lock.wallId}`, from: pos, to, label: `${lock.distance.toFixed(2)}m` });
+      const refs = [f.measurement_lock.refA, f.measurement_lock.refB].filter((r): r is MeasurementRef => !!r);
+      for (const ref of refs) {
+        let to: Point | null = null;
+        if (ref.kind === "wall") {
+          const wall = wallById.get(ref.wallId);
+          if (!wall) continue;
+          to = closestPointOnWall(pos, wall);
+        } else {
+          const other = fittingById.get(ref.fittingId);
+          if (!other) continue;
+          to = dragPreview?.id === other.id ? dragPreview.position : other.position;
+        }
+        lines.push({ key: `${f.id}-${ref.kind}-${ref.kind === "wall" ? ref.wallId : ref.fittingId}`, from: pos, to, label: `${ref.distance.toFixed(2)}m` });
       }
     }
     return lines;

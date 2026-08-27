@@ -357,15 +357,15 @@ export function computeMeasurementLock(position: Point, walls: WallSegment[], fi
   const perpendicularWalls = walls.filter((wall) => hasPerpendicularFoot(position, wall));
   if (perpendicularWalls.length === 0) return null;
   const ranked = perpendicularWalls
-    .map((wall) => ({ wallId: wall.id, distance: perpendicularDistanceToWall(position, wall) }))
+    .map((wall) => ({ kind: "wall" as const, wallId: wall.id, distance: perpendicularDistanceToWall(position, wall) }))
     .sort((a, b) => a.distance - b.distance);
   if (fittingType && isSingleWallFitting(fittingType)) {
     // These fittings are snapped onto their mounted wall on placement/drag
     // (see snapToNearestWall), so ranked[0] is that same wall at ~0m — not
     // useful as "the" measurement. The one real reading is the along-wall
     // distance to the nearest adjacent wall, i.e. the next-nearest one.
-    return ranked.length > 1 ? { wallA: ranked[1] } : { wallA: ranked[0] };
+    return ranked.length > 1 ? { refA: ranked[1] } : { refA: ranked[0] };
   }
-  if (ranked.length < 2) return { wallA: ranked[0] };
-  return { wallA: ranked[0], wallB: ranked[1] };
+  if (ranked.length < 2) return { refA: ranked[0] };
+  return { refA: ranked[0], refB: ranked[1] };
 }
