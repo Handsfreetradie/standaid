@@ -285,11 +285,10 @@ export function useUpdateSetoutFittingPosition(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (input: { fittingId: string; position: Point; measurement_lock: MeasurementLock | null }) => {
-      const { error } = await sb
-        .from("setout_fittings")
-        .update({ position: input.position, measurement_lock: input.measurement_lock })
-        .eq("id", input.fittingId);
+    mutationFn: async (input: { fittingId: string; position: Point; measurement_lock: MeasurementLock | null; specs?: FittingSpecs }) => {
+      const update: Record<string, unknown> = { position: input.position, measurement_lock: input.measurement_lock };
+      if (input.specs) update.specs = input.specs;
+      const { error } = await sb.from("setout_fittings").update(update).eq("id", input.fittingId);
       if (error) throw error;
     },
     onSuccess: () => {

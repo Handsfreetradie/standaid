@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Trash2, Check, RotateCcw, X } from "lucide-react";
+import { Trash2, Check, RotateCcw, RotateCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -76,6 +76,7 @@ interface FittingPaletteProps {
   selectedFitting?: SetoutFitting | null;
   onUpdateSpecs?: (specs: FittingSpecs) => void;
   onUpdateStatus?: (status: FittingStatus) => void;
+  onRotate?: () => void;
   walls?: WallSegment[];
   onUpdateMeasurementLock?: (lock: MeasurementLock) => void;
   circuits?: SetoutCircuit[];
@@ -90,6 +91,7 @@ const FittingPalette = ({
   selectedFitting,
   onUpdateSpecs,
   onUpdateStatus,
+  onRotate,
   walls = [],
   onUpdateMeasurementLock,
   circuits = [],
@@ -129,6 +131,12 @@ const FittingPalette = ({
                       <Check className="h-3.5 w-3.5" /> Confirm
                     </>
                   )}
+                </Button>
+              )}
+              {onRotate && selectedFitting && (
+                <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-muted-foreground" onClick={onRotate}>
+                  <RotateCw className="h-3.5 w-3.5" />
+                  Rotate
                 </Button>
               )}
               <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-destructive hover:text-destructive" onClick={onDeleteSelected}>

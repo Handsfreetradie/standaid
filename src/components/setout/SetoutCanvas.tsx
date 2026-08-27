@@ -473,10 +473,11 @@ export default function SetoutCanvas({
                 : f.type === "switch"
                   ? { gangCount: Math.min(4, gangsFor(f).length) }
                   : {};
+          const rotation = f.specs.rotation ?? 0;
           return (
             <g
               key={f.id}
-              transform={`translate(${pos.x} ${pos.y}) scale(${iconScale}) translate(-12 -12)`}
+              transform={`translate(${pos.x} ${pos.y}) scale(${iconScale}) rotate(${rotation} 12 12) translate(-12 -12)`}
               onPointerDown={(e) => handleFittingPointerDown(e, f)}
               className={cn(
                 mode === "place-fittings" && !panMode && "cursor-grab",

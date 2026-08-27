@@ -154,6 +154,65 @@ function hasPerpendicularFoot(p: Point, wall: WallSegment): boolean {
   return t >= 0 && t <= 1;
 }
 
+// Rough "middle of the room" reference point (average of all wall
+// endpoints) — used only to guess which side of a wall is "inside" versus
+// "into the cavity", not for anything measurement-critical.
+function wallsCentroid(walls: WallSegment[]): Point | null {
+  const points = walls.flatMap((w) => [w.start, w.end]);
+  if (points.length === 0) return null;
+  const sum = points.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
+  return { x: sum.x / points.length, y: sum.y / points.length };
+}
+
+function nearestMountWall(p: Point, walls: WallSegment[]): WallSegment | null {
+  if (walls.length === 0) return null;
+  const candidates = walls.filter((wall) => hasPerpendicularFoot(p, wall));
+  const pool = candidates.length > 0 ? candidates : walls;
+  let nearest = pool[0];
+  let nearestDistance = perpendicularDistanceToWall(p, nearest);
+  for (const wall of pool.slice(1)) {
+    const d = perpendicularDistanceToWall(p, wall);
+    if (d < nearestDistance) {
+      nearestDistance = d;
+      nearest = wall;
+    }
+  }
+  return nearest;
+}
+
+// Rotation (degrees clockwise) that orients a wall-mounted symbol so its
+// body faces into the room rather than into the wall cavity. Wall-mount
+// symbols (GpoSymbol, SwitchSymbol, ...) are drawn with their baseline at
+// the bottom — "up" in the icon's own frame is "into the room" at
+// rotation 0 — so this finds which of the wall's two perpendicular
+// directions points toward the room's rough centre, then works out the
+// angle needed to turn the icon's local "up" to face that way.
+function rotationFacingRoom(wall: WallSegment, position: Point, centroid: Point | null): number {
+  const dx = wall.end.x - wall.start.x;
+  const dy = wall.end.y - wall.start.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const n1 = { x: -dy / len, y: dx / len };
+  const n2 = { x: dy / len, y: -dx / len };
+  let normal = n1;
+  if (centroid) {
+    const toCentroid = { x: centroid.x - position.x, y: centroid.y - position.y };
+    const d1 = toCentroid.x * n1.x + toCentroid.y * n1.y;
+    const d2 = toCentroid.x * n2.x + toCentroid.y * n2.y;
+    normal = d2 > d1 ? n2 : n1;
+  }
+  const radians = Math.atan2(normal.x, -normal.y);
+  return Math.round(((radians * 180) / Math.PI + 360) % 360);
+}
+
+// One-stop helper for placement/drag: auto-orients a wall-mounted fitting
+// to face into the room based on whichever wall it's nearest to. Returns 0
+// (no rotation) if there's nothing to orient against yet.
+export function autoRotationForWallMount(position: Point, walls: WallSegment[]): number {
+  const wall = nearestMountWall(position, walls);
+  if (!wall) return 0;
+  return rotationFacingRoom(wall, position, wallsCentroid(walls));
+}
+
 // Snaps a point onto the nearest wall — used for GPOs, switches, and other
 // wall-mounted fittings, which should sit physically on the wall line
 // rather than floating anywhere in the room. Prefers walls with a genuine

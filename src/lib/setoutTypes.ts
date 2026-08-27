@@ -89,6 +89,15 @@ export interface FittingSpecs {
   // without a DB change.
   gangs?: string[][];
   locked?: boolean;
+  // Degrees clockwise, 0-359. Wall-mounted types get this set automatically
+  // on placement/drag so the symbol's body faces into the room rather than
+  // into the wall cavity (see autoRotationForWallMount) — the rotate
+  // control just lets the tradie override that guess when it's wrong.
+  rotation?: number;
+  // Once the tradie manually rotates a wall-mounted fitting, stop
+  // auto-recomputing its facing on every drag — otherwise a manual fix
+  // would just get overwritten the next time it's nudged.
+  rotationLocked?: boolean;
 }
 
 export interface WallLock {

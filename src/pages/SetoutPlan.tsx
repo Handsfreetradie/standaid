@@ -11,7 +11,7 @@ import LayerVisibilityToggle from "@/components/setout/LayerVisibilityToggle";
 import SwitchLinksPanel from "@/components/setout/SwitchLinksPanel";
 import type { FittingType } from "@/components/setout/symbols";
 import { DEFAULT_LAYER_VISIBILITY, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type Point, type SetoutFitting } from "@/lib/setoutTypes";
-import { computeMeasurementLock, defaultHeightForType } from "@/lib/setoutGeometry";
+import { autoRotationForWallMount, computeMeasurementLock, defaultHeightForType } from "@/lib/setoutGeometry";
 import { generateSetoutReportPdf } from "@/lib/setoutReport";
 import CircuitsPanel from "@/components/setout/CircuitsPanel";
 import MeasurementListPanel from "@/components/setout/MeasurementListPanel";
@@ -92,14 +92,27 @@ const SetoutPlan = () => {
     assignFittingCircuit.mutate({ fittingId: selectedFittingId, circuitId });
   };
 
+  const handleRotate = () => {
+    if (!selectedFitting) return;
+    const current = selectedFitting.specs.rotation ?? 0;
+    updateFittingSpecs.mutate({
+      fittingId: selectedFitting.id,
+      specs: { ...selectedFitting.specs, rotation: (current + 90) % 360, rotationLocked: true },
+    });
+  };
+
   const handlePlaceFitting = (point: Point) => {
     if (!selectedType || !plan) return;
     const defaultHeight = defaultHeightForType(selectedType);
+    const isWallMounted = isSingleWallFitting(selectedType);
+    const specs: FittingSpecs = {};
+    if (defaultHeight != null) specs.mountingHeight = defaultHeight;
+    if (isWallMounted) specs.rotation = autoRotationForWallMount(point, plan.walls);
     createFitting.mutate({
       type: selectedType,
       position: point,
       measurement_lock: computeMeasurementLock(point, plan.walls, selectedType),
-      specs: defaultHeight != null ? { mountingHeight: defaultHeight } : undefined,
+      specs: Object.keys(specs).length > 0 ? specs : undefined,
     });
     // Deliberately kept selected rather than cleared — tradies place several
     // of the same fitting (e.g. a run of downlights) in a row, so forcing a
@@ -110,10 +123,18 @@ const SetoutPlan = () => {
 
   const handleFittingDrag = (fittingId: string, position: Point) => {
     if (!plan) return;
-    const fittingType = fittings.find((f) => f.id === fittingId)?.type;
+    const fitting = fittings.find((f) => f.id === fittingId);
+    if (!fitting) return;
     // Re-lock on every manual adjustment — the whole point of the lock is
     // that it always reflects where the fitting actually is right now.
-    updateFittingPosition.mutate({ fittingId, position, measurement_lock: computeMeasurementLock(position, plan.walls, fittingType) });
+    // Wall-mounted types also re-orient in case the drag moved them to a
+    // different wall, unless the tradie has manually overridden the facing
+    // (rotationLocked) — see handleRotate.
+    const specs =
+      isSingleWallFitting(fitting.type) && !fitting.specs.rotationLocked
+        ? { ...fitting.specs, rotation: autoRotationForWallMount(position, plan.walls) }
+        : undefined;
+    updateFittingPosition.mutate({ fittingId, position, measurement_lock: computeMeasurementLock(position, plan.walls, fitting.type), specs });
   };
 
   const handleDeleteSelected = () => {
@@ -308,6 +329,7 @@ const SetoutPlan = () => {
                 selectedFitting={selectedFitting}
                 onUpdateSpecs={handleUpdateSpecs}
                 onUpdateStatus={handleUpdateStatus}
+                onRotate={handleRotate}
                 walls={plan.walls}
                 onUpdateMeasurementLock={handleUpdateMeasurementLock}
                 circuits={circuits}
