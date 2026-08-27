@@ -448,7 +448,13 @@ export default function SetoutCanvas({
   const switchLinks = useMemo(() => {
     if (layerVisibility && !layerVisibility.switches) return [];
     const switches = fittings.filter((f) => f.type === "switch");
-    const links: { key: string; switchPos: Point; targetPos: Point; active: boolean }[] = [];
+    // A light fed from 2+ gangs (from any switch, not just this one) is
+    // 2-way/3-way by definition — no separate "way" field, it's just
+    // derived from how many gangs list it. Shown as a small label on the
+    // curve so multi-way switching is visible on the plan itself, not only
+    // in the text-based cable-run list.
+    const wayCountFor = (targetId: string) => switches.reduce((n, s) => n + gangsFor(s).filter((gang) => gang.includes(targetId)).length, 0);
+    const links: { key: string; switchPos: Point; targetPos: Point; active: boolean; wayCount: number }[] = [];
     for (const sw of switches) {
       const swPos = dragPreview?.id === sw.id ? dragPreview.position : sw.position;
       const gangs = gangsFor(sw);
@@ -464,6 +470,7 @@ export default function SetoutCanvas({
             switchPos: fromPos,
             targetPos,
             active: sw.id === linkActiveSwitchId && gangIndex === linkActiveGangIndex,
+            wayCount: wayCountFor(targetId),
           });
           fromPos = targetPos;
           fromId = targetId;
@@ -659,21 +666,52 @@ export default function SetoutCanvas({
 
         {switchLinks.length > 0 && (
           <g>
-            {switchLinks.map((link) => (
-              <line
-                key={link.key}
-                x1={link.switchPos.x}
-                y1={link.switchPos.y}
-                x2={link.targetPos.x}
-                y2={link.targetPos.y}
-                className={link.active ? "text-primary" : "text-muted-foreground"}
-                stroke="currentColor"
-                strokeOpacity={link.active ? 0.8 : 0.35}
-                strokeWidth={link.active ? 1.5 : 1}
-                strokeDasharray="0.12 0.08"
-                vectorEffect="non-scaling-stroke"
-              />
-            ))}
+            {switchLinks.map((link) => {
+              // A gentle bow (quadratic bezier, not a straight line) — the
+              // trade-drawing convention for a switch-to-fixture cable run
+              // (see e.g. a real switchboard/lighting layout), and reads
+              // more clearly than straight lines once several links share
+              // an endpoint. Bow direction is a fixed left-hand normal, cap
+              // the offset so a long run doesn't get an absurd arc.
+              const dx = link.targetPos.x - link.switchPos.x;
+              const dy = link.targetPos.y - link.switchPos.y;
+              const len = Math.hypot(dx, dy) || 1;
+              const nx = -dy / len;
+              const ny = dx / len;
+              const bow = Math.min(len * 0.15, 0.4);
+              const cx = (link.switchPos.x + link.targetPos.x) / 2 + nx * bow;
+              const cy = (link.switchPos.y + link.targetPos.y) / 2 + ny * bow;
+              const fontSize = 10 * px2scene();
+              return (
+                <g key={link.key}>
+                  <path
+                    d={`M ${link.switchPos.x} ${link.switchPos.y} Q ${cx} ${cy} ${link.targetPos.x} ${link.targetPos.y}`}
+                    fill="none"
+                    className={link.active ? "text-primary" : "text-muted-foreground"}
+                    stroke="currentColor"
+                    strokeOpacity={link.active ? 0.8 : 0.35}
+                    strokeWidth={link.active ? 1.5 : 1}
+                    strokeDasharray="0.12 0.08"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  {link.wayCount > 1 && (
+                    <text
+                      x={0.25 * link.switchPos.x + 0.5 * cx + 0.25 * link.targetPos.x}
+                      y={0.25 * link.switchPos.y + 0.5 * cy + 0.25 * link.targetPos.y}
+                      fontSize={fontSize}
+                      textAnchor="middle"
+                      stroke="hsl(var(--background))"
+                      strokeWidth={fontSize * 0.28}
+                      className={link.active ? "text-primary" : "text-muted-foreground"}
+                      fill="currentColor"
+                      paintOrder="stroke"
+                    >
+                      {link.wayCount}-way
+                    </text>
+                  )}
+                </g>
+              );
+            })}
           </g>
         )}
 
