@@ -1,8 +1,8 @@
-import { useRef, useState, useCallback, useMemo } from "react";
+import { useRef, useState, useCallback, useMemo, useEffect } from "react";
 import { Hand, Minus, Plus, MousePointer2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
-import { isSingleWallFitting, type Point, type SetoutFitting, type WallSegment, type WallLock, type LayerVisibility } from "@/lib/setoutTypes";
+import { gangsFor, isSingleWallFitting, type Point, type SetoutFitting, type WallSegment, type WallLock, type LayerVisibility } from "@/lib/setoutTypes";
 import { snapOrthogonal, isNearFirstPoint, lightPoolRadius, poolsSignificantlyOverlap, closestPointOnWall, snapToNearestWall } from "@/lib/setoutGeometry";
 
 interface ViewBox {
@@ -45,6 +45,7 @@ interface SetoutCanvasProps {
   onFittingSelect?: (fittingId: string | null) => void;
   layerVisibility?: LayerVisibility;
   linkActiveSwitchId?: string | null;
+  linkActiveGangIndex?: number;
   onSwitchTap?: (switchId: string | null) => void;
   onLinkTargetTap?: (fittingId: string) => void;
   className?: string;
@@ -84,6 +85,7 @@ export default function SetoutCanvas({
   onFittingSelect,
   layerVisibility,
   linkActiveSwitchId,
+  linkActiveGangIndex = 0,
   onSwitchTap,
   onLinkTargetTap,
   className,
@@ -117,7 +119,7 @@ export default function SetoutCanvas({
   }, []);
 
   const handleWheel = useCallback(
-    (e: React.WheelEvent<SVGSVGElement>) => {
+    (e: WheelEvent) => {
       e.preventDefault();
       const svg = svgRef.current;
       if (!svg) return;
@@ -132,6 +134,18 @@ export default function SetoutCanvas({
     },
     [zoomAround]
   );
+
+  // React attaches its synthetic wheel handler as a passive listener, so
+  // `e.preventDefault()` inside a plain `onWheel` prop silently does
+  // nothing — the browser scrolls the page underneath the zoom regardless.
+  // A native, explicitly non-passive listener is the only way to actually
+  // stop that scroll.
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    svg.addEventListener("wheel", handleWheel, { passive: false });
+    return () => svg.removeEventListener("wheel", handleWheel);
+  }, [handleWheel]);
 
   const sceneFromClient = useCallback((clientX: number, clientY: number): Point => {
     const svg = svgRef.current;
@@ -270,29 +284,39 @@ export default function SetoutCanvas({
     });
   }, [fittings, layerVisibility?.coverage, dragPreview]);
 
-  // A switch's linked_to is a loop-in chain, not a star — the cable runs
-  // switch -> first light -> second light -> ... in tap order, same as a
-  // real 2-core-and-earth loop threaded through each fitting, not a
-  // separate home-run from the switch to every light.
+  // Each gang of a switch plate is its own loop-in chain, not a star — the
+  // cable runs switch -> first light -> second light -> ... in tap order
+  // within that gang, same as a real 2-core-and-earth loop threaded through
+  // each fitting, not a separate home-run from the switch to every light.
+  // A 2-gang plate draws two independent chains leaving the same switch
+  // icon; a light fed by 2+ gangs (from any switch) is 2-way by definition.
   const switchLinks = useMemo(() => {
     if (layerVisibility && !layerVisibility.switches) return [];
     const switches = fittings.filter((f) => f.type === "switch");
     const links: { key: string; switchPos: Point; targetPos: Point; active: boolean }[] = [];
     for (const sw of switches) {
       const swPos = dragPreview?.id === sw.id ? dragPreview.position : sw.position;
-      let fromPos = swPos;
-      let fromId = sw.id;
-      for (const targetId of sw.linked_to) {
-        const target = fittings.find((f) => f.id === targetId);
-        if (!target) continue;
-        const targetPos = dragPreview?.id === target.id ? dragPreview.position : target.position;
-        links.push({ key: `${fromId}-${targetId}`, switchPos: fromPos, targetPos, active: sw.id === linkActiveSwitchId });
-        fromPos = targetPos;
-        fromId = targetId;
-      }
+      const gangs = gangsFor(sw);
+      gangs.forEach((gang, gangIndex) => {
+        let fromPos = swPos;
+        let fromId = sw.id;
+        for (const targetId of gang) {
+          const target = fittings.find((f) => f.id === targetId);
+          if (!target) continue;
+          const targetPos = dragPreview?.id === target.id ? dragPreview.position : target.position;
+          links.push({
+            key: `${sw.id}-g${gangIndex}-${fromId}-${targetId}`,
+            switchPos: fromPos,
+            targetPos,
+            active: sw.id === linkActiveSwitchId && gangIndex === linkActiveGangIndex,
+          });
+          fromPos = targetPos;
+          fromId = targetId;
+        }
+      });
     }
     return links;
-  }, [fittings, layerVisibility?.switches, dragPreview, linkActiveSwitchId]);
+  }, [fittings, layerVisibility?.switches, dragPreview, linkActiveSwitchId, linkActiveGangIndex]);
 
   const measurementLines = useMemo(() => {
     if (!layerVisibility?.measurements) return [];
@@ -321,7 +345,6 @@ export default function SetoutCanvas({
         ref={svgRef}
         viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`}
         className={cn("h-full w-full touch-none select-none", cursorClass)}
-        onWheel={handleWheel}
         onPointerDown={handleBackgroundPointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -447,7 +470,9 @@ export default function SetoutCanvas({
               ? { count: f.specs.count ?? 1, ...(f.type === "gpo" ? { variant: f.specs.gpoVariant ?? "standard" } : {}) }
               : f.type === "downlight"
                 ? { sizeMm: f.specs.downlightSizeMm ?? 90 }
-                : {};
+                : f.type === "switch"
+                  ? { gangCount: Math.min(4, gangsFor(f).length) }
+                  : {};
           return (
             <g
               key={f.id}

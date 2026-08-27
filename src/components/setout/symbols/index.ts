@@ -41,6 +41,7 @@ export { default as WallStairLightSymbol } from "./WallStairLightSymbol";
 export type { GpoSymbolProps } from "./GpoSymbol";
 export type { DownlightSymbolProps } from "./DownlightSymbol";
 export type { ParaFloodSymbolProps } from "./ParaFloodSymbol";
+export type { SwitchSymbolProps } from "./SwitchSymbol";
 export type { Fluoro1200SymbolProps } from "./Fluoro1200Symbol";
 export type { FittingType, SetoutSymbolProps } from "./types";
 export { FITTING_LABELS, FITTING_SYMBOLS } from "./fittingSymbolMap";

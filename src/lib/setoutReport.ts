@@ -4,7 +4,7 @@
 import jsPDF from "jspdf";
 import { FITTING_LABELS } from "@/components/setout/symbols";
 import type { FittingType } from "@/components/setout/symbols";
-import { CATEGORY_FOR_TYPE, FITTING_CATEGORY_ORDER, LAYER_LABELS, type Point, type SetoutCircuit, type SetoutFitting, type SetoutPlan } from "@/lib/setoutTypes";
+import { CATEGORY_FOR_TYPE, FITTING_CATEGORY_ORDER, gangsFor, LAYER_LABELS, type Point, type SetoutCircuit, type SetoutFitting, type SetoutPlan } from "@/lib/setoutTypes";
 
 const PAGE_W = 210; // A4 mm
 const PAGE_H = 297;
@@ -267,38 +267,45 @@ function drawCableRunPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting[
     return;
   }
 
+  // N-way derivation: count how many gangs — across any switch — list this
+  // target, not just how many switches. A 2-gang plate's two gangs are
+  // independent circuits, same as two separate switches.
+  const wayCount = (targetId: string) => switches.reduce((n, s) => n + gangsFor(s).filter((gang) => gang.includes(targetId)).length, 0);
+
   for (const sw of switches) {
+    const gangs = gangsFor(sw);
     ensureSpace(6);
     doc.setFontSize(10);
     doc.setTextColor(20);
-    doc.text(codes.get(sw.id) ?? "?", MARGIN, y);
+    doc.text(`${codes.get(sw.id) ?? "?"}${gangs.length > 1 ? ` (${gangs.length}-gang)` : ""}`, MARGIN, y);
     y += 5;
 
     doc.setFontSize(9);
     doc.setTextColor(60);
-    if (sw.linked_to.length === 0) {
-      ensureSpace(5);
-      doc.text("Not linked to anything yet", MARGIN + 4, y);
-      y += 5;
-    } else {
-      // linked_to is a loop-in chain in tap order (switch -> first light ->
+    gangs.forEach((gang, gangIndex) => {
+      const gangLabel = gangs.length > 1 ? `Gang ${gangIndex + 1}: ` : "";
+      if (gang.length === 0) {
+        ensureSpace(5);
+        doc.text(`${gangLabel}Not linked to anything yet`, MARGIN + 4, y);
+        y += 5;
+        return;
+      }
+      // Each gang is a loop-in chain in tap order (switch -> first light ->
       // second light -> ...), not a set of separate home-runs — same
       // topology as SetoutCanvas.tsx's switchLinks and SwitchLinksPanel.tsx.
-      // N-way derivation: count how many switches list this target in their
-      // own linked_to.
-      const parts = sw.linked_to
+      const parts = gang
         .map((id) => fittings.find((f) => f.id === id))
         .filter((f): f is SetoutFitting => !!f)
         .map((target) => {
           const code = codes.get(target.id) ?? "?";
-          const ways = switches.filter((s) => s.linked_to.includes(target.id)).length;
+          const ways = wayCount(target.id);
           return ways > 1 ? `${code} (${ways}-way)` : code;
         });
-      const lines = doc.splitTextToSize(`${codes.get(sw.id) ?? "?"} -> ${parts.join(" -> ")}`, CONTENT_W - 4);
+      const lines = doc.splitTextToSize(`${gangLabel}${codes.get(sw.id) ?? "?"} -> ${parts.join(" -> ")}`, CONTENT_W - 4);
       ensureSpace(lines.length * 4.2);
       doc.text(lines, MARGIN + 4, y);
       y += lines.length * 4.2;
-    }
+    });
     y += 3;
   }
 }

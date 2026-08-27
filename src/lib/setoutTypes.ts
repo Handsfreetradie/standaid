@@ -80,6 +80,15 @@ export interface FittingSpecs {
   count?: 1 | 2;
   gpoVariant?: GpoVariant;
   downlightSizeMm?: 50 | 70 | 90;
+  // A switch plate's independent gangs — each gang is its own ordered
+  // loop-in chain (switch -> target[0] -> target[1] -> ...), e.g. one
+  // 2-gang plate where gang 1 runs 4 downlights and gang 2 runs a separate
+  // exhaust fan. Replaces the old flat `linked_to` for switches, which
+  // could only represent a single gang; `linked_to` is left in the schema
+  // unused rather than migrated away, since JSONB specs can hold this
+  // without a DB change.
+  gangs?: string[][];
+  locked?: boolean;
 }
 
 export interface WallLock {
@@ -114,6 +123,15 @@ export const SINGLE_WALL_FITTING_TYPES: FittingType[] = [
 
 export function isSingleWallFitting(type: FittingType): boolean {
   return SINGLE_WALL_FITTING_TYPES.includes(type);
+}
+
+// A switch plate's gangs, defaulting to a single empty gang for a plain
+// 1-gang switch that hasn't been linked to anything yet — every consumer
+// (canvas rendering, the link panel, PDF export, the toggle mutation)
+// should read gangs through this rather than touching specs.gangs raw, so
+// "no gangs yet" and "one empty gang" are always treated the same way.
+export function gangsFor(fitting: Pick<SetoutFitting, "specs">): string[][] {
+  return fitting.specs.gangs && fitting.specs.gangs.length > 0 ? fitting.specs.gangs : [[]];
 }
 
 export type FittingStatus = "placed" | "confirmed";

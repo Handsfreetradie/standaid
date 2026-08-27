@@ -14,6 +14,7 @@ import {
   type FittingSpecs,
   type MeasurementLock,
   CATEGORY_FOR_TYPE,
+  gangsFor,
 } from "@/lib/setoutTypes";
 import type { FittingType } from "@/components/setout/symbols";
 
@@ -197,19 +198,67 @@ export function useCreateSetoutFitting(planId: string) {
   });
 }
 
-// Toggles a target fitting in/out of a switch's linked_to array — the sole
-// source of truth for switch<->light wiring (no separate "switch type"
-// field; a light with 2+ switches pointing at it is a 2-way by definition).
-export function useToggleSwitchLink(planId: string) {
+// Toggles a target fitting in/out of one gang of a switch plate. Gangs are
+// independent loop-in chains (specs.gangs: string[][]) — a 2-gang plate has
+// two separate chains, e.g. gang 1 running 4 downlights and gang 2 running
+// an exhaust fan on its own. There's no separate "2-way/3-way" field: a
+// light is N-way switched purely because it shows up in N different gangs
+// (across any switches), derived the same way regardless of which gang or
+// plate each occurrence came from.
+export function useToggleGangLink(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (input: { switchFitting: SetoutFitting; targetId: string }) => {
-      const current = input.switchFitting.linked_to;
-      const next = current.includes(input.targetId)
-        ? current.filter((id) => id !== input.targetId)
-        : [...current, input.targetId];
-      const { error } = await sb.from("setout_fittings").update({ linked_to: next }).eq("id", input.switchFitting.id);
+    mutationFn: async (input: { switchFitting: SetoutFitting; gangIndex: number; targetId: string }) => {
+      const gangs = gangsFor(input.switchFitting).map((gang) => [...gang]);
+      while (gangs.length <= input.gangIndex) gangs.push([]);
+      const gang = gangs[input.gangIndex];
+      gangs[input.gangIndex] = gang.includes(input.targetId) ? gang.filter((id) => id !== input.targetId) : [...gang, input.targetId];
+      const { error } = await sb
+        .from("setout_fittings")
+        .update({ specs: { ...input.switchFitting.specs, gangs } })
+        .eq("id", input.switchFitting.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
+    },
+  });
+}
+
+// Adds a new empty gang to a switch plate (e.g. going from a 1-gang to a
+// 2-gang switch) and bumps its `specs.count` to match, since GpoSymbol-style
+// count already drives which switch glyph (1/2/3/4-gang) gets drawn.
+export function useAddSwitchGang(planId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (switchFitting: SetoutFitting) => {
+      const gangs = [...gangsFor(switchFitting), []];
+      const { error } = await sb
+        .from("setout_fittings")
+        .update({ specs: { ...switchFitting.specs, gangs, count: gangs.length } })
+        .eq("id", switchFitting.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
+    },
+  });
+}
+
+// Removes a gang entirely (not just clearing its links) — e.g. undoing an
+// accidental "+ Add gang".
+export function useRemoveSwitchGang(planId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: { switchFitting: SetoutFitting; gangIndex: number }) => {
+      const gangs = gangsFor(input.switchFitting).filter((_, i) => i !== input.gangIndex);
+      const { error } = await sb
+        .from("setout_fittings")
+        .update({ specs: { ...input.switchFitting.specs, gangs, count: Math.max(1, gangs.length) } })
+        .eq("id", input.switchFitting.id);
       if (error) throw error;
     },
     onSuccess: () => {

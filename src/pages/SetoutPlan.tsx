@@ -10,7 +10,7 @@ import FittingPalette from "@/components/setout/FittingPalette";
 import LayerVisibilityToggle from "@/components/setout/LayerVisibilityToggle";
 import SwitchLinksPanel from "@/components/setout/SwitchLinksPanel";
 import type { FittingType } from "@/components/setout/symbols";
-import { DEFAULT_LAYER_VISIBILITY, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type Point } from "@/lib/setoutTypes";
+import { DEFAULT_LAYER_VISIBILITY, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type Point, type SetoutFitting } from "@/lib/setoutTypes";
 import { computeMeasurementLock, defaultHeightForType } from "@/lib/setoutGeometry";
 import { generateSetoutReportPdf } from "@/lib/setoutReport";
 import CircuitsPanel from "@/components/setout/CircuitsPanel";
@@ -24,7 +24,9 @@ import {
   useUpdateSetoutFittingStatus,
   useUpdateSetoutFittingMeasurementLock,
   useUpdateSetoutPlanLayerVisibility,
-  useToggleSwitchLink,
+  useToggleGangLink,
+  useAddSwitchGang,
+  useRemoveSwitchGang,
   useDeleteSetoutFitting,
 } from "@/hooks/useSetoutPlans";
 import { useSetoutCircuits, useAssignFittingCircuit } from "@/hooks/useSetoutCircuits";
@@ -45,7 +47,9 @@ const SetoutPlan = () => {
   const updateFittingSpecs = useUpdateSetoutFittingSpecs(planId || "");
   const updateFittingMeasurementLock = useUpdateSetoutFittingMeasurementLock(planId || "");
   const updateLayerVisibility = useUpdateSetoutPlanLayerVisibility(planId || "");
-  const toggleSwitchLink = useToggleSwitchLink(planId || "");
+  const toggleGangLink = useToggleGangLink(planId || "");
+  const addSwitchGang = useAddSwitchGang(planId || "");
+  const removeSwitchGang = useRemoveSwitchGang(planId || "");
   const updateFittingStatus = useUpdateSetoutFittingStatus(planId || "");
   const deleteFitting = useDeleteSetoutFitting(planId || "");
   const assignFittingCircuit = useAssignFittingCircuit(planId || "");
@@ -54,6 +58,7 @@ const SetoutPlan = () => {
   const [selectedType, setSelectedType] = useState<FittingType | null>(null);
   const [selectedFittingId, setSelectedFittingId] = useState<string | null>(null);
   const [activeSwitchId, setActiveSwitchId] = useState<string | null>(null);
+  const [activeGangIndex, setActiveGangIndex] = useState(0);
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>(DEFAULT_LAYER_VISIBILITY);
   const layerSyncedRef = useRef(false);
 
@@ -125,7 +130,21 @@ const SetoutPlan = () => {
   const handleLinkTargetTap = (targetId: string) => {
     const activeSwitch = fittings.find((f) => f.id === activeSwitchId);
     if (!activeSwitch) return;
-    toggleSwitchLink.mutate({ switchFitting: activeSwitch, targetId });
+    toggleGangLink.mutate({ switchFitting: activeSwitch, gangIndex: activeGangIndex, targetId });
+  };
+
+  const handleSelectSwitch = (switchId: string | null) => {
+    setActiveSwitchId(switchId);
+    setActiveGangIndex(0);
+  };
+
+  const handleAddGang = (switchFitting: SetoutFitting) => {
+    addSwitchGang.mutate(switchFitting);
+  };
+
+  const handleRemoveGang = (switchFitting: SetoutFitting, gangIndex: number) => {
+    removeSwitchGang.mutate({ switchFitting, gangIndex });
+    if (switchFitting.id === activeSwitchId && gangIndex === activeGangIndex) setActiveGangIndex(0);
   };
 
   const handleExport = async () => {
@@ -147,6 +166,7 @@ const SetoutPlan = () => {
     setSelectedFittingId(null);
     setSelectedType(null);
     setActiveSwitchId(null);
+    setActiveGangIndex(0);
   };
 
   // Rendered in two different spots depending on breakpoint (above the
@@ -265,7 +285,8 @@ const SetoutPlan = () => {
                 onFittingSelect={setSelectedFittingId}
                 layerVisibility={layerVisibility}
                 linkActiveSwitchId={activeSwitchId}
-                onSwitchTap={setActiveSwitchId}
+                linkActiveGangIndex={activeGangIndex}
+                onSwitchTap={handleSelectSwitch}
                 onLinkTargetTap={handleLinkTargetTap}
                 className="h-full"
               />
@@ -293,7 +314,15 @@ const SetoutPlan = () => {
                 onAssignCircuit={handleAssignCircuit}
               />
             ) : (
-              <SwitchLinksPanel fittings={fittings} activeSwitchId={activeSwitchId} onSelectSwitch={setActiveSwitchId} />
+              <SwitchLinksPanel
+                fittings={fittings}
+                activeSwitchId={activeSwitchId}
+                activeGangIndex={activeGangIndex}
+                onSelectSwitch={handleSelectSwitch}
+                onSelectGang={setActiveGangIndex}
+                onAddGang={handleAddGang}
+                onRemoveGang={handleRemoveGang}
+              />
             )}
 
             <div className="pt-4 border-t border-border">

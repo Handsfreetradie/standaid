@@ -1,22 +1,36 @@
-import { ArrowRight, Cable } from "lucide-react";
+import { ArrowRight, Cable, Plus, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { FITTING_LABELS, FITTING_SYMBOLS } from "@/components/setout/symbols";
-import type { SetoutFitting } from "@/lib/setoutTypes";
+import { gangsFor, type SetoutFitting } from "@/lib/setoutTypes";
 
 interface SwitchLinksPanelProps {
   fittings: SetoutFitting[];
   activeSwitchId: string | null;
+  activeGangIndex: number;
   onSelectSwitch: (id: string | null) => void;
+  onSelectGang: (gangIndex: number) => void;
+  onAddGang: (switchFitting: SetoutFitting) => void;
+  onRemoveGang: (switchFitting: SetoutFitting, gangIndex: number) => void;
 }
 
-// A light with 2+ switches pointing at it is a 2-way/3-way by definition —
-// no separate "switch type" is stored, this is derived from linked_to.
+// A light fed by 2+ gangs — from any switch, any gang — is 2-way/3-way by
+// definition. No separate "switch type" is stored; this is purely derived
+// from how many gangs include it.
 function wayCountFor(targetId: string, switches: SetoutFitting[]): number {
-  return switches.filter((sw) => sw.linked_to.includes(targetId)).length;
+  return switches.reduce((count, sw) => count + gangsFor(sw).filter((gang) => gang.includes(targetId)).length, 0);
 }
 
-export default function SwitchLinksPanel({ fittings, activeSwitchId, onSelectSwitch }: SwitchLinksPanelProps) {
+export default function SwitchLinksPanel({
+  fittings,
+  activeSwitchId,
+  activeGangIndex,
+  onSelectSwitch,
+  onSelectGang,
+  onAddGang,
+  onRemoveGang,
+}: SwitchLinksPanelProps) {
   const switches = fittings.filter((f) => f.type === "switch");
 
   if (switches.length === 0) {
@@ -26,46 +40,81 @@ export default function SwitchLinksPanel({ fittings, activeSwitchId, onSelectSwi
   return (
     <div className="space-y-2">
       {switches.map((sw, i) => {
-        const isActive = sw.id === activeSwitchId;
-        const links = sw.linked_to.map((id) => fittings.find((f) => f.id === id)).filter((f): f is SetoutFitting => !!f);
+        const isActiveSwitch = sw.id === activeSwitchId;
+        const gangs = gangsFor(sw);
         return (
-          <Card
-            key={sw.id}
-            className={cn("p-3 rounded-xl cursor-pointer transition-colors", isActive && "border-primary/40 bg-primary/5")}
-            onClick={() => onSelectSwitch(isActive ? null : sw.id)}
-          >
+          <Card key={sw.id} className={cn("p-3 rounded-xl transition-colors", isActiveSwitch && "border-primary/40 bg-primary/5")}>
             <div className="flex items-center justify-between mb-1.5">
-              <p className="text-sm font-semibold text-foreground">Switch {i + 1}</p>
-              {isActive && <span className="text-[10px] font-medium text-primary bg-primary/10 rounded px-1.5 py-0.5">Tap lights to link</span>}
+              <p className="text-sm font-semibold text-foreground">
+                Switch {i + 1}
+                {gangs.length > 1 && <span className="ml-1 text-xs font-normal text-muted-foreground">({gangs.length}-gang)</span>}
+              </p>
+              <Button variant="ghost" size="sm" className="h-6 gap-1 text-[11px] text-muted-foreground" onClick={() => onAddGang(sw)}>
+                <Plus className="h-3 w-3" /> Add gang
+              </Button>
             </div>
-            {links.length === 0 ? (
-              <p className="text-xs text-muted-foreground">Not linked to anything yet</p>
-            ) : (
-              <div className="flex flex-wrap items-center gap-1">
-                <span className="text-[10px] font-medium text-muted-foreground">Switch</span>
-                {links.map((target) => {
-                  const Icon = FITTING_SYMBOLS[target.type];
-                  const ways = wayCountFor(target.id, switches);
-                  return (
-                    <span key={target.id} className="contents">
-                      <ArrowRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                      <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/50 px-1.5 py-1 text-[11px] text-foreground">
-                        <Icon size={14} className="text-primary" strokeWidth={1.5} />
-                        {FITTING_LABELS[target.type]}
-                        {ways > 1 && <span className="text-primary font-medium">· {ways}-way</span>}
-                      </span>
+            <div className="space-y-1.5">
+              {gangs.map((gang, gangIndex) => {
+                const isActiveGang = isActiveSwitch && gangIndex === activeGangIndex;
+                const links = gang.map((id) => fittings.find((f) => f.id === id)).filter((f): f is SetoutFitting => !!f);
+                return (
+                  <div
+                    key={gangIndex}
+                    className={cn(
+                      "flex flex-wrap items-center gap-1.5 rounded-lg border px-2 py-1.5 cursor-pointer",
+                      isActiveGang ? "border-primary/40 bg-primary/10" : "border-border"
+                    )}
+                    onClick={() => {
+                      onSelectSwitch(sw.id);
+                      onSelectGang(gangIndex);
+                    }}
+                  >
+                    <span className="text-[10px] font-medium text-muted-foreground flex-shrink-0">
+                      {gangs.length > 1 ? `Gang ${gangIndex + 1}` : "Switch"}
                     </span>
-                  );
-                })}
-              </div>
-            )}
+                    {links.length === 0 ? (
+                      <span className="text-xs text-muted-foreground">{isActiveGang ? "Tap lights to link" : "Not linked yet"}</span>
+                    ) : (
+                      links.map((target) => {
+                        const Icon = FITTING_SYMBOLS[target.type];
+                        const ways = wayCountFor(target.id, switches);
+                        return (
+                          <span key={target.id} className="contents">
+                            <ArrowRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                            <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/50 px-1.5 py-1 text-[11px] text-foreground">
+                              <Icon size={14} className="text-primary" strokeWidth={1.5} />
+                              {FITTING_LABELS[target.type]}
+                              {ways > 1 && <span className="text-primary font-medium">· {ways}-way</span>}
+                            </span>
+                          </span>
+                        );
+                      })
+                    )}
+                    {gangs.length > 1 && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 ml-auto text-muted-foreground hover:text-destructive flex-shrink-0"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRemoveGang(sw, gangIndex);
+                        }}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </Card>
         );
       })}
 
       <div className="flex items-start gap-1.5 pt-1 text-[11px] text-muted-foreground">
         <Cable className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
-        This list is the cable-run order — each switch's linked points are what it runs to.
+        Each gang is its own cable run — tap a gang, then tap lights on the canvas to link them. Use "Add gang" for a plate that
+        controls more than one thing (e.g. downlights on one gang, a fan on another).
       </div>
     </div>
   );
