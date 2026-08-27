@@ -476,7 +476,11 @@ export default function SetoutCanvas({
     if (!layerVisibility?.measurements) return [];
     const wallById = new Map(walls.map((w) => [w.id, w]));
     const lines: { key: string; from: Point; to: Point; label: string }[] = [];
-    for (const f of fittings) {
+    // visibleFittings, not the raw fittings list — a fitting whose category
+    // layer is toggled off should have its measurement line disappear too,
+    // otherwise a hidden GPO still leaves a dangling wall-measurement line
+    // with nothing visibly attached to it.
+    for (const f of visibleFittings) {
       if (!f.measurement_lock) continue;
       const pos = dragPreview?.id === f.id ? dragPreview.position : f.position;
       const locks = [f.measurement_lock.wallA, f.measurement_lock.wallB].filter((l): l is WallLock => !!l);
@@ -488,7 +492,7 @@ export default function SetoutCanvas({
       }
     }
     return lines;
-  }, [fittings, walls, layerVisibility?.measurements, dragPreview]);
+  }, [visibleFittings, walls, layerVisibility?.measurements, dragPreview]);
 
   const iconScale = (ICON_SCREEN_PX * px2scene()) / 24;
   const cursorClass = panMode || mode === "view" ? "cursor-grab active:cursor-grabbing" : "cursor-crosshair";
