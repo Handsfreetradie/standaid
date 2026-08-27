@@ -29,17 +29,21 @@ TASK 1 — Wall outline: trace the outer perimeter of the room/house as an order
 
 TASK 2 — Scale: if a dimension is legibly labelled on the drawing spanning two of the corners you traced (e.g. "4200", "3.6m", "4200mm"), report which two corners it spans and the real-world length in metres. Only report this if you can actually read a number on the plan — never estimate or guess a scale from typical room sizes. If no legible dimension is visible, omit this field entirely.
 
-TASK 3 — Existing electrical symbols: this plan may already have electrical fittings marked on it (a switchboard-designer's plan, or a plan the electrician has already marked up), or it may have none at all — both are normal. For every electrical symbol you can actually see already drawn on the plan, report its position (same normalized 0-1 coordinates) and classify it into exactly one of these types:
+TASK 3 — Internal walls: this plan may show internal partition walls dividing rooms (most real house/building plans do), or it may be a single room with no internal walls — both are normal. For every internal wall line you can actually see, report it as its own line segment (two endpoint points, same normalized 0-1 coordinates) — these don't need to connect into a closed shape like the outer perimeter does, each one is independent. Do not include the exterior perimeter walls here, only genuine internal partitions.
+
+TASK 4 — Doors and windows: for every door and window opening you can see cut into ANY wall (exterior or internal), report it as its own short line segment spanning the gap in the wall (two endpoint points, same normalized 0-1 coordinates), plus whether it's a "door" or "window". A door is typically drawn as a gap in the wall with a quarter-circle swing arc; a window is typically a gap with a thin line or double-tick across it, sometimes with sill lines. Only report openings you can actually see — don't guess that a wall has a door just because a room needs one.
+
+TASK 5 — Existing electrical symbols: this plan may already have electrical fittings marked on it (a switchboard-designer's plan, or a plan the electrician has already marked up), or it may have none at all — both are normal. For every electrical symbol you can actually see already drawn on the plan, report its position (same normalized 0-1 coordinates) and classify it into exactly one of these types:
 ${FITTING_TYPES.join(", ")}
 
 Common AS/NZS-convention symbols to recognise: a downlight is usually a small circle with a cross or dot inside; a GPO (power point) is a circle with two short parallel marks; a switch is a small flick/tick mark on or near a wall line, sometimes with a letter subscript for multi-gang; a smoke detector is often a circle with "SD" or a distinctive hatched circle; an exhaust fan is a circle with an "X" or fan-blade hatching; a ceiling fan is a larger circle, sometimes with blade lines; a TV/data point is a circle with "TV" or "D" lettering.
 
 Classification rules:
-- Only report a symbol you can actually see drawn on the plan — never invent fittings that aren't there.
+- Only report a symbol you can actually see drawn on the plan — never invent fittings, walls, doors, or windows that aren't there.
 - If you can see a symbol clearly but aren't confident which of the listed types it is, still report its position but use type "unclassified" and set confidence to "low" rather than guessing a specific type. A wrong classification is worse than an honest "unclassified".
 - Set confidence to "high" only when the symbol convention is unambiguous.
 
-Call return_plan_extraction with your findings. If the plan has zero visible electrical symbols, return an empty fittings array — that's a normal, valid result.`;
+Call return_plan_extraction with your findings. Any of interior_walls, openings, or fittings can be an empty array if the plan genuinely has none — that's a normal, valid result.`;
 
 serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
@@ -134,6 +138,30 @@ serve(async (req) => {
                 },
                 required: ["corner_a_index", "corner_b_index", "real_distance_metres"],
               },
+              interior_walls: {
+                type: "array",
+                description: "Internal partition walls, each its own independent line segment — empty array if there are none",
+                items: {
+                  type: "object",
+                  properties: { x1: { type: "number" }, y1: { type: "number" }, x2: { type: "number" }, y2: { type: "number" } },
+                  required: ["x1", "y1", "x2", "y2"],
+                },
+              },
+              openings: {
+                type: "array",
+                description: "Doors/windows cut into any wall, each traced as the short segment spanning the gap — empty array if there are none",
+                items: {
+                  type: "object",
+                  properties: {
+                    x1: { type: "number" },
+                    y1: { type: "number" },
+                    x2: { type: "number" },
+                    y2: { type: "number" },
+                    kind: { type: "string", enum: ["door", "window"] },
+                  },
+                  required: ["x1", "y1", "x2", "y2", "kind"],
+                },
+              },
               fittings: {
                 type: "array",
                 description: "Every existing electrical symbol already drawn on the plan — empty array if there are none",
@@ -149,7 +177,7 @@ serve(async (req) => {
                 },
               },
             },
-            required: ["corners", "fittings"],
+            required: ["corners", "interior_walls", "openings", "fittings"],
           },
         }],
         tool_choice: { type: "tool", name: "return_plan_extraction" },
@@ -198,6 +226,8 @@ serve(async (req) => {
     return json({
       corners: result.corners,
       suggested_scale: result.suggested_scale ?? null,
+      interior_walls: result.interior_walls ?? [],
+      openings: result.openings ?? [],
       fittings: result.fittings ?? [],
     });
   } catch (e) {

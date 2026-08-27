@@ -15,6 +15,7 @@ import {
   autoRotationForWallMount,
   computeMeasurementLock,
   defaultHeightForType,
+  nearestWallAndOffset,
   nextOpeningId,
   nextWallId,
   polygonToWalls,
@@ -44,9 +45,20 @@ interface AiFitting extends NormalizedPoint {
   type: string;
   confidence: "high" | "medium" | "low";
 }
+interface AiWallSegment {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+interface AiOpening extends AiWallSegment {
+  kind: "door" | "window";
+}
 interface AiExtraction {
   corners: NormalizedPoint[];
   suggested_scale: { corner_a_index: number; corner_b_index: number; real_distance_metres: number } | null;
+  interior_walls: AiWallSegment[];
+  openings: AiOpening[];
   fittings: AiFitting[];
 }
 
@@ -100,6 +112,8 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
   const [savedWalls, setSavedWalls] = useState<WallSegment[] | null>(null);
   const [savedOpenings, setSavedOpenings] = useState<WallOpening[]>([]);
   const [aiCorners, setAiCorners] = useState<NormalizedPoint[] | null>(null);
+  const [aiInteriorWalls, setAiInteriorWalls] = useState<AiWallSegment[]>([]);
+  const [aiOpenings, setAiOpenings] = useState<AiOpening[]>([]);
   const [aiFittings, setAiFittings] = useState<AiFitting[]>([]);
   const [removedKeys, setRemovedKeys] = useState<Set<string>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
@@ -147,6 +161,8 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
       const extraction = await runAiExtraction(source);
       if (extraction && extraction.corners.length >= 3) {
         setAiCorners(extraction.corners);
+        setAiInteriorWalls(extraction.interior_walls || []);
+        setAiOpenings(extraction.openings || []);
         setAiFittings(extraction.fittings || []);
         const scale = extraction.suggested_scale;
         const a = scale ? extraction.corners[scale.corner_a_index] : null;
@@ -158,11 +174,11 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
           ]);
           setRealDistance(String(scale.real_distance_metres));
         }
-        toast.success(
-          extraction.fittings?.length
-            ? `AI traced the walls and found ${extraction.fittings.length} existing fitting${extraction.fittings.length === 1 ? "" : "s"} — check the suggestion below.`
-            : "AI traced the wall outline — check the suggestion below."
-        );
+        const extras: string[] = [];
+        if (extraction.interior_walls?.length) extras.push(`${extraction.interior_walls.length} interior wall${extraction.interior_walls.length === 1 ? "" : "s"}`);
+        if (extraction.openings?.length) extras.push(`${extraction.openings.length} door${extraction.openings.length === 1 ? "" : "s"}/window${extraction.openings.length === 1 ? "" : "s"}`);
+        if (extraction.fittings?.length) extras.push(`${extraction.fittings.length} existing fitting${extraction.fittings.length === 1 ? "" : "s"}`);
+        toast.success(extras.length ? `AI traced the walls and found ${extras.join(", ")} — check the suggestion below.` : "AI traced the wall outline — check the suggestion below.");
       } else {
         toast.error("Couldn't auto-detect this plan — calibrate and trace it manually instead.");
       }
@@ -190,7 +206,38 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     // tradie goes Back and forward again, don't clobber edits they've
     // already made to the traced shape.
     if (aiCorners && aiCorners.length >= 3 && sketchPoints.length === 0) {
-      setSketchPoints(aiCorners.map((c) => ({ x: (c.x * raster.naturalWidth) / ppm, y: (c.y * raster.naturalHeight) / ppm })));
+      const toMetres = (p: NormalizedPoint) => ({ x: (p.x * raster.naturalWidth) / ppm, y: (p.y * raster.naturalHeight) / ppm });
+      const seededSketchPoints = aiCorners.map(toMetres);
+      setSketchPoints(seededSketchPoints);
+
+      if ((aiInteriorWalls.length > 0 || aiOpenings.length > 0) && interiorWalls.length === 0 && wallOpenings.length === 0) {
+        const seededInterior: WallSegment[] = aiInteriorWalls.map((w) => ({
+          id: nextWallId(),
+          start: toMetres({ x: w.x1, y: w.y1 }),
+          end: toMetres({ x: w.x2, y: w.y2 }),
+          kind: "interior",
+        }));
+        setInteriorWalls(seededInterior);
+
+        // Resolve each AI-reported opening to a real {wallId, offset}
+        // geometrically (nearest wall to its midpoint), rather than trusting
+        // the AI to name which wall it belongs to — robust to it being
+        // imprecise about that, since the geometry is unambiguous either way.
+        const combinedWalls = [...polygonToWalls(seededSketchPoints), ...seededInterior];
+        const seededOpenings: WallOpening[] = [];
+        for (const o of aiOpenings) {
+          const p1 = toMetres({ x: o.x1, y: o.y1 });
+          const p2 = toMetres({ x: o.x2, y: o.y2 });
+          const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+          const resolved = nearestWallAndOffset(mid, combinedWalls);
+          if (!resolved) continue;
+          const width = distance(p1, p2);
+          const len = wallLength(resolved.wall);
+          const offset = Math.max(0, Math.min(Math.max(len - width, 0), resolved.offset - width / 2));
+          seededOpenings.push({ id: nextOpeningId(), wallId: resolved.wall.id, offset, width, kind: o.kind });
+        }
+        setWallOpenings(seededOpenings);
+      }
     }
     setStep("trace-walls");
   };
