@@ -509,6 +509,17 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
                   className="h-7 w-20 text-xs"
                 />
                 <span className="text-muted-foreground">m</span>
+                {o.kind === "door" && (
+                  <button
+                    type="button"
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() =>
+                      setWallOpenings((prev) => prev.map((p) => (p.id === o.id ? { ...p, swingFlipped: !p.swingFlipped } : p)))
+                    }
+                  >
+                    Flip swing
+                  </button>
+                )}
                 <button
                   type="button"
                   className="text-muted-foreground hover:text-destructive"

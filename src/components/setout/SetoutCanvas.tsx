@@ -787,7 +787,11 @@ export default function SetoutCanvas({
               // Door: a leaf line from the hinge (p1) swinging into the room,
               // plus a quarter-circle arc tracing the leaf's sweep back to
               // the far jamb (p2) — the standard architectural door glyph.
-              const normal = roomFacingNormal(wall, p1, wallCentroid);
+              // swingFlipped negates the room-facing normal to swing the
+              // leaf out instead, for the doors where the default guess
+              // (always inward) doesn't match reality.
+              const roomNormal = roomFacingNormal(wall, p1, wallCentroid);
+              const normal = o.swingFlipped ? { x: -roomNormal.x, y: -roomNormal.y } : roomNormal;
               const openEnd = { x: p1.x + normal.x * o.width, y: p1.y + normal.y * o.width };
               return (
                 <g
@@ -797,8 +801,12 @@ export default function SetoutCanvas({
                 >
                   {hitStroke}
                   <line x1={p1.x} y1={p1.y} x2={openEnd.x} y2={openEnd.y} stroke="currentColor" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                  {/* Flipping the normal mirrors openEnd across the wall
+                      line, which also flips the arc's rotational sense —
+                      the sweep flag has to flip along with it or the arc
+                      bows the wrong way. */}
                   <path
-                    d={`M ${openEnd.x} ${openEnd.y} A ${o.width} ${o.width} 0 0 1 ${p2.x} ${p2.y}`}
+                    d={`M ${openEnd.x} ${openEnd.y} A ${o.width} ${o.width} 0 0 ${o.swingFlipped ? 0 : 1} ${p2.x} ${p2.y}`}
                     fill="none"
                     stroke="currentColor"
                     strokeWidth={1}

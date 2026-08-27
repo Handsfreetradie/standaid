@@ -21,6 +21,11 @@ export default defineConfig(() => ({
       includeAssets: ["favicon.ico", "pwa-192.png", "pwa-512.png", "maskable-512.png", "apple-touch-icon.png"],
       injectManifest: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+        // Default cap (2 MiB) was already within a few hundred bytes of the
+        // main bundle's real size — any trivial change tipped it over and
+        // broke the production build. 3 MiB gives real headroom instead of
+        // living on that edge; still small enough to precache without issue.
+        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
       },
       manifest: {
         name: "StandAId",

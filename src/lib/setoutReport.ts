@@ -262,7 +262,8 @@ async function drawPlanPage(
           continue;
         }
         const rawP1 = pointAtOffset(wall, Math.max(0, o.offset));
-        const normal = roomFacingNormal(wall, rawP1, centroid);
+        const roomNormal = roomFacingNormal(wall, rawP1, centroid);
+        const normal = o.swingFlipped ? { x: -roomNormal.x, y: -roomNormal.y } : roomNormal;
         const openEnd = toPage({ x: rawP1.x + normal.x * o.width, y: rawP1.y + normal.y * o.width });
         doc.setDrawColor(90);
         doc.setLineWidth(0.25);
