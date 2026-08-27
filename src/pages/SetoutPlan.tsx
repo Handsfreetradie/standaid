@@ -379,6 +379,7 @@ const SetoutPlan = () => {
             <div className="h-[65vh] md:h-[85vh] mb-4 md:mb-0">
               <SetoutCanvas
                 walls={plan.walls}
+                openings={plan.openings}
                 fittings={fittings}
                 mode={workspaceMode}
                 selectedFittingType={selectedType}

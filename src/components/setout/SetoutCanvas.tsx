@@ -10,10 +10,23 @@ import {
   type SetoutCircuit,
   type SetoutFitting,
   type WallSegment,
+  type WallOpening,
   type WallLock,
   type LayerVisibility,
 } from "@/lib/setoutTypes";
-import { snapOrthogonal, isNearFirstPoint, lightPoolRadius, poolsSignificantlyOverlap, closestPointOnWall, snapToNearestWall, alignToExistingPoints } from "@/lib/setoutGeometry";
+import {
+  snapOrthogonal,
+  isNearFirstPoint,
+  lightPoolRadius,
+  poolsSignificantlyOverlap,
+  closestPointOnWall,
+  snapToNearestWall,
+  alignToExistingPoints,
+  wallLength,
+  pointAtOffset,
+  wallsCentroid,
+  roomFacingNormal,
+} from "@/lib/setoutGeometry";
 
 interface ViewBox {
   x: number;
@@ -36,6 +49,7 @@ export type SetoutCanvasMode = "view" | "calibrate" | "sketch-walls" | "place-fi
 interface SetoutCanvasProps {
   backgroundImage?: BackgroundImage;
   walls: WallSegment[];
+  openings?: WallOpening[];
   fittings?: SetoutFitting[];
   mode: SetoutCanvasMode;
   sketchPoints?: Point[];
@@ -85,6 +99,7 @@ function initialViewBox(backgroundImage?: BackgroundImage, walls?: WallSegment[]
 export default function SetoutCanvas({
   backgroundImage,
   walls,
+  openings = [],
   fittings = [],
   mode,
   sketchPoints = [],
@@ -217,7 +232,7 @@ export default function SetoutCanvas({
         if (calibratePoints.length < 2) onCalibratePointAdd?.(scene);
       } else if (mode === "place-fittings" && selectedFittingType) {
         const point = isSingleWallFitting(selectedFittingType)
-          ? snapToNearestWall(scene, walls)
+          ? snapToNearestWall(scene, walls, openings)
           : selectedFittingType === "downlight"
             ? alignToExistingPoints(
                 scene,
@@ -248,6 +263,7 @@ export default function SetoutCanvas({
       onFittingSelect,
       onSwitchTap,
       walls,
+      openings,
       fittings,
     ]
   );
@@ -266,7 +282,7 @@ export default function SetoutCanvas({
         const raw = { x: origin.x + dx, y: origin.y + dy };
         let position = raw;
         if (isSingleWallFitting(type)) {
-          position = snapToNearestWall(raw, walls);
+          position = snapToNearestWall(raw, walls, openings);
           setAlignGuides(null);
         } else if (type === "downlight") {
           const others = fittings.filter((f) => f.type === "downlight" && f.id !== fittingId).map((f) => f.position);
@@ -279,7 +295,7 @@ export default function SetoutCanvas({
         setDragPreview({ id: fittingId, position });
       }
     },
-    [walls, fittings]
+    [walls, openings, fittings]
   );
 
   const endPan = useCallback(() => {
@@ -343,6 +359,29 @@ export default function SetoutCanvas({
     for (let y = startY; y <= endY; y += step) hLines.push(y);
     return { vLines, hLines, startX, endX, startY, endY };
   }, [viewBox]);
+
+  const wallCentroid = useMemo(() => wallsCentroid(walls), [walls]);
+
+  // Cuts each wall into the solid sub-segments either side of its openings
+  // (a door/window leaves a visible gap in the wall line, drawn separately
+  // below) — computed once per walls/openings change rather than inline in
+  // JSX since every wall needs its own sorted-by-offset pass.
+  const wallRenderData = useMemo(() => {
+    return walls.map((wall) => {
+      const wallOpenings = openings.filter((o) => o.wallId === wall.id).sort((a, b) => a.offset - b.offset);
+      const len = wallLength(wall);
+      const segments: { from: Point; to: Point }[] = [];
+      let cursor = 0;
+      for (const o of wallOpenings) {
+        const start = Math.max(0, Math.min(len, o.offset));
+        const end = Math.max(0, Math.min(len, o.offset + o.width));
+        if (start > cursor) segments.push({ from: pointAtOffset(wall, cursor), to: pointAtOffset(wall, start) });
+        cursor = Math.max(cursor, end);
+      }
+      if (cursor < len) segments.push({ from: pointAtOffset(wall, cursor), to: pointAtOffset(wall, len) });
+      return { wall, segments, openings: wallOpenings };
+    });
+  }, [walls, openings]);
 
   const visibleFittings = useMemo(() => {
     if (!layerVisibility) return fittings;
@@ -443,10 +482,64 @@ export default function SetoutCanvas({
           ))}
         </g>
 
-        <g className="text-foreground">
-          {walls.map((wall) => (
-            <line key={wall.id} x1={wall.start.x} y1={wall.start.y} x2={wall.end.x} y2={wall.end.y} stroke="currentColor" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinecap="square" />
+        <g>
+          {wallRenderData.map(({ wall, segments }) => (
+            <g key={wall.id} className={wall.kind === "interior" ? "text-foreground/60" : "text-foreground"}>
+              {segments.map((seg, i) => (
+                <line
+                  key={i}
+                  x1={seg.from.x}
+                  y1={seg.from.y}
+                  x2={seg.to.x}
+                  y2={seg.to.y}
+                  stroke="currentColor"
+                  strokeWidth={wall.kind === "interior" ? 1.25 : 2}
+                  vectorEffect="non-scaling-stroke"
+                  strokeLinecap="square"
+                />
+              ))}
+            </g>
           ))}
+          {wallRenderData.flatMap(({ wall, openings: wallOpenings }) =>
+            wallOpenings.map((o) => {
+              const len = wallLength(wall);
+              const p1 = pointAtOffset(wall, Math.max(0, o.offset));
+              const p2 = pointAtOffset(wall, Math.min(len, o.offset + o.width));
+              if (o.kind === "window") {
+                return (
+                  <line
+                    key={o.id}
+                    x1={p1.x}
+                    y1={p1.y}
+                    x2={p2.x}
+                    y2={p2.y}
+                    stroke="currentColor"
+                    strokeWidth={1}
+                    vectorEffect="non-scaling-stroke"
+                    className="text-sky-600"
+                  />
+                );
+              }
+              // Door: a leaf line from the hinge (p1) swinging into the room,
+              // plus a quarter-circle arc tracing the leaf's sweep back to
+              // the far jamb (p2) — the standard architectural door glyph.
+              const normal = roomFacingNormal(wall, p1, wallCentroid);
+              const openEnd = { x: p1.x + normal.x * o.width, y: p1.y + normal.y * o.width };
+              return (
+                <g key={o.id} className="text-foreground/70">
+                  <line x1={p1.x} y1={p1.y} x2={openEnd.x} y2={openEnd.y} stroke="currentColor" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                  <path
+                    d={`M ${openEnd.x} ${openEnd.y} A ${o.width} ${o.width} 0 0 1 ${p2.x} ${p2.y}`}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={1}
+                    strokeDasharray="0.06 0.06"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </g>
+              );
+            })
+          )}
         </g>
 
         {sketchPoints.length > 0 && (

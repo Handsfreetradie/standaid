@@ -5,6 +5,7 @@ import jsPDF from "jspdf";
 import { FITTING_LABELS } from "@/components/setout/symbols";
 import type { FittingType } from "@/components/setout/symbols";
 import { CATEGORY_FOR_TYPE, FITTING_CATEGORY_ORDER, gangsFor, LAYER_LABELS, type Point, type SetoutCircuit, type SetoutFitting, type SetoutPlan } from "@/lib/setoutTypes";
+import { wallLength, pointAtOffset, wallsCentroid, roomFacingNormal } from "@/lib/setoutGeometry";
 
 const PAGE_W = 210; // A4 mm
 const PAGE_H = 297;
@@ -137,12 +138,66 @@ function drawPlanPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting[], c
     const originY = planTop + (planAreaH - bboxH * scale) / 2 - minY * scale;
     const toPage = (p: Point) => ({ x: originX + p.x * scale, y: originY + p.y * scale });
 
-    doc.setDrawColor(60);
-    doc.setLineWidth(0.5);
+    const centroid = wallsCentroid(plan.walls);
     for (const wall of plan.walls) {
-      const a = toPage(wall.start);
-      const b = toPage(wall.end);
-      doc.line(a.x, a.y, b.x, b.y);
+      const wallOpenings = (plan.openings ?? []).filter((o) => o.wallId === wall.id).sort((a, b) => a.offset - b.offset);
+      const len = wallLength(wall);
+      doc.setDrawColor(60);
+      doc.setLineWidth(wall.kind === "interior" ? 0.3 : 0.5);
+      let cursor = 0;
+      for (const o of wallOpenings) {
+        const start = Math.max(0, Math.min(len, o.offset));
+        const end = Math.max(0, Math.min(len, o.offset + o.width));
+        if (start > cursor) {
+          const a = toPage(pointAtOffset(wall, cursor));
+          const b = toPage(pointAtOffset(wall, start));
+          doc.line(a.x, a.y, b.x, b.y);
+        }
+        cursor = Math.max(cursor, end);
+      }
+      if (cursor < len) {
+        const a = toPage(pointAtOffset(wall, cursor));
+        const b = toPage(pointAtOffset(wall, len));
+        doc.line(a.x, a.y, b.x, b.y);
+      }
+
+      // Door/window glyphs — same construction as the on-screen canvas
+      // (leaf + swing arc for a door, a single line across the gap for a
+      // window), just drawn with jsPDF primitives instead of SVG.
+      for (const o of wallOpenings) {
+        const p1 = toPage(pointAtOffset(wall, Math.max(0, o.offset)));
+        const p2 = toPage(pointAtOffset(wall, Math.min(len, o.offset + o.width)));
+        if (o.kind === "window") {
+          doc.setDrawColor(30, 100, 160);
+          doc.setLineWidth(0.25);
+          doc.line(p1.x, p1.y, p2.x, p2.y);
+          continue;
+        }
+        const rawP1 = pointAtOffset(wall, Math.max(0, o.offset));
+        const normal = roomFacingNormal(wall, rawP1, centroid);
+        const openEnd = toPage({ x: rawP1.x + normal.x * o.width, y: rawP1.y + normal.y * o.width });
+        doc.setDrawColor(90);
+        doc.setLineWidth(0.25);
+        doc.line(p1.x, p1.y, openEnd.x, openEnd.y);
+        // Quarter-circle swing arc, approximated as a short polyline (jsPDF
+        // has no simple SVG-style arc primitive) — centred on the hinge,
+        // radius = opening width, from the open leaf end back to the far jamb.
+        const hingePage = p1;
+        const startAngle = Math.atan2(openEnd.y - hingePage.y, openEnd.x - hingePage.x);
+        const endAngle = Math.atan2(p2.y - hingePage.y, p2.x - hingePage.x);
+        let sweep = endAngle - startAngle;
+        while (sweep <= -Math.PI) sweep += Math.PI * 2;
+        while (sweep > Math.PI) sweep -= Math.PI * 2;
+        const radiusPage = Math.hypot(openEnd.x - hingePage.x, openEnd.y - hingePage.y);
+        const steps = 8;
+        let prev = openEnd;
+        for (let i = 1; i <= steps; i++) {
+          const angle = startAngle + (sweep * i) / steps;
+          const next = { x: hingePage.x + radiusPage * Math.cos(angle), y: hingePage.y + radiusPage * Math.sin(angle) };
+          doc.line(prev.x, prev.y, next.x, next.y);
+          prev = next;
+        }
+      }
     }
 
     doc.setLineWidth(0.2);

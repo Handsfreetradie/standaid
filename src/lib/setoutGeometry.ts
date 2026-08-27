@@ -152,7 +152,7 @@ export function projectPointOntoWall(p: Point, wall: WallSegment): number {
   return t * len;
 }
 
-function pointAtOffset(wall: WallSegment, offset: number): Point {
+export function pointAtOffset(wall: WallSegment, offset: number): Point {
   const len = wallLength(wall) || 1;
   const t = Math.max(0, Math.min(1, offset / len));
   return { x: wall.start.x + (wall.end.x - wall.start.x) * t, y: wall.start.y + (wall.end.y - wall.start.y) * t };
@@ -181,7 +181,7 @@ function hasPerpendicularFoot(p: Point, wall: WallSegment): boolean {
 // Rough "middle of the room" reference point (average of all wall
 // endpoints) — used only to guess which side of a wall is "inside" versus
 // "into the cavity", not for anything measurement-critical.
-function wallsCentroid(walls: WallSegment[]): Point | null {
+export function wallsCentroid(walls: WallSegment[]): Point | null {
   const points = walls.flatMap((w) => [w.start, w.end]);
   if (points.length === 0) return null;
   const sum = points.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
@@ -211,19 +211,25 @@ function nearestMountWall(p: Point, walls: WallSegment[]): WallSegment | null {
 // rotation 0 — so this finds which of the wall's two perpendicular
 // directions points toward the room's rough centre, then works out the
 // angle needed to turn the icon's local "up" to face that way.
-function rotationFacingRoom(wall: WallSegment, position: Point, centroid: Point | null): number {
+// Which of a wall's two perpendicular directions points toward the room's
+// rough centre from a given point on that wall — shared by the wall-mount
+// auto-rotation below and by door-swing rendering (a door leaf should swing
+// into the room, same "which side is inside" question).
+export function roomFacingNormal(wall: WallSegment, position: Point, centroid: Point | null): Point {
   const dx = wall.end.x - wall.start.x;
   const dy = wall.end.y - wall.start.y;
   const len = Math.hypot(dx, dy) || 1;
   const n1 = { x: -dy / len, y: dx / len };
   const n2 = { x: dy / len, y: -dx / len };
-  let normal = n1;
-  if (centroid) {
-    const toCentroid = { x: centroid.x - position.x, y: centroid.y - position.y };
-    const d1 = toCentroid.x * n1.x + toCentroid.y * n1.y;
-    const d2 = toCentroid.x * n2.x + toCentroid.y * n2.y;
-    normal = d2 > d1 ? n2 : n1;
-  }
+  if (!centroid) return n1;
+  const toCentroid = { x: centroid.x - position.x, y: centroid.y - position.y };
+  const d1 = toCentroid.x * n1.x + toCentroid.y * n1.y;
+  const d2 = toCentroid.x * n2.x + toCentroid.y * n2.y;
+  return d2 > d1 ? n2 : n1;
+}
+
+function rotationFacingRoom(wall: WallSegment, position: Point, centroid: Point | null): number {
+  const normal = roomFacingNormal(wall, position, centroid);
   const radians = Math.atan2(normal.x, -normal.y);
   return Math.round(((radians * 180) / Math.PI + 360) % 360);
 }
