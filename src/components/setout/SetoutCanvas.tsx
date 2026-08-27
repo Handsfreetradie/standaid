@@ -22,14 +22,8 @@ interface ViewBox {
   h: number;
 }
 
-const MIN_SCENE_SPAN = 1.5;
-const MAX_SCENE_SPAN = 200;
 const ICON_SCREEN_PX = 28;
 const CORNER_MARKER_METRES = 0.09;
-
-function clampSpan(v: number) {
-  return Math.min(MAX_SCENE_SPAN, Math.max(MIN_SCENE_SPAN, v));
-}
 
 interface BackgroundImage {
   href: string;
@@ -115,12 +109,30 @@ export default function SetoutCanvas({
   className,
 }: SetoutCanvasProps) {
   const svgRef = useRef<SVGSVGElement>(null);
-  const [viewBox, setViewBox] = useState<ViewBox>(() => initialViewBox(backgroundImage, walls));
+  // Zoom limits are relative to how wide a view this canvas started with,
+  // not a fixed absolute number — a fixed span assumes scene units are
+  // metres, but "calibrate" mode feeds this component a backgroundImage
+  // sized in raw image pixels (often thousands of units), so a fixed cap
+  // of e.g. 200 would clamp almost immediately on the very first zoom,
+  // snapping to a tiny sliver of the image with no way back out.
+  const spanBoundsRef = useRef<{ min: number; max: number } | null>(null);
+  const [viewBox, setViewBox] = useState<ViewBox>(() => {
+    const vb = initialViewBox(backgroundImage, walls);
+    const initialSpan = Math.max(vb.w, vb.h);
+    spanBoundsRef.current = { min: initialSpan / 200, max: initialSpan * 1.5 };
+    return vb;
+  });
   const [panMode, setPanMode] = useState(false);
   const panState = useRef<{ clientX: number; clientY: number; vb: ViewBox; scale: number } | null>(null);
   const dragState = useRef<{ fittingId: string; type: FittingType; clientX: number; clientY: number; scale: number; origin: Point } | null>(null);
   const [dragPreview, setDragPreview] = useState<{ id: string; position: Point } | null>(null);
   const [alignGuides, setAlignGuides] = useState<{ x?: number; y?: number } | null>(null);
+
+  const clampSpan = useCallback((v: number) => {
+    const bounds = spanBoundsRef.current;
+    if (!bounds) return v;
+    return Math.min(bounds.max, Math.max(bounds.min, v));
+  }, []);
 
   const px2scene = useCallback(() => {
     const el = svgRef.current;
@@ -141,7 +153,7 @@ export default function SetoutCanvas({
         h,
       };
     });
-  }, []);
+  }, [clampSpan]);
 
   const handleWheel = useCallback(
     (e: WheelEvent) => {
