@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Trash2, Check, RotateCcw, RotateCw, X } from "lucide-react";
+import { Trash2, Check, RotateCcw, RotateCw, Lock, Unlock, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -137,6 +137,24 @@ const FittingPalette = ({
                 <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-muted-foreground" onClick={onRotate}>
                   <RotateCw className="h-3.5 w-3.5" />
                   Rotate
+                </Button>
+              )}
+              {onUpdateSpecs && selectedFitting && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-1.5 text-muted-foreground"
+                  onClick={() => onUpdateSpecs({ ...selectedFitting.specs, locked: !selectedFitting.specs.locked })}
+                >
+                  {selectedFitting.specs.locked ? (
+                    <>
+                      <Unlock className="h-3.5 w-3.5" /> Unlock
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="h-3.5 w-3.5" /> Lock
+                    </>
+                  )}
                 </Button>
               )}
               <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-destructive hover:text-destructive" onClick={onDeleteSelected}>

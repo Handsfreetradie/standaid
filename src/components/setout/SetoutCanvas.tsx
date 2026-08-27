@@ -236,7 +236,7 @@ export default function SetoutCanvas({
         return;
       }
       onFittingSelect?.(fitting.id);
-      if (mode !== "place-fittings" || panMode) return;
+      if (mode !== "place-fittings" || panMode || fitting.specs.locked) return;
       dragState.current = {
         fittingId: fitting.id,
         type: fitting.type,
@@ -503,6 +503,13 @@ export default function SetoutCanvas({
                 <g transform="translate(15 -3)">
                   <circle r={5} fill="hsl(var(--primary))" />
                   <path d="M-2 0l1.5 1.5L2.5 -2" stroke="hsl(var(--primary-foreground))" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                </g>
+              )}
+              {f.specs.locked && (
+                <g transform="translate(-3 27)">
+                  <circle r={5} fill="hsl(var(--muted-foreground))" />
+                  <rect x={-2} y={-0.5} width={4} height={3} rx={0.5} fill="hsl(var(--background))" />
+                  <path d="M-1.3 -0.5v-1.2a1.3 1.3 0 0 1 2.6 0v1.2" stroke="hsl(var(--background))" strokeWidth={1} fill="none" />
                 </g>
               )}
             </g>
