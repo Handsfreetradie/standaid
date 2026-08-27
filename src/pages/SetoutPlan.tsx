@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download } from "lucide-react";
+import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -29,10 +29,21 @@ import {
   useAddSwitchGang,
   useRemoveSwitchGang,
   useDeleteSetoutFitting,
+  useRestoreSetoutFitting,
 } from "@/hooks/useSetoutPlans";
 import { useSetoutCircuits, useAssignFittingCircuit } from "@/hooks/useSetoutCircuits";
 
 type WorkspaceMode = Extract<SetoutCanvasMode, "place-fittings" | "link-switches" | "select-multiple">;
+
+// A small in-memory undo history for the most common accidental actions —
+// placing, deleting, or dragging a fitting. Not persisted across reload,
+// and doesn't cover circuit/gang edits or wall changes; scoped to what a
+// tradie is most likely to want to walk back mid-session.
+type UndoEntry =
+  | { type: "create"; fittingId: string }
+  | { type: "delete"; fitting: SetoutFitting }
+  | { type: "bulk-delete"; fittings: SetoutFitting[] }
+  | { type: "move"; fittingId: string; prevPosition: Point; prevMeasurementLock: MeasurementLock | null; prevSpecs: FittingSpecs };
 
 const SetoutPlan = () => {
   const { planId } = useParams();
@@ -53,6 +64,7 @@ const SetoutPlan = () => {
   const removeSwitchGang = useRemoveSwitchGang(planId || "");
   const updateFittingStatus = useUpdateSetoutFittingStatus(planId || "");
   const deleteFitting = useDeleteSetoutFitting(planId || "");
+  const restoreFitting = useRestoreSetoutFitting(planId || "");
   const assignFittingCircuit = useAssignFittingCircuit(planId || "");
 
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("place-fittings");
@@ -62,6 +74,8 @@ const SetoutPlan = () => {
   const [activeGangIndex, setActiveGangIndex] = useState(0);
   const [multiSelectIds, setMultiSelectIds] = useState<Set<string>>(new Set());
   const [bulkCircuitId, setBulkCircuitId] = useState<string>("unassigned");
+  const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
+  const pushUndo = (entry: UndoEntry) => setUndoStack((prev) => [...prev.slice(-19), entry]);
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>(DEFAULT_LAYER_VISIBILITY);
   const layerSyncedRef = useRef(false);
 
@@ -111,12 +125,15 @@ const SetoutPlan = () => {
     const specs: FittingSpecs = {};
     if (defaultHeight != null) specs.mountingHeight = defaultHeight;
     if (isWallMounted) specs.rotation = autoRotationForWallMount(point, plan.walls);
-    createFitting.mutate({
-      type: selectedType,
-      position: point,
-      measurement_lock: computeMeasurementLock(point, plan.walls, selectedType),
-      specs: Object.keys(specs).length > 0 ? specs : undefined,
-    });
+    createFitting.mutate(
+      {
+        type: selectedType,
+        position: point,
+        measurement_lock: computeMeasurementLock(point, plan.walls, selectedType),
+        specs: Object.keys(specs).length > 0 ? specs : undefined,
+      },
+      { onSuccess: (created) => pushUndo({ type: "create", fittingId: created.id }) }
+    );
     // Deliberately kept selected rather than cleared — tradies place several
     // of the same fitting (e.g. a run of downlights) in a row, so forcing a
     // re-tap of the palette after every single placement would be worse UX.
@@ -137,11 +154,13 @@ const SetoutPlan = () => {
       isSingleWallFitting(fitting.type) && !fitting.specs.rotationLocked
         ? { ...fitting.specs, rotation: autoRotationForWallMount(position, plan.walls) }
         : undefined;
+    pushUndo({ type: "move", fittingId, prevPosition: fitting.position, prevMeasurementLock: fitting.measurement_lock, prevSpecs: fitting.specs });
     updateFittingPosition.mutate({ fittingId, position, measurement_lock: computeMeasurementLock(position, plan.walls, fitting.type), specs });
   };
 
   const handleDeleteSelected = () => {
-    if (!selectedFittingId) return;
+    if (!selectedFittingId || !selectedFitting) return;
+    pushUndo({ type: "delete", fitting: selectedFitting });
     deleteFitting.mutate(selectedFittingId);
     setSelectedFittingId(null);
   };
@@ -210,8 +229,30 @@ const SetoutPlan = () => {
   };
 
   const handleBulkDelete = () => {
+    const toDelete = fittings.filter((f) => multiSelectIds.has(f.id));
+    if (toDelete.length > 0) pushUndo({ type: "bulk-delete", fittings: toDelete });
     multiSelectIds.forEach((fittingId) => deleteFitting.mutate(fittingId));
     setMultiSelectIds(new Set());
+  };
+
+  const handleUndo = () => {
+    const entry = undoStack[undoStack.length - 1];
+    if (!entry) return;
+    setUndoStack((prev) => prev.slice(0, -1));
+    if (entry.type === "create") {
+      deleteFitting.mutate(entry.fittingId);
+    } else if (entry.type === "delete") {
+      restoreFitting.mutate(entry.fitting);
+    } else if (entry.type === "bulk-delete") {
+      entry.fittings.forEach((f) => restoreFitting.mutate(f));
+    } else if (entry.type === "move") {
+      updateFittingPosition.mutate({
+        fittingId: entry.fittingId,
+        position: entry.prevPosition,
+        measurement_lock: entry.prevMeasurementLock,
+        specs: entry.prevSpecs,
+      });
+    }
   };
 
   // Rendered in two different spots depending on breakpoint (above the
@@ -309,10 +350,16 @@ const SetoutPlan = () => {
           >
             <ArrowLeft className="h-4 w-4" /> Back
           </button>
-          <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={handleExport} disabled={exporting}>
-            {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-            Export PDF
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={handleUndo} disabled={undoStack.length === 0}>
+              <Undo2 className="h-3.5 w-3.5" />
+              Undo
+            </Button>
+            <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={handleExport} disabled={exporting}>
+              {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+              Export PDF
+            </Button>
+          </div>
         </div>
         <h2 className="font-sans text-lg font-extrabold text-foreground mb-3">{plan.name}</h2>
 

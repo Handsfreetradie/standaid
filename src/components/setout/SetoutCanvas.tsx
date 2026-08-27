@@ -483,10 +483,21 @@ export default function SetoutCanvas({
                   ? { gangCount: Math.min(4, gangsFor(f).length) }
                   : {};
           const rotation = f.specs.rotation ?? 0;
+          // Wall-mounted symbols anchor at their base (bottom-centre, where
+          // GpoSymbol/SwitchSymbol and friends draw their wall baseline)
+          // rather than their geometric centre, so the base sits exactly on
+          // the wall and the body projects into the room from there.
+          // Rotate must come before the anchor-translate here (i.e. run on
+          // the *raw* icon coordinates first) — doing it the other way
+          // round, as this previously did, rotates around the wrong pivot
+          // once the coordinate space has already been shifted, so the
+          // icon visibly drifts off-position at anything but 0°/360°.
+          const anchorX = 12;
+          const anchorY = isSingleWallFitting(f.type) ? 20.5 : 12;
           return (
             <g
               key={f.id}
-              transform={`translate(${pos.x} ${pos.y}) scale(${iconScale}) rotate(${rotation} 12 12) translate(-12 -12)`}
+              transform={`translate(${pos.x} ${pos.y}) scale(${iconScale}) translate(${-anchorX} ${-anchorY}) rotate(${rotation} ${anchorX} ${anchorY})`}
               onPointerDown={(e) => handleFittingPointerDown(e, f)}
               className={cn(
                 mode === "place-fittings" && !panMode && "cursor-grab",

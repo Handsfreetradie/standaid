@@ -198,6 +198,35 @@ export function useCreateSetoutFitting(planId: string) {
   });
 }
 
+// Re-inserts a fitting with its original id and all fields intact — used
+// by undo to bring back a just-deleted fitting exactly as it was,
+// including any circuit assignment or switch-gang links pointing at it
+// (which a fresh insert with a new id would otherwise silently orphan).
+export function useRestoreSetoutFitting(planId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (fitting: SetoutFitting) => {
+      const { error } = await sb.from("setout_fittings").insert({
+        id: fitting.id,
+        plan_id: fitting.plan_id,
+        type: fitting.type,
+        position: fitting.position,
+        category: fitting.category,
+        specs: fitting.specs,
+        measurement_lock: fitting.measurement_lock,
+        status: fitting.status,
+        circuit_id: fitting.circuit_id,
+        linked_to: fitting.linked_to,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
+    },
+  });
+}
+
 // Toggles a target fitting in/out of one gang of a switch plate. Gangs are
 // independent loop-in chains (specs.gangs: string[][]) — a 2-gang plate has
 // two separate chains, e.g. gang 1 running 4 downlights and gang 2 running
