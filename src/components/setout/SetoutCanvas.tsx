@@ -3,7 +3,7 @@ import { Hand, Minus, Plus, MousePointer2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
 import { gangsFor, isSingleWallFitting, type Point, type SetoutFitting, type WallSegment, type WallLock, type LayerVisibility } from "@/lib/setoutTypes";
-import { snapOrthogonal, isNearFirstPoint, lightPoolRadius, poolsSignificantlyOverlap, closestPointOnWall, snapToNearestWall } from "@/lib/setoutGeometry";
+import { snapOrthogonal, isNearFirstPoint, lightPoolRadius, poolsSignificantlyOverlap, closestPointOnWall, snapToNearestWall, alignToExistingPoints } from "@/lib/setoutGeometry";
 
 interface ViewBox {
   x: number;
@@ -100,6 +100,7 @@ export default function SetoutCanvas({
   const panState = useRef<{ clientX: number; clientY: number; vb: ViewBox; scale: number } | null>(null);
   const dragState = useRef<{ fittingId: string; type: FittingType; clientX: number; clientY: number; scale: number; origin: Point } | null>(null);
   const [dragPreview, setDragPreview] = useState<{ id: string; position: Point } | null>(null);
+  const [alignGuides, setAlignGuides] = useState<{ x?: number; y?: number } | null>(null);
 
   const px2scene = useCallback(() => {
     const el = svgRef.current;
@@ -181,7 +182,14 @@ export default function SetoutCanvas({
         const point = snapWalls && last ? snapOrthogonal(last, scene) : scene;
         onSketchPointAdd?.(point);
       } else if (mode === "place-fittings" && selectedFittingType) {
-        const point = isSingleWallFitting(selectedFittingType) ? snapToNearestWall(scene, walls) : scene;
+        const point = isSingleWallFitting(selectedFittingType)
+          ? snapToNearestWall(scene, walls)
+          : selectedFittingType === "downlight"
+            ? alignToExistingPoints(
+                scene,
+                fittings.filter((f) => f.type === "downlight").map((f) => f.position)
+              ).position
+            : scene;
         onPlaceFitting?.(point);
       } else if (mode === "place-fittings") {
         onFittingSelect?.(null);
@@ -189,7 +197,7 @@ export default function SetoutCanvas({
         onSwitchTap?.(null);
       }
     },
-    [panMode, mode, viewBox, px2scene, sceneFromClient, sketchPoints, onSketchClose, snapWalls, onSketchPointAdd, selectedFittingType, onPlaceFitting, onFittingSelect, onSwitchTap, walls]
+    [panMode, mode, viewBox, px2scene, sceneFromClient, sketchPoints, onSketchClose, snapWalls, onSketchPointAdd, selectedFittingType, onPlaceFitting, onFittingSelect, onSwitchTap, walls, fittings]
   );
 
   const handlePointerMove = useCallback(
@@ -204,11 +212,22 @@ export default function SetoutCanvas({
         const dx = (e.clientX - clientX) * scale;
         const dy = (e.clientY - clientY) * scale;
         const raw = { x: origin.x + dx, y: origin.y + dy };
-        const position = isSingleWallFitting(type) ? snapToNearestWall(raw, walls) : raw;
+        let position = raw;
+        if (isSingleWallFitting(type)) {
+          position = snapToNearestWall(raw, walls);
+          setAlignGuides(null);
+        } else if (type === "downlight") {
+          const others = fittings.filter((f) => f.type === "downlight" && f.id !== fittingId).map((f) => f.position);
+          const aligned = alignToExistingPoints(raw, others);
+          position = aligned.position;
+          setAlignGuides({ x: aligned.guideX, y: aligned.guideY });
+        } else {
+          setAlignGuides(null);
+        }
         setDragPreview({ id: fittingId, position });
       }
     },
-    [walls]
+    [walls, fittings]
   );
 
   const endPan = useCallback(() => {
@@ -221,6 +240,7 @@ export default function SetoutCanvas({
     }
     dragState.current = null;
     setDragPreview(null);
+    setAlignGuides(null);
   }, [dragPreview, onFittingDrag]);
 
   const handlePointerUp = useCallback(() => {
@@ -456,6 +476,13 @@ export default function SetoutCanvas({
                 </g>
               );
             })}
+          </g>
+        )}
+
+        {alignGuides && (
+          <g className="text-sky-500" stroke="currentColor" strokeOpacity={0.7} strokeWidth={1} strokeDasharray="0.1 0.08" vectorEffect="non-scaling-stroke">
+            {alignGuides.x != null && <line x1={alignGuides.x} y1={viewBox.y} x2={alignGuides.x} y2={viewBox.y + viewBox.h} />}
+            {alignGuides.y != null && <line x1={viewBox.x} y1={alignGuides.y} x2={viewBox.x + viewBox.w} y2={alignGuides.y} />}
           </g>
         )}
 

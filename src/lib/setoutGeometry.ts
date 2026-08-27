@@ -236,6 +236,38 @@ export function snapToNearestWall(p: Point, walls: WallSegment[]): Point {
   return closestPointOnWall(p, nearestWall);
 }
 
+// Smart-guide style row/column snapping for downlights: if a downlight
+// being placed or dragged is already close to sharing an x or y with
+// another downlight in the room, snap it exactly onto that line instead
+// of leaving it a few centimetres off — the same behaviour as alignment
+// guides in a design tool. Independent per axis, so a light can pick up a
+// column from one neighbour and a row from a different one.
+export const ALIGNMENT_SNAP_THRESHOLD_METRES = 0.15;
+
+export function alignToExistingPoints(
+  point: Point,
+  others: Point[],
+  threshold = ALIGNMENT_SNAP_THRESHOLD_METRES
+): { position: Point; guideX?: number; guideY?: number } {
+  let bestX: number | undefined;
+  let bestXDist = threshold;
+  let bestY: number | undefined;
+  let bestYDist = threshold;
+  for (const other of others) {
+    const dx = Math.abs(other.x - point.x);
+    if (dx < bestXDist) {
+      bestXDist = dx;
+      bestX = other.x;
+    }
+    const dy = Math.abs(other.y - point.y);
+    if (dy < bestYDist) {
+      bestYDist = dy;
+      bestY = other.y;
+    }
+  }
+  return { position: { x: bestX ?? point.x, y: bestY ?? point.y }, guideX: bestX, guideY: bestY };
+}
+
 // Auto-locks a fitting to its nearest wall(s) (by perpendicular distance) —
 // this is what gets read off with a laser on site, so it must be recomputed
 // any time the fitting moves ("re-lock on any manual adjustment"). GPOs and
