@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import SetoutCanvas from "./SetoutCanvas";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -41,9 +43,26 @@ interface NormalizedPoint {
   x: number;
   y: number;
 }
-interface AiFitting extends NormalizedPoint {
-  type: string;
-  confidence: "high" | "medium" | "low";
+// A hand-marked fixture location the tradie added themselves (highlighter/
+// pen dot) — colour is a small fixed enum the AI classifies into, since
+// asking it to classify the actual fixture TYPE is exactly what proved
+// unreliable on real plans. The tradie assigns colour -> fitting type
+// themselves in the review step below.
+const MARK_COLORS = ["red", "orange", "yellow", "green", "blue", "purple", "pink", "black"] as const;
+type MarkColor = (typeof MARK_COLORS)[number];
+const MARK_COLOR_SWATCH_CLASS: Record<MarkColor, string> = {
+  red: "bg-red-500",
+  orange: "bg-orange-500",
+  yellow: "bg-yellow-400",
+  green: "bg-green-500",
+  blue: "bg-blue-500",
+  purple: "bg-purple-500",
+  pink: "bg-pink-500",
+  black: "bg-black",
+};
+
+interface AiMark extends NormalizedPoint {
+  color: MarkColor;
 }
 interface AiWallSegment {
   x1: number;
@@ -59,7 +78,7 @@ interface AiExtraction {
   suggested_scale: { corner_a_index: number; corner_b_index: number; real_distance_metres: number } | null;
   interior_walls: AiWallSegment[];
   openings: AiOpening[];
-  fittings: AiFitting[];
+  marks: AiMark[];
 }
 
 async function renderPdfFirstPage(file: File): Promise<RasterSource> {
@@ -88,7 +107,7 @@ function loadImageFile(file: File): Promise<RasterSource> {
   });
 }
 
-type Step = "select-file" | "loading" | "extracting" | "calibrate" | "trace-walls" | "review-fittings";
+type Step = "select-file" | "loading" | "extracting" | "calibrate" | "trace-walls" | "review-marks";
 
 interface CalibrationImportFlowProps {
   plan: SetoutPlan;
@@ -114,8 +133,8 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
   const [aiCorners, setAiCorners] = useState<NormalizedPoint[] | null>(null);
   const [aiInteriorWalls, setAiInteriorWalls] = useState<AiWallSegment[]>([]);
   const [aiOpenings, setAiOpenings] = useState<AiOpening[]>([]);
-  const [aiFittings, setAiFittings] = useState<AiFitting[]>([]);
-  const [removedKeys, setRemovedKeys] = useState<Set<string>>(new Set());
+  const [aiMarks, setAiMarks] = useState<AiMark[]>([]);
+  const [colorAssignments, setColorAssignments] = useState<Record<string, FittingType | "skip">>({});
   const fileRef = useRef<HTMLInputElement>(null);
   const saveGeometry = useUpdateSetoutPlanGeometry(plan.id);
   const createFittingsBulk = useCreateSetoutFittingsBulk(plan.id);
@@ -163,7 +182,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
         setAiCorners(extraction.corners);
         setAiInteriorWalls(extraction.interior_walls || []);
         setAiOpenings(extraction.openings || []);
-        setAiFittings(extraction.fittings || []);
+        setAiMarks(extraction.marks || []);
         const scale = extraction.suggested_scale;
         const a = scale ? extraction.corners[scale.corner_a_index] : null;
         const b = scale ? extraction.corners[scale.corner_b_index] : null;
@@ -177,7 +196,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
         const extras: string[] = [];
         if (extraction.interior_walls?.length) extras.push(`${extraction.interior_walls.length} interior wall${extraction.interior_walls.length === 1 ? "" : "s"}`);
         if (extraction.openings?.length) extras.push(`${extraction.openings.length} door${extraction.openings.length === 1 ? "" : "s"}/window${extraction.openings.length === 1 ? "" : "s"}`);
-        if (extraction.fittings?.length) extras.push(`${extraction.fittings.length} existing fitting${extraction.fittings.length === 1 ? "" : "s"}`);
+        if (extraction.marks?.length) extras.push(`${extraction.marks.length} hand-marked fixture${extraction.marks.length === 1 ? "" : "s"}`);
         toast.success(extras.length ? `AI traced the walls and found ${extras.join(", ")} — check the suggestion below.` : "AI traced the wall outline — check the suggestion below.");
       } else {
         toast.error("Couldn't auto-detect this plan — calibrate and trace it manually instead.");
@@ -251,11 +270,10 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
         scale_calibration: { pointA: calibPoints[0], pointB: calibPoints[1], realDistanceMetres: distanceMetres },
         openings: wallOpenings,
       });
-      const classifiable = aiFittings.filter((f) => f.type in FITTING_SYMBOLS);
-      if (classifiable.length > 0) {
+      if (aiMarks.length > 0) {
         setSavedWalls(walls);
         setSavedOpenings(wallOpenings);
-        setStep("review-fittings");
+        setStep("review-marks");
       } else {
         toast.success("Walls saved");
         onComplete();
@@ -273,8 +291,9 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
         </button>
         <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Upload the builder's plan</h2>
         <p className="text-xs text-muted-foreground mb-5">
-          PDF or photo of the plan. AI will trace the walls and pick up any electrical symbols already marked — you'll confirm scale and
-          review everything before it's added.
+          PDF or photo of the plan. AI will trace the walls automatically. If you want it to also pick up fixture locations, mark them on
+          the plan first with a highlighter or pen — use a different colour per fixture type (any colours you like), and you'll tell the
+          app what each colour means after upload.
         </p>
         <input ref={fileRef} type="file" accept="application/pdf,image/*" className="hidden" onChange={handleFileSelect} />
         <Card
@@ -493,26 +512,37 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     );
   }
 
-  if (step === "review-fittings" && raster && pixelsPerMetre && savedWalls) {
-    const classifiedCount = aiFittings.filter((f) => f.type in FITTING_SYMBOLS).length;
-    const unclassifiedCount = aiFittings.length - classifiedCount;
-    const draftFittings = aiFittings
-      .map((f, i) => ({ key: String(i), f }))
-      .filter(({ f }) => f.type in FITTING_SYMBOLS)
-      .filter(({ key }) => !removedKeys.has(key))
-      .map(({ key, f }) => {
-        const type = f.type as FittingType;
-        const rawPosition = { x: (f.x * raster.naturalWidth) / pixelsPerMetre, y: (f.y * raster.naturalHeight) / pixelsPerMetre };
-        // Snap wall-mounted detections onto the actual wall line (and clear
-        // of any door/window on it) — same treatment a manually-placed
-        // fitting gets, so AI-detected GPOs/switches don't end up floating
-        // just off the wall or sitting mid-doorway.
-        const position = isSingleWallFitting(type) ? snapToNearestWall(rawPosition, savedWalls, savedOpenings) : rawPosition;
-        return { key, type, position };
-      });
+  if (step === "review-marks" && raster && pixelsPerMetre && savedWalls) {
+    const marksByColor = new Map<MarkColor, AiMark[]>();
+    for (const m of aiMarks) {
+      if (!marksByColor.has(m.color)) marksByColor.set(m.color, []);
+      marksByColor.get(m.color)!.push(m);
+    }
+    const colors = Array.from(marksByColor.keys());
 
-    const previewFittings: SetoutFitting[] = draftFittings.map((f) => ({
-      id: f.key,
+    const rawPositionFor = (m: AiMark): Point => ({
+      x: (m.x * raster.naturalWidth) / pixelsPerMetre,
+      y: (m.y * raster.naturalHeight) / pixelsPerMetre,
+    });
+
+    // Every colour with a fitting type assigned (not left unset, not
+    // explicitly skipped) becomes that many fittings at their marked
+    // positions — wall-mounted types still snap onto the actual wall line
+    // (and clear of any door/window on it), same treatment a manually
+    // placed fitting gets.
+    const assignedFittings: { type: FittingType; position: Point }[] = [];
+    for (const color of colors) {
+      const assignment = colorAssignments[color];
+      if (!assignment || assignment === "skip") continue;
+      for (const m of marksByColor.get(color)!) {
+        const raw = rawPositionFor(m);
+        const position = isSingleWallFitting(assignment) ? snapToNearestWall(raw, savedWalls, savedOpenings) : raw;
+        assignedFittings.push({ type: assignment, position });
+      }
+    }
+
+    const previewFittings: SetoutFitting[] = assignedFittings.map((f, i) => ({
+      id: String(i),
       plan_id: plan.id,
       type: f.type,
       position: f.position,
@@ -528,7 +558,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
 
     const handleAddFittings = async () => {
       const walls = savedWalls;
-      const inputs = draftFittings.map(({ type, position }) => {
+      const inputs = assignedFittings.map(({ type, position }) => {
         const defaultHeight = defaultHeightForType(type);
         const specs: FittingSpecs = {};
         if (defaultHeight != null) specs.mountingHeight = defaultHeight;
@@ -551,15 +581,44 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
 
     return (
       <div className="flex flex-col h-full px-5 py-6 max-w-3xl mx-auto w-full">
-        <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Review detected fittings</h2>
+        <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">What does each colour mean?</h2>
         <p className="text-xs text-muted-foreground mb-4">
-          AI found {aiFittings.length} existing electrical symbol{aiFittings.length === 1 ? "" : "s"} on this plan
-          {unclassifiedCount > 0
-            ? `, ${unclassifiedCount} of which it couldn't confidently classify — those aren't shown, you'll need to add ${unclassifiedCount === 1 ? "it" : "them"} manually`
-            : ""}
-          . Remove anything that looks wrong below, then add the rest to the plan with measurements attached automatically.
+          AI found {aiMarks.length} hand-marked location{aiMarks.length === 1 ? "" : "s"} across {colors.length} colour
+          {colors.length === 1 ? "" : "s"}. Tell it what each colour represents — skip a colour if it wasn't for a fixture.
         </p>
-        <div className="flex-1 min-h-[300px] mb-4">
+
+        <div className="space-y-2 mb-4">
+          {colors.map((color) => {
+            const count = marksByColor.get(color)!.length;
+            return (
+              <div key={color} className="flex items-center gap-2 rounded-lg border border-border px-3 py-2">
+                <span className={cn("h-4 w-4 rounded-full flex-shrink-0", MARK_COLOR_SWATCH_CLASS[color])} />
+                <span className="text-xs font-medium text-foreground capitalize w-14 flex-shrink-0">{color}</span>
+                <span className="text-xs text-muted-foreground w-16 flex-shrink-0">
+                  {count} mark{count === 1 ? "" : "s"}
+                </span>
+                <Select
+                  value={colorAssignments[color] ?? undefined}
+                  onValueChange={(v) => setColorAssignments((prev) => ({ ...prev, [color]: v as FittingType | "skip" }))}
+                >
+                  <SelectTrigger className="h-8 flex-1 text-xs">
+                    <SelectValue placeholder="What is this?" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="skip">Skip this colour</SelectItem>
+                    {(Object.keys(FITTING_SYMBOLS) as FittingType[]).map((type) => (
+                      <SelectItem key={type} value={type}>
+                        {FITTING_LABELS[type]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="flex-1 min-h-[260px] mb-4">
           <SetoutCanvas
             backgroundImage={{ href: raster.href, width: raster.naturalWidth / pixelsPerMetre, height: raster.naturalHeight / pixelsPerMetre }}
             walls={savedWalls}
@@ -568,31 +627,16 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
             mode="view"
           />
         </div>
-        {draftFittings.length > 0 && (
-          <div className="space-y-1.5 mb-4 max-h-40 overflow-y-auto">
-            {draftFittings.map((f) => (
-              <div key={f.key} className="flex items-center justify-between rounded-lg border border-border px-3 py-1.5 text-xs">
-                <span className="font-medium text-foreground">{FITTING_LABELS[f.type]}</span>
-                <button
-                  type="button"
-                  className="text-muted-foreground hover:text-destructive"
-                  onClick={() => setRemovedKeys((prev) => new Set(prev).add(f.key))}
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+
         <div className="flex gap-2">
           <Button variant="outline" className="flex-1" onClick={onComplete}>
             Skip — place manually
           </Button>
-          <Button className="flex-1 font-bold" disabled={draftFittings.length === 0 || createFittingsBulk.isPending} onClick={handleAddFittings}>
+          <Button className="flex-1 font-bold" disabled={assignedFittings.length === 0 || createFittingsBulk.isPending} onClick={handleAddFittings}>
             {createFittingsBulk.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              `Add ${draftFittings.length} fitting${draftFittings.length === 1 ? "" : "s"}`
+              `Add ${assignedFittings.length} fitting${assignedFittings.length === 1 ? "" : "s"}`
             )}
           </Button>
         </div>

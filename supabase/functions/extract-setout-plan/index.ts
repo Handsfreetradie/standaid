@@ -4,24 +4,27 @@ import { getAllowedOrigin } from "../_shared/cors.ts";
 import { logTokenUsage } from "../_shared/log-usage.ts";
 
 // Reads an uploaded builder's plan (rasterized PDF page or photo) and returns
-// the wall outline plus any electrical symbols already drawn on it, all in
+// the wall outline plus any hand-marked fixture locations on it, all in
 // normalized 0-1 image coordinates. Nothing is written to the DB here — the
 // frontend owns turning this into walls/fittings (via polygonToWalls,
 // computeMeasurementLock etc.) after the tradie confirms scale, same as
 // every other Setout mutation is client-driven.
+//
+// Two earlier approaches to detecting EXISTING electrical symbols on a plan
+// (a single whole-image pass, then a tiled multi-pass) both failed real
+// testing — asking a vision model to classify which of 39 subtle
+// professional CAD symbol conventions a small mark represents is
+// inherently unreliable, and tiling made it worse by losing the whole-plan
+// context needed to disambiguate an ambiguous mark (e.g. a switch's small
+// tick vs a door swing line vs a dimension tick). This replaces that
+// entirely: the tradie marks fixture locations themselves with bright
+// highlighter/pen marks in whatever colours they choose, and the AI's job
+// shrinks to finding high-contrast hand-marks and grouping them by colour —
+// a well-understood, reliable vision task. The *meaning* of each colour
+// (which fitting type it represents) is a human decision made client-side
+// after extraction, not something the AI has to guess.
 
-// Duplicated from src/components/setout/symbols/types.ts — Deno edge
-// functions don't share a build with the frontend. Keep in sync if the
-// FittingType union changes.
-const FITTING_TYPES = [
-  "downlight", "batten_holder", "wall_batten_holder", "wall_stair_light", "external_light",
-  "heater_fan_light_2", "heater_fan_light_4", "junction_box", "ceiling_fan", "ceiling_fan_light",
-  "para_flood", "round_fluoro", "fluoro_1200", "motion_sensor", "exhaust_fan", "exhaust_fan_light",
-  "pendant", "switch", "gpo", "tv_point", "phone_point", "meter_box", "nbn_box", "ubo_rhood", "data",
-  "smoke_detector", "heating_duct", "ducted_heating_unit", "heat_cool_duct", "rev_cycle_unit",
-  "thermostat", "return_air", "evap_cooling_duct", "evap_cooling_unit", "ac_condenser",
-  "ac_head_unit", "cooling_unit", "vacuum_unit", "vacuum_outlet",
-];
+const MARK_COLORS = ["red", "orange", "yellow", "green", "blue", "purple", "pink", "black"];
 
 const SYSTEM_PROMPT = `You are reading an Australian residential/commercial electrical or architectural floor plan (a builder's PDF page or a site photo of a plan) for a licensed electrician who will use your output to set out the job. Precision matters — the electrician measures from these positions on site.
 
@@ -33,17 +36,9 @@ TASK 3 — Internal walls: this plan may show internal partition walls dividing 
 
 TASK 4 — Doors and windows: for every door and window opening you can see cut into ANY wall (exterior or internal), report it as its own short line segment spanning the gap in the wall (two endpoint points, same normalized 0-1 coordinates), plus whether it's a "door" or "window". A door is typically drawn as a gap in the wall with a quarter-circle swing arc; a window is typically a gap with a thin line or double-tick across it, sometimes with sill lines. Only report openings you can actually see — don't guess that a wall has a door just because a room needs one.
 
-TASK 5 — Existing electrical symbols: this plan may already have electrical fittings marked on it (a switchboard-designer's plan, or a plan the electrician has already marked up), or it may have none at all — both are normal. For every electrical symbol you can actually see already drawn on the plan, report its position (same normalized 0-1 coordinates) and classify it into exactly one of these types:
-${FITTING_TYPES.join(", ")}
+TASK 5 — Hand-marked fixture locations: the tradie may have marked up this plan themselves with a highlighter or pen to indicate where electrical fixtures go — bright, hand-drawn dots/circles/ticks that are clearly NOT part of the plan's own printed drawing (which is black/grey/blue CAD linework). Completely ignore the plan's own printed electrical symbols, room labels, and dimension marks for this task — only report the tradie's own added marks. For each hand-mark found, report its position (same normalized 0-1 coordinates) and its colour, picked from exactly this list: ${MARK_COLORS.join(", ")}. Pick whichever colour in the list is the closest match — don't invent a colour name outside this list. If the plan has no hand-marks on it at all, that's a normal, valid result — return an empty array.
 
-Common AS/NZS-convention symbols to recognise: a downlight is usually a small circle with a cross or dot inside; a GPO (power point) is a circle with two short parallel marks; a switch is a small flick/tick mark on or near a wall line, sometimes with a letter subscript for multi-gang; a smoke detector is often a circle with "SD" or a distinctive hatched circle; an exhaust fan is a circle with an "X" or fan-blade hatching; a ceiling fan is a larger circle, sometimes with blade lines; a TV/data point is a circle with "TV" or "D" lettering.
-
-Classification rules:
-- Only report a symbol you can actually see drawn on the plan — never invent fittings, walls, doors, or windows that aren't there.
-- If you can see a symbol clearly but aren't confident which of the listed types it is, still report its position but use type "unclassified" and set confidence to "low" rather than guessing a specific type. A wrong classification is worse than an honest "unclassified".
-- Set confidence to "high" only when the symbol convention is unambiguous.
-
-Call return_plan_extraction with your findings. Any of interior_walls, openings, or fittings can be an empty array if the plan genuinely has none — that's a normal, valid result.`;
+Never invent a wall, door, window, or mark that isn't actually visible. Call return_plan_extraction with your findings — interior_walls, openings, and marks can all be empty arrays if the plan genuinely has none.`;
 
 serve(async (req) => {
   const origin = req.headers.get("Origin") || "";
@@ -115,7 +110,7 @@ serve(async (req) => {
         system: SYSTEM_PROMPT,
         tools: [{
           name: "return_plan_extraction",
-          description: "Return the extracted wall outline, optional scale suggestion, and any existing electrical symbols",
+          description: "Return the extracted wall outline, optional scale suggestion, interior walls, openings, and hand-marked fixture locations",
           input_schema: {
             type: "object",
             properties: {
@@ -162,22 +157,21 @@ serve(async (req) => {
                   required: ["x1", "y1", "x2", "y2", "kind"],
                 },
               },
-              fittings: {
+              marks: {
                 type: "array",
-                description: "Every existing electrical symbol already drawn on the plan — empty array if there are none",
+                description: "Hand-marked fixture locations the tradie added themselves (highlighter/pen dots) — empty array if the plan has none",
                 items: {
                   type: "object",
                   properties: {
                     x: { type: "number" },
                     y: { type: "number" },
-                    type: { type: "string", enum: [...FITTING_TYPES, "unclassified"] },
-                    confidence: { type: "string", enum: ["high", "medium", "low"] },
+                    color: { type: "string", enum: MARK_COLORS },
                   },
-                  required: ["x", "y", "type", "confidence"],
+                  required: ["x", "y", "color"],
                 },
               },
             },
-            required: ["corners", "interior_walls", "openings", "fittings"],
+            required: ["corners", "interior_walls", "openings", "marks"],
           },
         }],
         tool_choice: { type: "tool", name: "return_plan_extraction" },
@@ -185,7 +179,7 @@ serve(async (req) => {
           role: "user",
           content: [
             { type: "image", source: { type: "base64", media_type: mediaType, data: imageBase64 } },
-            { type: "text", text: "Extract the wall outline, scale (if legibly labelled), and any existing electrical symbols from this plan." },
+            { type: "text", text: "Extract the wall outline, scale (if legibly labelled), interior walls, openings, and any hand-marked fixture locations from this plan." },
           ],
         }],
       }),
@@ -228,7 +222,7 @@ serve(async (req) => {
       suggested_scale: result.suggested_scale ?? null,
       interior_walls: result.interior_walls ?? [],
       openings: result.openings ?? [],
-      fittings: result.fittings ?? [],
+      marks: result.marks ?? [],
     });
   } catch (e) {
     console.error("[extract-setout-plan] error:", e);
