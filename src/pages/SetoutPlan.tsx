@@ -178,6 +178,15 @@ const SetoutPlan = () => {
     toggleGangLink.mutate({ switchFitting: activeSwitch, gangIndex: activeGangIndex, targetId });
   };
 
+  // 2-way/3-way/4-way switching: a gang's chain can continue on to another
+  // switch instead of ending at a light — same toggle mutation as linking a
+  // light, just with a switch id as the target. The referenced switch
+  // doesn't need its own mirrored gang entry; it's simply the last stop in
+  // this gang's run.
+  const handleLinkSwitchTarget = (switchFitting: SetoutFitting, gangIndex: number, targetSwitchId: string) => {
+    toggleGangLink.mutate({ switchFitting, gangIndex, targetId: targetSwitchId });
+  };
+
   const handleSelectSwitch = (switchId: string | null) => {
     setActiveSwitchId(switchId);
     setActiveGangIndex(0);
@@ -437,6 +446,7 @@ const SetoutPlan = () => {
                 onSelectGang={setActiveGangIndex}
                 onAddGang={handleAddGang}
                 onRemoveGang={handleRemoveGang}
+                onLinkSwitchTarget={handleLinkSwitchTarget}
               />
             ) : (
               <div className="rounded-xl border border-border p-3 space-y-2">

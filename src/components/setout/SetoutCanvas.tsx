@@ -448,17 +448,19 @@ export default function SetoutCanvas({
   const switchLinks = useMemo(() => {
     if (layerVisibility && !layerVisibility.switches) return [];
     const switches = fittings.filter((f) => f.type === "switch");
-    // A light fed from 2+ gangs (from any switch, not just this one) is
-    // 2-way/3-way by definition — no separate "way" field, it's just
-    // derived from how many gangs list it. Shown as a small label on the
-    // curve so multi-way switching is visible on the plan itself, not only
-    // in the text-based cable-run list.
-    const wayCountFor = (targetId: string) => switches.reduce((n, s) => n + gangsFor(s).filter((gang) => gang.includes(targetId)).length, 0);
-    const links: { key: string; switchPos: Point; targetPos: Point; active: boolean; wayCount: number }[] = [];
+    // A 2-way/3-way/4-way run is one continuous chain that passes through
+    // multiple switches (switch A -> lights -> switch B, optionally on to
+    // C/D) rather than two switches independently claiming the same light —
+    // a gang's chain can include another switch's id as its last stop(s).
+    // Every light in that gang shares the same way-count: the owning switch
+    // plus however many other switches the chain passes through.
+    const wayCountForGang = (gang: string[]) => 1 + gang.filter((id) => switches.some((s) => s.id === id)).length;
+    const links: { key: string; switchPos: Point; targetPos: Point; active: boolean; wayCount: number; targetIsSwitch: boolean }[] = [];
     for (const sw of switches) {
       const swPos = dragPreview?.id === sw.id ? dragPreview.position : sw.position;
       const gangs = gangsFor(sw);
       gangs.forEach((gang, gangIndex) => {
+        const wayCount = wayCountForGang(gang);
         let fromPos = swPos;
         let fromId = sw.id;
         for (const targetId of gang) {
@@ -470,7 +472,8 @@ export default function SetoutCanvas({
             switchPos: fromPos,
             targetPos,
             active: sw.id === linkActiveSwitchId && gangIndex === linkActiveGangIndex,
-            wayCount: wayCountFor(targetId),
+            wayCount,
+            targetIsSwitch: target.type === "switch",
           });
           fromPos = targetPos;
           fromId = targetId;
@@ -694,7 +697,7 @@ export default function SetoutCanvas({
                     strokeDasharray="0.12 0.08"
                     vectorEffect="non-scaling-stroke"
                   />
-                  {link.wayCount > 1 && (
+                  {!link.targetIsSwitch && link.wayCount > 1 && (
                     <text
                       x={0.25 * link.switchPos.x + 0.5 * cx + 0.25 * link.targetPos.x}
                       y={0.25 * link.switchPos.y + 0.5 * cy + 0.25 * link.targetPos.y}

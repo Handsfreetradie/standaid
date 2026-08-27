@@ -403,10 +403,13 @@ function drawCableRunPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting[
     return;
   }
 
-  // N-way derivation: count how many gangs — across any switch — list this
-  // target, not just how many switches. A 2-gang plate's two gangs are
-  // independent circuits, same as two separate switches.
-  const wayCount = (targetId: string) => switches.reduce((n, s) => n + gangsFor(s).filter((gang) => gang.includes(targetId)).length, 0);
+  // A 2-way/3-way/4-way run is one continuous chain that passes through
+  // multiple switches (switch A -> lights -> switch B, optionally on to
+  // C/D), not two switches independently claiming the same light — a
+  // gang's chain can include another switch's id as its last stop(s).
+  // Every light in a gang shares that gang's way-count: the owning switch
+  // plus however many other switches the chain passes through.
+  const wayCountForGang = (gang: string[]) => 1 + gang.filter((id) => switches.some((s) => s.id === id)).length;
 
   for (const sw of switches) {
     const gangs = gangsFor(sw);
@@ -429,13 +432,13 @@ function drawCableRunPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting[
       // Each gang is a loop-in chain in tap order (switch -> first light ->
       // second light -> ...), not a set of separate home-runs — same
       // topology as SetoutCanvas.tsx's switchLinks and SwitchLinksPanel.tsx.
+      const ways = wayCountForGang(gang);
       const parts = gang
         .map((id) => fittings.find((f) => f.id === id))
         .filter((f): f is SetoutFitting => !!f)
         .map((target) => {
           const code = codes.get(target.id) ?? "?";
-          const ways = wayCount(target.id);
-          return ways > 1 ? `${code} (${ways}-way)` : code;
+          return target.type !== "switch" && ways > 1 ? `${code} (${ways}-way)` : code;
         });
       const lines = doc.splitTextToSize(`${gangLabel}${codes.get(sw.id) ?? "?"} -> ${parts.join(" -> ")}`, CONTENT_W - 4);
       ensureSpace(lines.length * 4.2);

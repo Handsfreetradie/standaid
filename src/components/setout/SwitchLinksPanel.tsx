@@ -1,6 +1,7 @@
 import { ArrowRight, Cable, Plus, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { FITTING_LABELS, FITTING_SYMBOLS } from "@/components/setout/symbols";
 import { gangsFor, type SetoutFitting } from "@/lib/setoutTypes";
@@ -13,13 +14,17 @@ interface SwitchLinksPanelProps {
   onSelectGang: (gangIndex: number) => void;
   onAddGang: (switchFitting: SetoutFitting) => void;
   onRemoveGang: (switchFitting: SetoutFitting, gangIndex: number) => void;
+  onLinkSwitchTarget: (switchFitting: SetoutFitting, gangIndex: number, targetSwitchId: string) => void;
 }
 
-// A light fed by 2+ gangs — from any switch, any gang — is 2-way/3-way by
-// definition. No separate "switch type" is stored; this is purely derived
-// from how many gangs include it.
-function wayCountFor(targetId: string, switches: SetoutFitting[]): number {
-  return switches.reduce((count, sw) => count + gangsFor(sw).filter((gang) => gang.includes(targetId)).length, 0);
+// A 2-way/3-way/4-way run is one continuous chain that passes through
+// multiple switches (switch A -> lights -> switch B, optionally on to C/D)
+// rather than two switches independently claiming the same light — a gang
+// can include another switch's id as its last stop(s), same as any light.
+// Every light in that gang shares the same way-count: the owning switch
+// plus however many other switches the chain passes through.
+function wayCountForGang(gang: string[], switches: SetoutFitting[]): number {
+  return 1 + gang.filter((id) => switches.some((s) => s.id === id)).length;
 }
 
 export default function SwitchLinksPanel({
@@ -30,6 +35,7 @@ export default function SwitchLinksPanel({
   onSelectGang,
   onAddGang,
   onRemoveGang,
+  onLinkSwitchTarget,
 }: SwitchLinksPanelProps) {
   const switches = fittings.filter((f) => f.type === "switch");
 
@@ -57,6 +63,8 @@ export default function SwitchLinksPanel({
               {gangs.map((gang, gangIndex) => {
                 const isActiveGang = isActiveSwitch && gangIndex === activeGangIndex;
                 const links = gang.map((id) => fittings.find((f) => f.id === id)).filter((f): f is SetoutFitting => !!f);
+                const ways = wayCountForGang(gang, switches);
+                const otherSwitches = switches.filter((other) => other.id !== sw.id && !gang.includes(other.id));
                 return (
                   <div
                     key={gangIndex}
@@ -77,18 +85,35 @@ export default function SwitchLinksPanel({
                     ) : (
                       links.map((target) => {
                         const Icon = FITTING_SYMBOLS[target.type];
-                        const ways = wayCountFor(target.id, switches);
                         return (
                           <span key={target.id} className="contents">
                             <ArrowRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
                             <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/50 px-1.5 py-1 text-[11px] text-foreground">
                               <Icon size={14} className="text-primary" strokeWidth={1.5} />
                               {FITTING_LABELS[target.type]}
-                              {ways > 1 && <span className="text-primary font-medium">· {ways}-way</span>}
+                              {target.type !== "switch" && ways > 1 && <span className="text-primary font-medium">· {ways}-way</span>}
                             </span>
                           </span>
                         );
                       })
+                    )}
+                    {otherSwitches.length > 0 && (
+                      <Select onValueChange={(targetId) => onLinkSwitchTarget(sw, gangIndex, targetId)}>
+                        <SelectTrigger
+                          className="h-6 w-auto gap-1 rounded-md border-dashed px-1.5 text-[10px] flex-shrink-0"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Plus className="h-3 w-3" />
+                          <SelectValue placeholder="Link switch (2-way)" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {otherSwitches.map((other) => (
+                            <SelectItem key={other.id} value={other.id}>
+                              Switch {switches.indexOf(other) + 1}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     )}
                     {gangs.length > 1 && (
                       <Button
