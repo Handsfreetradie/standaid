@@ -262,14 +262,16 @@ export default function SetoutCanvas({
         const result = nearestWallAndOffset(scene, walls);
         if (result) onOpeningPlace?.(result.wall.id, result.offset);
       } else if (mode === "place-fittings" && selectedFittingType) {
+        // Alignment applies to every ceiling/surface-mounted fitting (not
+        // just downlights) — a smoke alarm or exhaust fan lining up with
+        // existing downlights (or each other) is just as useful as
+        // downlight-to-downlight rows/columns.
         const point = isSingleWallFitting(selectedFittingType)
           ? snapToNearestWall(scene, walls, openings)
-          : selectedFittingType === "downlight"
-            ? alignToExistingPoints(
-                scene,
-                fittings.filter((f) => f.type === "downlight").map((f) => f.position)
-              ).position
-            : scene;
+          : alignToExistingPoints(
+              scene,
+              fittings.filter((f) => !isSingleWallFitting(f.type)).map((f) => f.position)
+            ).position;
         onPlaceFitting?.(point);
       } else if (mode === "place-fittings") {
         onFittingSelect?.(null);
@@ -319,13 +321,11 @@ export default function SetoutCanvas({
         if (isSingleWallFitting(type)) {
           position = snapToNearestWall(raw, walls, openings);
           setAlignGuides(null);
-        } else if (type === "downlight") {
-          const others = fittings.filter((f) => f.type === "downlight" && f.id !== fittingId).map((f) => f.position);
+        } else {
+          const others = fittings.filter((f) => !isSingleWallFitting(f.type) && f.id !== fittingId).map((f) => f.position);
           const aligned = alignToExistingPoints(raw, others);
           position = aligned.position;
           setAlignGuides({ x: aligned.guideX, y: aligned.guideY });
-        } else {
-          setAlignGuides(null);
         }
         setDragPreview({ id: fittingId, position });
       }
@@ -702,9 +702,19 @@ export default function SetoutCanvas({
         )}
 
         {alignGuides && (
-          <g className="text-sky-500" stroke="currentColor" strokeOpacity={0.7} strokeWidth={1} strokeDasharray="0.1 0.08" vectorEffect="non-scaling-stroke">
-            {alignGuides.x != null && <line x1={alignGuides.x} y1={viewBox.y} x2={alignGuides.x} y2={viewBox.y + viewBox.h} />}
-            {alignGuides.y != null && <line x1={viewBox.x} y1={alignGuides.y} x2={viewBox.x + viewBox.w} y2={alignGuides.y} />}
+          // vector-effect is not an inherited SVG property — setting it on
+          // the parent <g> (as this used to) has no effect on the child
+          // <line>s, so their 1-unit stroke width scaled with the current
+          // zoom like any other geometry, rendering as a thick bar rather
+          // than a thin on-screen guide line once zoomed in. Each line needs
+          // its own vector-effect attribute.
+          <g className="text-sky-500" stroke="currentColor" strokeOpacity={0.7} strokeWidth={1} strokeDasharray="6 4">
+            {alignGuides.x != null && (
+              <line x1={alignGuides.x} y1={viewBox.y} x2={alignGuides.x} y2={viewBox.y + viewBox.h} vectorEffect="non-scaling-stroke" />
+            )}
+            {alignGuides.y != null && (
+              <line x1={viewBox.x} y1={alignGuides.y} x2={viewBox.x + viewBox.w} y2={alignGuides.y} vectorEffect="non-scaling-stroke" />
+            )}
           </g>
         )}
 

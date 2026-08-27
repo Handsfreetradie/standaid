@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { FITTING_LABELS, FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
-import { BEAM_ANGLE_OPTIONS, DEFAULT_BEAM_ANGLE, DEFAULT_MOUNTING_HEIGHT, defaultHeightForType } from "@/lib/setoutGeometry";
+import { BEAM_ANGLE_OPTIONS, DEFAULT_BEAM_ANGLE, DEFAULT_MOUNTING_HEIGHT, defaultHeightForType, perpendicularDistanceToWall } from "@/lib/setoutGeometry";
 import {
   CATEGORY_FOR_TYPE,
   FITTING_CATEGORY_ORDER,
@@ -98,6 +98,22 @@ const FittingPalette = ({
   const wallLabel = (wallId: string) => {
     const index = walls.findIndex((w) => w.id === wallId);
     return index === -1 ? "Wall" : `Wall ${index + 1}`;
+  };
+
+  // Re-points a measurement at a different wall — e.g. the tradie wants a
+  // GPO measured off the wall it's actually more useful to reference from
+  // on site, not just whichever wall happens to be geometrically nearest.
+  // Distance is recomputed fresh against the newly chosen wall (still just
+  // a starting point — the distance field itself stays hand-editable).
+  const handleMeasurementWallChange = (slot: "wallA" | "wallB", newWallId: string) => {
+    if (!selectedFitting?.measurement_lock || !onUpdateMeasurementLock) return;
+    const wall = walls.find((w) => w.id === newWallId);
+    if (!wall) return;
+    const distance = Number(perpendicularDistanceToWall(selectedFitting.position, wall).toFixed(2));
+    onUpdateMeasurementLock({
+      ...selectedFitting.measurement_lock,
+      [slot]: { wallId: newWallId, distance },
+    });
   };
   return (
     <div className="space-y-2">
@@ -296,9 +312,23 @@ const FittingPalette = ({
               <p className="text-[11px] font-medium text-muted-foreground">Measurements (edit if the laser reads different)</p>
               <div className="flex gap-2">
                 <div className="flex-1">
-                  <p className="text-[10px] text-muted-foreground mb-1">{wallLabel(selectedFitting.measurement_lock.wallA.wallId)} (m)</p>
+                  <Select
+                    value={selectedFitting.measurement_lock.wallA.wallId}
+                    onValueChange={(v) => handleMeasurementWallChange("wallA", v)}
+                  >
+                    <SelectTrigger className="h-6 px-1.5 mb-1 text-[10px] text-muted-foreground">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {walls.map((w, i) => (
+                        <SelectItem key={w.id} value={w.id}>
+                          Wall {i + 1}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <DraftNumberInput
-                    key={`wallA-${selectedFitting.id}-${selectedFitting.measurement_lock.wallA.distance.toFixed(2)}`}
+                    key={`wallA-${selectedFitting.id}-${selectedFitting.measurement_lock.wallA.wallId}-${selectedFitting.measurement_lock.wallA.distance.toFixed(2)}`}
                     type="number"
                     inputMode="decimal"
                     step="0.01"
@@ -314,9 +344,23 @@ const FittingPalette = ({
                 </div>
                 {selectedFitting.measurement_lock.wallB && (
                   <div className="flex-1">
-                    <p className="text-[10px] text-muted-foreground mb-1">{wallLabel(selectedFitting.measurement_lock.wallB.wallId)} (m)</p>
+                    <Select
+                      value={selectedFitting.measurement_lock.wallB.wallId}
+                      onValueChange={(v) => handleMeasurementWallChange("wallB", v)}
+                    >
+                      <SelectTrigger className="h-6 px-1.5 mb-1 text-[10px] text-muted-foreground">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {walls.map((w, i) => (
+                          <SelectItem key={w.id} value={w.id}>
+                            Wall {i + 1}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <DraftNumberInput
-                      key={`wallB-${selectedFitting.id}-${selectedFitting.measurement_lock.wallB.distance.toFixed(2)}`}
+                      key={`wallB-${selectedFitting.id}-${selectedFitting.measurement_lock.wallB.wallId}-${selectedFitting.measurement_lock.wallB.distance.toFixed(2)}`}
                       type="number"
                       inputMode="decimal"
                       step="0.01"
