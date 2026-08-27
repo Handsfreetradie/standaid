@@ -27,7 +27,7 @@ interface BackgroundImage {
   height: number;
 }
 
-export type SetoutCanvasMode = "view" | "sketch-walls" | "place-fittings" | "link-switches";
+export type SetoutCanvasMode = "view" | "sketch-walls" | "place-fittings" | "link-switches" | "select-multiple";
 
 interface SetoutCanvasProps {
   backgroundImage?: BackgroundImage;
@@ -48,6 +48,8 @@ interface SetoutCanvasProps {
   linkActiveGangIndex?: number;
   onSwitchTap?: (switchId: string | null) => void;
   onLinkTargetTap?: (fittingId: string) => void;
+  multiSelectIds?: Set<string>;
+  onMultiSelectToggle?: (fittingId: string) => void;
   className?: string;
 }
 
@@ -88,6 +90,8 @@ export default function SetoutCanvas({
   linkActiveGangIndex = 0,
   onSwitchTap,
   onLinkTargetTap,
+  multiSelectIds,
+  onMultiSelectToggle,
   className,
 }: SetoutCanvasProps) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -233,6 +237,10 @@ export default function SetoutCanvas({
         } else if (linkActiveSwitchId) {
           onLinkTargetTap?.(fitting.id);
         }
+        return;
+      }
+      if (mode === "select-multiple") {
+        onMultiSelectToggle?.(fitting.id);
         return;
       }
       onFittingSelect?.(fitting.id);
@@ -458,6 +466,7 @@ export default function SetoutCanvas({
           const selected = selectedFittingId === f.id;
           const isActiveSwitch = mode === "link-switches" && f.id === linkActiveSwitchId;
           const isLinkTarget = mode === "link-switches" && !!linkActiveSwitchId;
+          const isMultiSelected = mode === "select-multiple" && !!multiSelectIds?.has(f.id);
           // GPO/para-flood/1200-fluoro carry a `count` spec and GPO also a
           // `variant`; downlight carries `downlightSizeMm`. The shared
           // FITTING_SYMBOLS map is typed to the common SetoutSymbolProps
@@ -488,10 +497,10 @@ export default function SetoutCanvas({
                 cx={12}
                 cy={12}
                 r={13}
-                fill={isActiveSwitch ? "hsl(var(--primary) / 0.15)" : "transparent"}
+                fill={isActiveSwitch || isMultiSelected ? "hsl(var(--primary) / 0.15)" : "transparent"}
                 pointerEvents="all"
-                stroke={isActiveSwitch ? "hsl(var(--primary))" : "none"}
-                strokeWidth={isActiveSwitch ? 1.5 : 0}
+                stroke={isActiveSwitch || isMultiSelected ? "hsl(var(--primary))" : "none"}
+                strokeWidth={isActiveSwitch || isMultiSelected ? 1.5 : 0}
               />
               <Icon
                 size={24}

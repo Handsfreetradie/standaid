@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2, MousePointerClick, Cable, Download } from "lucide-react";
+import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import SetoutCanvas, { type SetoutCanvasMode } from "@/components/setout/SetoutCanvas";
 import FittingPalette from "@/components/setout/FittingPalette";
@@ -31,7 +32,7 @@ import {
 } from "@/hooks/useSetoutPlans";
 import { useSetoutCircuits, useAssignFittingCircuit } from "@/hooks/useSetoutCircuits";
 
-type WorkspaceMode = Extract<SetoutCanvasMode, "place-fittings" | "link-switches">;
+type WorkspaceMode = Extract<SetoutCanvasMode, "place-fittings" | "link-switches" | "select-multiple">;
 
 const SetoutPlan = () => {
   const { planId } = useParams();
@@ -59,6 +60,8 @@ const SetoutPlan = () => {
   const [selectedFittingId, setSelectedFittingId] = useState<string | null>(null);
   const [activeSwitchId, setActiveSwitchId] = useState<string | null>(null);
   const [activeGangIndex, setActiveGangIndex] = useState(0);
+  const [multiSelectIds, setMultiSelectIds] = useState<Set<string>>(new Set());
+  const [bulkCircuitId, setBulkCircuitId] = useState<string>("unassigned");
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>(DEFAULT_LAYER_VISIBILITY);
   const layerSyncedRef = useRef(false);
 
@@ -188,6 +191,27 @@ const SetoutPlan = () => {
     setSelectedType(null);
     setActiveSwitchId(null);
     setActiveGangIndex(0);
+    setMultiSelectIds(new Set());
+  };
+
+  const handleMultiSelectToggle = (fittingId: string) => {
+    setMultiSelectIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(fittingId)) next.delete(fittingId);
+      else next.add(fittingId);
+      return next;
+    });
+  };
+
+  const handleBulkAssignCircuit = () => {
+    const circuitId = bulkCircuitId === "unassigned" ? null : bulkCircuitId;
+    multiSelectIds.forEach((fittingId) => assignFittingCircuit.mutate({ fittingId, circuitId }));
+    setMultiSelectIds(new Set());
+  };
+
+  const handleBulkDelete = () => {
+    multiSelectIds.forEach((fittingId) => deleteFitting.mutate(fittingId));
+    setMultiSelectIds(new Set());
   };
 
   // Rendered in two different spots depending on breakpoint (above the
@@ -215,6 +239,16 @@ const SetoutPlan = () => {
         )}
       >
         <Cable className="h-3.5 w-3.5" /> Link switches
+      </button>
+      <button
+        type="button"
+        onClick={() => handleWorkspaceModeChange("select-multiple")}
+        className={cn(
+          "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+          workspaceMode === "select-multiple" ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"
+        )}
+      >
+        <CheckSquare className="h-3.5 w-3.5" /> Select multiple
       </button>
     </div>
   );
@@ -309,6 +343,8 @@ const SetoutPlan = () => {
                 linkActiveGangIndex={activeGangIndex}
                 onSwitchTap={handleSelectSwitch}
                 onLinkTargetTap={handleLinkTargetTap}
+                multiSelectIds={multiSelectIds}
+                onMultiSelectToggle={handleMultiSelectToggle}
                 className="h-full"
               />
             </div>
@@ -335,7 +371,7 @@ const SetoutPlan = () => {
                 circuits={circuits}
                 onAssignCircuit={handleAssignCircuit}
               />
-            ) : (
+            ) : workspaceMode === "link-switches" ? (
               <SwitchLinksPanel
                 fittings={fittings}
                 activeSwitchId={activeSwitchId}
@@ -345,6 +381,38 @@ const SetoutPlan = () => {
                 onAddGang={handleAddGang}
                 onRemoveGang={handleRemoveGang}
               />
+            ) : (
+              <div className="rounded-xl border border-border p-3 space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Tap fittings on the canvas to select them, then assign them all to one circuit at once.
+                  {multiSelectIds.size > 0 && ` ${multiSelectIds.size} selected.`}
+                </p>
+                {multiSelectIds.size > 0 && (
+                  <>
+                    <Select value={bulkCircuitId} onValueChange={setBulkCircuitId}>
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Assign to circuit" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unassigned">Unassigned</SelectItem>
+                        {circuits.map((circuit) => (
+                          <SelectItem key={circuit.id} value={circuit.id}>
+                            {circuit.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <div className="flex gap-2">
+                      <Button size="sm" className="flex-1" onClick={handleBulkAssignCircuit}>
+                        Assign {multiSelectIds.size} fitting{multiSelectIds.size === 1 ? "" : "s"}
+                      </Button>
+                      <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={handleBulkDelete}>
+                        Delete
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
             )}
 
             <div className="pt-4 border-t border-border">
