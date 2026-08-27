@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download, Undo2 } from "lucide-react";
+import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download, Undo2, PencilRuler } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -15,6 +15,7 @@ import { DEFAULT_LAYER_VISIBILITY, isSingleWallFitting, type FittingSpecs, type 
 import { autoRotationForWallMount, computeMeasurementLock, defaultHeightForType } from "@/lib/setoutGeometry";
 import { generateSetoutReportPdf } from "@/lib/setoutReport";
 import CircuitsPanel from "@/components/setout/CircuitsPanel";
+import EditWallsFlow from "@/components/setout/EditWallsFlow";
 import MeasurementListPanel from "@/components/setout/MeasurementListPanel";
 import {
   useSetoutPlan,
@@ -76,6 +77,7 @@ const SetoutPlan = () => {
   const [bulkCircuitId, setBulkCircuitId] = useState<string>("unassigned");
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
   const pushUndo = (entry: UndoEntry) => setUndoStack((prev) => [...prev.slice(-19), entry]);
+  const [editingWalls, setEditingWalls] = useState(false);
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>(DEFAULT_LAYER_VISIBILITY);
   const layerSyncedRef = useRef(false);
 
@@ -340,6 +342,10 @@ const SetoutPlan = () => {
     );
   }
 
+  if (editingWalls) {
+    return <EditWallsFlow plan={plan} onClose={() => setEditingWalls(false)} />;
+  }
+
   return (
     <div className="h-full overflow-y-auto">
       <div className="px-5 py-6 pb-24 md:pb-8 max-w-7xl mx-auto">
@@ -351,6 +357,10 @@ const SetoutPlan = () => {
             <ArrowLeft className="h-4 w-4" /> Back
           </button>
           <div className="flex items-center gap-1.5">
+            <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setEditingWalls(true)}>
+              <PencilRuler className="h-3.5 w-3.5" />
+              Edit walls
+            </Button>
             <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={handleUndo} disabled={undoStack.length === 0}>
               <Undo2 className="h-3.5 w-3.5" />
               Undo
