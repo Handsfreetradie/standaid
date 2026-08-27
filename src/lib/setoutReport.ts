@@ -10,6 +10,7 @@ import {
   FITTING_CATEGORY_ORDER,
   colorForCircuit,
   gangsFor,
+  isSingleWallFitting,
   symbolExtraPropsFor,
   LAYER_LABELS,
   type Point,
@@ -63,16 +64,23 @@ async function drawFittingSymbol(
   const colored = markup.replace(/currentColor/g, color);
   const parsed = new DOMParser().parseFromString(colored, "image/svg+xml");
   const svgEl = parsed.documentElement;
+  // Wall-mounted symbols anchor at their base (local icon point (12, 20.5),
+  // where GpoSymbol/SwitchSymbol and friends draw their wall baseline), not
+  // their geometric centre — same convention SetoutCanvas.tsx uses on
+  // screen, so the base sits on the wall line and the body projects into
+  // the room from there, instead of straddling the wall centred on it.
+  const anchorX = 12;
+  const anchorY = isSingleWallFitting(fitting.type) ? 20.5 : 12;
   const rotation = fitting.specs.rotation ?? 0;
   if (rotation) {
     const g = parsed.createElementNS("http://www.w3.org/2000/svg", "g");
-    g.setAttribute("transform", `rotate(${rotation} 12 12)`);
+    g.setAttribute("transform", `rotate(${rotation} ${anchorX} ${anchorY})`);
     while (svgEl.firstChild) g.appendChild(svgEl.firstChild);
     svgEl.appendChild(g);
   }
   await svg2pdf(svgEl, doc, {
-    x: pagePos.x - SYMBOL_SIZE_MM / 2,
-    y: pagePos.y - SYMBOL_SIZE_MM / 2,
+    x: pagePos.x - (anchorX / 24) * SYMBOL_SIZE_MM,
+    y: pagePos.y - (anchorY / 24) * SYMBOL_SIZE_MM,
     width: SYMBOL_SIZE_MM,
     height: SYMBOL_SIZE_MM,
   });
