@@ -30,6 +30,7 @@ import {
   roomFacingNormal,
   nearestWallAndOffset,
   perpendicularDistanceToWall,
+  projectPointOntoWall,
 } from "@/lib/setoutGeometry";
 
 interface ViewBox {
@@ -82,10 +83,19 @@ interface SetoutCanvasProps {
   interiorWallDraftStart?: Point | null;
   onInteriorWallDraftPointAdd?: (point: Point) => void;
   onInteriorWallSegmentAdd?: (start: Point, end: Point) => void;
+  // Interior walls default to square (horizontal/vertical off the start
+  // point) same as the perimeter's snapWalls — a tradie's rough second tap
+  // gets straightened automatically. Set false to let a wall land exactly
+  // where tapped (an intentionally angled partition).
+  snapInteriorWalls?: boolean;
   // "place-opening" mode: a tap resolves to the nearest wall + offset along
   // it (via nearestWallAndOffset) — the parent turns that into a
   // WallOpening with whatever kind/width is currently selected.
   onOpeningPlace?: (wallId: string, offset: number) => void;
+  // "place-opening" mode: dragging an already-placed door/window slides it
+  // along its own wall — the parent persists the new offset, clamped to the
+  // wall's length here since this component owns the wall geometry.
+  onOpeningDrag?: (openingId: string, offset: number) => void;
   // "pick-measurement-ref" mode: re-points selectedFittingId's measurement
   // at whatever the tradie taps next — a wall (if the tap lands close
   // enough to one) or another fitting — rather than a labelled dropdown,
@@ -142,7 +152,9 @@ export default function SetoutCanvas({
   interiorWallDraftStart = null,
   onInteriorWallDraftPointAdd,
   onInteriorWallSegmentAdd,
+  snapInteriorWalls = true,
   onOpeningPlace,
+  onOpeningDrag,
   onMeasurementRefPick,
   snapWalls = false,
   selectedFittingType,
@@ -179,6 +191,8 @@ export default function SetoutCanvas({
   const dragState = useRef<{ fittingId: string; type: FittingType; clientX: number; clientY: number; scale: number; origin: Point } | null>(null);
   const [dragPreview, setDragPreview] = useState<{ id: string; position: Point } | null>(null);
   const [alignGuides, setAlignGuides] = useState<{ x?: number; y?: number } | null>(null);
+  const openingDragState = useRef<{ openingId: string; wall: WallSegment; width: number } | null>(null);
+  const [openingDragPreview, setOpeningDragPreview] = useState<{ id: string; offset: number } | null>(null);
 
   const clampSpan = useCallback((v: number) => {
     const bounds = spanBoundsRef.current;
@@ -250,7 +264,7 @@ export default function SetoutCanvas({
 
   const handleBackgroundPointerDown = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
-      if (dragState.current) return;
+      if (dragState.current || openingDragState.current) return;
       if (panMode || mode === "view") {
         panState.current = { clientX: e.clientX, clientY: e.clientY, vb: viewBox, scale: px2scene() };
         (e.target as Element).setPointerCapture(e.pointerId);
@@ -269,7 +283,10 @@ export default function SetoutCanvas({
         if (calibratePoints.length < 2) onCalibratePointAdd?.(scene);
       } else if (mode === "sketch-interior-wall") {
         if (!interiorWallDraftStart) onInteriorWallDraftPointAdd?.(scene);
-        else onInteriorWallSegmentAdd?.(interiorWallDraftStart, scene);
+        else {
+          const end = snapInteriorWalls ? snapOrthogonal(interiorWallDraftStart, scene) : scene;
+          onInteriorWallSegmentAdd?.(interiorWallDraftStart, end);
+        }
       } else if (mode === "place-opening") {
         const result = nearestWallAndOffset(scene, walls);
         if (result) onOpeningPlace?.(result.wall.id, result.offset);
@@ -328,6 +345,7 @@ export default function SetoutCanvas({
       interiorWallDraftStart,
       onInteriorWallDraftPointAdd,
       onInteriorWallSegmentAdd,
+      snapInteriorWalls,
       onOpeningPlace,
       onMeasurementRefPick,
       selectedFittingId,
@@ -364,9 +382,16 @@ export default function SetoutCanvas({
           setAlignGuides({ x: aligned.guideX, y: aligned.guideY });
         }
         setDragPreview({ id: fittingId, position });
+      } else if (openingDragState.current) {
+        const { openingId, wall, width } = openingDragState.current;
+        const scene = sceneFromClient(e.clientX, e.clientY);
+        const len = wallLength(wall);
+        const raw = projectPointOntoWall(scene, wall) - width / 2;
+        const offset = Math.max(0, Math.min(Math.max(len - width, 0), raw));
+        setOpeningDragPreview({ id: openingId, offset });
       }
     },
-    [walls, openings, fittings]
+    [walls, openings, fittings, sceneFromClient]
   );
 
   const endPan = useCallback(() => {
@@ -377,10 +402,15 @@ export default function SetoutCanvas({
     if (dragState.current && dragPreview) {
       onFittingDrag?.(dragState.current.fittingId, dragPreview.position);
     }
+    if (openingDragState.current && openingDragPreview) {
+      onOpeningDrag?.(openingDragState.current.openingId, openingDragPreview.offset);
+    }
     dragState.current = null;
+    openingDragState.current = null;
     setDragPreview(null);
+    setOpeningDragPreview(null);
     setAlignGuides(null);
-  }, [dragPreview, onFittingDrag]);
+  }, [dragPreview, onFittingDrag, openingDragPreview, onOpeningDrag]);
 
   const handlePointerUp = useCallback(() => {
     endPan();
@@ -425,6 +455,21 @@ export default function SetoutCanvas({
     [mode, panMode, px2scene, onFittingSelect, linkActiveSwitchId, onSwitchTap, onLinkTargetTap, selectedFittingId, fittings, onMeasurementRefPick]
   );
 
+  // Grabbing an already-placed door/window slides it along its own wall
+  // instead of the background tap handler treating the same spot as
+  // "place a new opening here" — stopPropagation keeps the two from firing
+  // together, same pattern as handleFittingPointerDown.
+  const handleOpeningPointerDown = useCallback(
+    (e: React.PointerEvent, opening: WallOpening, wall: WallSegment) => {
+      if (mode !== "place-opening") return;
+      e.stopPropagation();
+      openingDragState.current = { openingId: opening.id, wall, width: opening.width };
+      setOpeningDragPreview({ id: opening.id, offset: opening.offset });
+      (e.target as Element).setPointerCapture(e.pointerId);
+    },
+    [mode]
+  );
+
   const gridLines = useMemo(() => {
     const step = 1;
     const startX = Math.floor(viewBox.x / step) * step;
@@ -440,13 +485,22 @@ export default function SetoutCanvas({
 
   const wallCentroid = useMemo(() => wallsCentroid(walls), [walls]);
 
+  // While an opening is being dragged, its offset in the render data tracks
+  // the live drag preview rather than the last-saved value — so the wall
+  // gap and door/window glyph visibly slide with the pointer, not just jump
+  // once the drag ends.
+  const effectiveOpenings = useMemo(() => {
+    if (!openingDragPreview) return openings;
+    return openings.map((o) => (o.id === openingDragPreview.id ? { ...o, offset: openingDragPreview.offset } : o));
+  }, [openings, openingDragPreview]);
+
   // Cuts each wall into the solid sub-segments either side of its openings
   // (a door/window leaves a visible gap in the wall line, drawn separately
   // below) — computed once per walls/openings change rather than inline in
   // JSX since every wall needs its own sorted-by-offset pass.
   const wallRenderData = useMemo(() => {
     return walls.map((wall) => {
-      const wallOpenings = openings.filter((o) => o.wallId === wall.id).sort((a, b) => a.offset - b.offset);
+      const wallOpenings = effectiveOpenings.filter((o) => o.wallId === wall.id).sort((a, b) => a.offset - b.offset);
       const len = wallLength(wall);
       const segments: { from: Point; to: Point }[] = [];
       let cursor = 0;
@@ -459,7 +513,7 @@ export default function SetoutCanvas({
       if (cursor < len) segments.push({ from: pointAtOffset(wall, cursor), to: pointAtOffset(wall, len) });
       return { wall, segments, openings: wallOpenings };
     });
-  }, [walls, openings]);
+  }, [walls, effectiveOpenings]);
 
   const visibleFittings = useMemo(() => {
     if (!layerVisibility) return fittings;
@@ -605,19 +659,41 @@ export default function SetoutCanvas({
               const len = wallLength(wall);
               const p1 = pointAtOffset(wall, Math.max(0, o.offset));
               const p2 = pointAtOffset(wall, Math.min(len, o.offset + o.width));
+              const draggable = mode === "place-opening";
+              // A transparent, much fatter line sitting over the same span as
+              // the visible glyph — the actual door/window line is only 1px
+              // wide, far too thin to reliably grab on a phone screen.
+              const hitStroke = (
+                <line
+                  x1={p1.x}
+                  y1={p1.y}
+                  x2={p2.x}
+                  y2={p2.y}
+                  stroke="transparent"
+                  strokeWidth={22 * px2scene()}
+                  vectorEffect="non-scaling-stroke"
+                  pointerEvents="stroke"
+                />
+              );
               if (o.kind === "window") {
                 return (
-                  <line
+                  <g
                     key={o.id}
-                    x1={p1.x}
-                    y1={p1.y}
-                    x2={p2.x}
-                    y2={p2.y}
-                    stroke="currentColor"
-                    strokeWidth={1}
-                    vectorEffect="non-scaling-stroke"
-                    className="text-sky-600"
-                  />
+                    className={draggable ? "cursor-grab active:cursor-grabbing" : undefined}
+                    onPointerDown={draggable ? (e) => handleOpeningPointerDown(e, o, wall) : undefined}
+                  >
+                    {hitStroke}
+                    <line
+                      x1={p1.x}
+                      y1={p1.y}
+                      x2={p2.x}
+                      y2={p2.y}
+                      stroke="currentColor"
+                      strokeWidth={1}
+                      vectorEffect="non-scaling-stroke"
+                      className="text-sky-600"
+                    />
+                  </g>
                 );
               }
               // Door: a leaf line from the hinge (p1) swinging into the room,
@@ -626,7 +702,12 @@ export default function SetoutCanvas({
               const normal = roomFacingNormal(wall, p1, wallCentroid);
               const openEnd = { x: p1.x + normal.x * o.width, y: p1.y + normal.y * o.width };
               return (
-                <g key={o.id} className="text-foreground/70">
+                <g
+                  key={o.id}
+                  className={cn("text-foreground/70", draggable && "cursor-grab active:cursor-grabbing")}
+                  onPointerDown={draggable ? (e) => handleOpeningPointerDown(e, o, wall) : undefined}
+                >
+                  {hitStroke}
                   <line x1={p1.x} y1={p1.y} x2={openEnd.x} y2={openEnd.y} stroke="currentColor" strokeWidth={1} vectorEffect="non-scaling-stroke" />
                   <path
                     d={`M ${openEnd.x} ${openEnd.y} A ${o.width} ${o.width} 0 0 1 ${p2.x} ${p2.y}`}

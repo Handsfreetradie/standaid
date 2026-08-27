@@ -3,6 +3,8 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import SetoutCanvas from "./SetoutCanvas";
 import { useUpdateSetoutPlanGeometry } from "@/hooks/useSetoutPlans";
 import type { Point, SetoutPlan, WallOpening, WallSegment } from "@/lib/setoutTypes";
@@ -27,6 +29,7 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
   const [interiorWalls, setInteriorWalls] = useState<WallSegment[]>(plan.walls.filter((w) => w.kind === "interior"));
   const [openings, setOpenings] = useState<WallOpening[]>(plan.openings ?? []);
   const [tool, setTool] = useState<"interior" | "opening">("interior");
+  const [straightInteriorWalls, setStraightInteriorWalls] = useState(true);
   const [openingKind, setOpeningKind] = useState<"door" | "window">("door");
   const [draftStart, setDraftStart] = useState<Point | null>(null);
   const saveGeometry = useUpdateSetoutPlanGeometry(plan.id);
@@ -60,7 +63,8 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
       </button>
       <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Edit walls</h2>
       <p className="text-xs text-muted-foreground mb-4">
-        Add internal walls or doors/windows that were missed. To fix the outer perimeter itself, re-import the plan instead.
+        Add internal walls or doors/windows that were missed — drag an existing door/window to reposition it. To fix the outer
+        perimeter itself, re-import the plan instead.
       </p>
 
       <div className="flex gap-1.5 mb-3">
@@ -71,6 +75,15 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
           Add door/window
         </Button>
       </div>
+
+      {tool === "interior" && (
+        <div className="flex items-center gap-2 mb-3">
+          <Switch id="edit-straight-interior-walls" checked={straightInteriorWalls} onCheckedChange={setStraightInteriorWalls} />
+          <Label htmlFor="edit-straight-interior-walls" className="text-xs font-normal text-muted-foreground">
+            Keep walls straight (90°) — turn off to draw an angled wall
+          </Label>
+        </div>
+      )}
 
       {tool === "opening" && (
         <div className="flex gap-1.5 mb-3">
@@ -90,11 +103,15 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
           mode={tool === "interior" ? "sketch-interior-wall" : "place-opening"}
           interiorWallDraftStart={draftStart}
           onInteriorWallDraftPointAdd={setDraftStart}
+          snapInteriorWalls={straightInteriorWalls}
           onInteriorWallSegmentAdd={(start, end) => {
             setInteriorWalls((prev) => [...prev, { id: nextWallId(), start, end, kind: "interior" }]);
             setDraftStart(null);
           }}
           onOpeningPlace={handleOpeningPlace}
+          onOpeningDrag={(openingId, offset) =>
+            setOpenings((prev) => prev.map((o) => (o.id === openingId ? { ...o, offset } : o)))
+          }
         />
       </div>
 

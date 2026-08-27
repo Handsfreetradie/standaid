@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import SetoutCanvas from "./SetoutCanvas";
 import { supabase } from "@/integrations/supabase/client";
@@ -117,6 +118,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
   const [interiorWalls, setInteriorWalls] = useState<WallSegment[]>([]);
   const [wallOpenings, setWallOpenings] = useState<WallOpening[]>([]);
   const [wallTool, setWallTool] = useState<"perimeter" | "interior" | "opening">("perimeter");
+  const [straightInteriorWalls, setStraightInteriorWalls] = useState(true);
   const [interiorDraftStart, setInteriorDraftStart] = useState<Point | null>(null);
   const [openingKind, setOpeningKind] = useState<"door" | "window">("door");
   const [savedWalls, setSavedWalls] = useState<WallSegment[] | null>(null);
@@ -388,8 +390,8 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
               ? "AI has traced a starting shape from the plan — drag/add/remove corners to fix anything it got wrong, then close the shape. You'll enter the real wall lengths next."
               : "Tap each corner of the room in order. Tap the first corner again (or the button below) to close the shape — you'll enter the real wall lengths next."
             : wallTool === "interior"
-              ? "Tap the start, then the end, of one internal wall at a time."
-              : `Tap a point on a wall to drop a ${openingKind} there — default width is editable below.`}
+              ? `Tap the start, then the end, of one internal wall at a time.${straightInteriorWalls ? " It'll square up to horizontal/vertical automatically." : ""}`
+              : `Tap a point on a wall to drop a ${openingKind} there — drag an existing one to reposition it, default width is editable below.`}
         </p>
 
         {perimeterFinalized && (
@@ -400,6 +402,15 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
             <Button size="sm" variant={wallTool === "opening" ? "default" : "outline"} onClick={() => setWallTool("opening")}>
               Add door/window
             </Button>
+          </div>
+        )}
+
+        {wallTool === "interior" && (
+          <div className="flex items-center gap-2 mb-3">
+            <Switch id="straight-interior-walls" checked={straightInteriorWalls} onCheckedChange={setStraightInteriorWalls} />
+            <Label htmlFor="straight-interior-walls" className="text-xs font-normal text-muted-foreground">
+              Keep walls straight (90°) — turn off to draw an angled wall
+            </Label>
           </div>
         )}
 
@@ -426,11 +437,15 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
             snapWalls={wallTool === "perimeter"}
             interiorWallDraftStart={interiorDraftStart}
             onInteriorWallDraftPointAdd={setInteriorDraftStart}
+            snapInteriorWalls={straightInteriorWalls}
             onInteriorWallSegmentAdd={(start, end) => {
               setInteriorWalls((prev) => [...prev, { id: nextWallId(), start, end, kind: "interior" }]);
               setInteriorDraftStart(null);
             }}
             onOpeningPlace={handleOpeningPlace}
+            onOpeningDrag={(openingId, offset) =>
+              setWallOpenings((prev) => prev.map((o) => (o.id === openingId ? { ...o, offset } : o)))
+            }
           />
         </div>
 
