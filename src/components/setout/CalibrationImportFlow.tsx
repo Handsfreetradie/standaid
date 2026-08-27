@@ -14,6 +14,7 @@ import { useUpdateSetoutPlanGeometry, useCreateSetoutFittingsBulk } from "@/hook
 import { FITTING_LABELS, FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
 import { CATEGORY_FOR_TYPE, distance, isSingleWallFitting, type FittingSpecs, type Point, type SetoutFitting, type SetoutPlan, type WallOpening, type WallSegment } from "@/lib/setoutTypes";
 import {
+  applyWallLengths,
   autoRotationForWallMount,
   computeMeasurementLock,
   defaultHeightForType,
@@ -95,7 +96,7 @@ function loadImageFile(file: File): Promise<RasterSource> {
   });
 }
 
-type Step = "select-file" | "loading" | "extracting" | "calibrate" | "trace-walls" | "review-marks";
+type Step = "select-file" | "loading" | "extracting" | "calibrate" | "trace-walls" | "adjust-lengths" | "review-marks";
 
 interface CalibrationImportFlowProps {
   plan: SetoutPlan;
@@ -111,6 +112,8 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
   const [realDistance, setRealDistance] = useState("");
   const [pixelsPerMetre, setPixelsPerMetre] = useState<number | null>(null);
   const [sketchPoints, setSketchPoints] = useState<Point[]>([]);
+  const [perimeterFinalized, setPerimeterFinalized] = useState(false);
+  const [lengths, setLengths] = useState<string[]>([]);
   const [interiorWalls, setInteriorWalls] = useState<WallSegment[]>([]);
   const [wallOpenings, setWallOpenings] = useState<WallOpening[]>([]);
   const [wallTool, setWallTool] = useState<"perimeter" | "interior" | "opening">("perimeter");
@@ -224,9 +227,23 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     setStep("trace-walls");
   };
 
-  const finishTrace = async () => {
-    if (sketchPoints.length < 3 || !pixelsPerMetre) return;
-    const walls = [...polygonToWalls(sketchPoints), ...interiorWalls];
+  // Perimeter tracing (rough taps) never saves directly — it hands off to
+  // the adjust-lengths step, which replaces the tapped lengths with the
+  // tradie's real printed/measured dimensions before anything is saved.
+  const proceedToLengthAdjustment = () => {
+    if (sketchPoints.length < 3) return;
+    const walls = polygonToWalls(sketchPoints);
+    setLengths(walls.map((w) => wallLength(w).toFixed(2)));
+    setStep("adjust-lengths");
+  };
+
+  // Accepts the points explicitly rather than always reading sketchPoints
+  // off the closure, since the adjust-lengths confirm handler needs to save
+  // the newly-corrected points immediately rather than waiting on a state
+  // update to land first.
+  const finishTrace = async (finalPoints: Point[] = sketchPoints) => {
+    if (finalPoints.length < 3 || !pixelsPerMetre) return;
+    const walls = [...polygonToWalls(finalPoints), ...interiorWalls];
     try {
       await saveGeometry.mutateAsync({
         walls,
@@ -346,7 +363,6 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     };
     const perimeterWalls = sketchPoints.length >= 3 ? polygonToWalls(sketchPoints) : [];
     const previewWalls = [...perimeterWalls, ...interiorWalls];
-    const canAddInteriorOrOpening = perimeterWalls.length > 0;
     const canvasMode = wallTool === "perimeter" ? "sketch-walls" : wallTool === "interior" ? "sketch-interior-wall" : "place-opening";
 
     const handleOpeningPlace = (wallId: string, offset: number) => {
@@ -363,28 +379,29 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
         <button onClick={() => setStep("calibrate")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
-        <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Trace the walls</h2>
+        <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">
+          {perimeterFinalized ? "Add interior walls, doors & windows" : "Trace the outer walls"}
+        </h2>
         <p className="text-xs text-muted-foreground mb-4">
           {wallTool === "perimeter"
             ? aiCorners
-              ? "AI has traced a starting shape from the plan — drag/add/remove corners to fix anything it got wrong, then close the shape."
-              : "Tap each corner of the room in order. Tap the first corner again (or the button below) to close the shape."
+              ? "AI has traced a starting shape from the plan — drag/add/remove corners to fix anything it got wrong, then close the shape. You'll enter the real wall lengths next."
+              : "Tap each corner of the room in order. Tap the first corner again (or the button below) to close the shape — you'll enter the real wall lengths next."
             : wallTool === "interior"
               ? "Tap the start, then the end, of one internal wall at a time."
               : `Tap a point on a wall to drop a ${openingKind} there — default width is editable below.`}
         </p>
 
-        <div className="flex gap-1.5 mb-3">
-          <Button size="sm" variant={wallTool === "perimeter" ? "default" : "outline"} onClick={() => setWallTool("perimeter")}>
-            Trace perimeter
-          </Button>
-          <Button size="sm" variant={wallTool === "interior" ? "default" : "outline"} disabled={!canAddInteriorOrOpening} onClick={() => setWallTool("interior")}>
-            Add interior wall
-          </Button>
-          <Button size="sm" variant={wallTool === "opening" ? "default" : "outline"} disabled={!canAddInteriorOrOpening} onClick={() => setWallTool("opening")}>
-            Add door/window
-          </Button>
-        </div>
+        {perimeterFinalized && (
+          <div className="flex gap-1.5 mb-3">
+            <Button size="sm" variant={wallTool === "interior" ? "default" : "outline"} onClick={() => setWallTool("interior")}>
+              Add interior wall
+            </Button>
+            <Button size="sm" variant={wallTool === "opening" ? "default" : "outline"} onClick={() => setWallTool("opening")}>
+              Add door/window
+            </Button>
+          </div>
+        )}
 
         {wallTool === "opening" && (
           <div className="flex gap-1.5 mb-3">
@@ -405,7 +422,8 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
             mode={canvasMode}
             sketchPoints={sketchPoints}
             onSketchPointAdd={(p) => setSketchPoints((prev) => [...prev, p])}
-            onSketchClose={finishTrace}
+            onSketchClose={proceedToLengthAdjustment}
+            snapWalls={wallTool === "perimeter"}
             interiorWallDraftStart={interiorDraftStart}
             onInteriorWallDraftPointAdd={setInteriorDraftStart}
             onInteriorWallSegmentAdd={(start, end) => {
@@ -464,15 +482,83 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
         )}
 
         <div className="flex gap-2">
-          {wallTool === "perimeter" && (
-            <Button variant="outline" className="flex-1" disabled={sketchPoints.length === 0} onClick={() => setSketchPoints((prev) => prev.slice(0, -1))}>
-              Undo point
+          {wallTool === "perimeter" ? (
+            <>
+              <Button variant="outline" className="flex-1" disabled={sketchPoints.length === 0} onClick={() => setSketchPoints((prev) => prev.slice(0, -1))}>
+                Undo point
+              </Button>
+              <Button className="flex-1 font-bold" disabled={sketchPoints.length < 3} onClick={proceedToLengthAdjustment}>
+                Close shape
+              </Button>
+            </>
+          ) : (
+            <Button className="flex-1 font-bold" disabled={saveGeometry.isPending} onClick={() => finishTrace()}>
+              {saveGeometry.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save walls"}
             </Button>
           )}
-          <Button className="flex-1 font-bold" disabled={sketchPoints.length < 3 || saveGeometry.isPending} onClick={finishTrace}>
-            {saveGeometry.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save walls"}
-          </Button>
         </div>
+      </div>
+    );
+  }
+
+  if (step === "adjust-lengths" && raster && pixelsPerMetre) {
+    const backgroundImage = {
+      href: raster.href,
+      width: raster.naturalWidth / pixelsPerMetre,
+      height: raster.naturalHeight / pixelsPerMetre,
+    };
+    const parsedLengths = lengths.map((l) => Number(l) || 0);
+    const previewPoints = parsedLengths.some((l) => l <= 0) ? sketchPoints : applyWallLengths(sketchPoints, parsedLengths);
+    const previewWalls = polygonToWalls(previewPoints);
+    const allLengthsValid = lengths.length > 0 && lengths.every((l) => Number(l) > 0);
+
+    const confirmLengths = () => {
+      if (!allLengthsValid) return;
+      const finalPoints = applyWallLengths(sketchPoints, lengths.map(Number));
+      setSketchPoints(finalPoints);
+      setPerimeterFinalized(true);
+      setWallTool("interior");
+      setStep("trace-walls");
+    };
+
+    return (
+      <div className="flex flex-col h-full px-5 py-6 max-w-3xl mx-auto w-full">
+        <button
+          onClick={() => setStep("trace-walls")}
+          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4"
+        >
+          <ArrowLeft className="h-4 w-4" /> Back to tracing
+        </button>
+        <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Enter the real wall lengths</h2>
+        <p className="text-xs text-muted-foreground mb-4">
+          Read each wall's length straight off the plan (or measure it on site) and type it in metres — this is what makes the shape
+          exact, not the tapping. The preview redraws true to scale as you type.
+        </p>
+
+        <div className="flex-1 min-h-[280px] mb-4">
+          <SetoutCanvas backgroundImage={backgroundImage} walls={previewWalls} mode="view" />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mb-6 max-h-48 overflow-y-auto">
+          {lengths.map((len, i) => (
+            <div key={i} className="space-y-1">
+              <Label htmlFor={`wall-${i}`} className="text-xs">Wall {i + 1}</Label>
+              <Input
+                id={`wall-${i}`}
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                value={len}
+                onChange={(e) => setLengths((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))}
+              />
+            </div>
+          ))}
+        </div>
+
+        <Button className="w-full h-12 font-bold rounded-xl" disabled={!allLengthsValid} onClick={confirmLengths}>
+          Confirm lengths
+        </Button>
       </div>
     );
   }
