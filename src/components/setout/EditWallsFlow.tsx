@@ -28,7 +28,7 @@ interface EditWallsFlowProps {
 export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
   const [interiorWalls, setInteriorWalls] = useState<WallSegment[]>(plan.walls.filter((w) => w.kind === "interior"));
   const [openings, setOpenings] = useState<WallOpening[]>(plan.openings ?? []);
-  const [tool, setTool] = useState<"interior" | "opening">("interior");
+  const [tool, setTool] = useState<"interior" | "opening" | "erase">("interior");
   const [straightInteriorWalls, setStraightInteriorWalls] = useState(true);
   const [openingKind, setOpeningKind] = useState<"door" | "window">("door");
   const [draftStart, setDraftStart] = useState<Point | null>(null);
@@ -44,6 +44,13 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
     const len = wallLength(wall);
     const clampedOffset = Math.max(0, Math.min(Math.max(len - width, 0), offset - width / 2));
     setOpenings((prev) => [...prev, { id: nextOpeningId(), wallId, offset: clampedOffset, width, kind: openingKind }]);
+  };
+
+  // Deleting a wall orphans any door/window cut into it — drop those too
+  // rather than leaving a dangling opening with no wall to render against.
+  const handleWallDelete = (wallId: string) => {
+    setInteriorWalls((prev) => prev.filter((w) => w.id !== wallId));
+    setOpenings((prev) => prev.filter((o) => o.wallId !== wallId));
   };
 
   const handleSave = async () => {
@@ -74,7 +81,16 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
         <Button size="sm" variant={tool === "opening" ? "default" : "outline"} onClick={() => setTool("opening")}>
           Add door/window
         </Button>
+        <Button size="sm" variant={tool === "erase" ? "default" : "outline"} onClick={() => setTool("erase")}>
+          Delete wall
+        </Button>
       </div>
+
+      {tool === "erase" && (
+        <p className="text-xs text-muted-foreground mb-3">
+          Tap an interior wall to delete it. The outer perimeter can't be erased this way — re-import the plan to fix that.
+        </p>
+      )}
 
       {tool === "interior" && (
         <>
@@ -106,7 +122,7 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
           walls={walls}
           wallThickness={plan.wall_thickness}
           openings={openings}
-          mode={tool === "interior" ? "sketch-interior-wall" : "place-opening"}
+          mode={tool === "interior" ? "sketch-interior-wall" : tool === "erase" ? "erase-wall" : "place-opening"}
           interiorWallDraftStart={draftStart}
           onInteriorWallDraftPointAdd={setDraftStart}
           snapInteriorWalls={straightInteriorWalls}
@@ -119,6 +135,7 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
           onOpeningDrag={(openingId, offset) =>
             setOpenings((prev) => prev.map((o) => (o.id === openingId ? { ...o, offset } : o)))
           }
+          onWallDelete={handleWallDelete}
         />
       </div>
 

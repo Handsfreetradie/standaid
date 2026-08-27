@@ -56,6 +56,7 @@ export type SetoutCanvasMode =
   | "calibrate"
   | "sketch-walls"
   | "sketch-interior-wall"
+  | "erase-wall"
   | "place-opening"
   | "place-fittings"
   | "link-switches"
@@ -100,6 +101,10 @@ interface SetoutCanvasProps {
   // gets straightened automatically. Set false to let a wall land exactly
   // where tapped (an intentionally angled partition).
   snapInteriorWalls?: boolean;
+  // "erase-wall" mode: tapping an interior wall deletes it outright — the
+  // exterior perimeter is never tappable here (fixing it needs a re-import,
+  // same boundary EditWallsFlow/CalibrationImportFlow already draw).
+  onWallDelete?: (wallId: string) => void;
   // "place-opening" mode: a tap resolves to the nearest wall + offset along
   // it (via nearestWallAndOffset) — the parent turns that into a
   // WallOpening with whatever kind/width is currently selected.
@@ -167,6 +172,7 @@ export default function SetoutCanvas({
   onInteriorWallSegmentAdd,
   onInteriorWallChainEnd,
   snapInteriorWalls = true,
+  onWallDelete,
   onOpeningPlace,
   onOpeningDrag,
   onMeasurementRefPick,
@@ -501,6 +507,15 @@ export default function SetoutCanvas({
     [mode]
   );
 
+  const handleWallPointerDown = useCallback(
+    (e: React.PointerEvent, wallId: string) => {
+      if (mode !== "erase-wall") return;
+      e.stopPropagation();
+      onWallDelete?.(wallId);
+    },
+    [mode, onWallDelete]
+  );
+
   const gridLines = useMemo(() => {
     const step = 1;
     const startX = Math.floor(viewBox.x / step) * step;
@@ -668,22 +683,46 @@ export default function SetoutCanvas({
         </g>
 
         <g>
-          {wallRenderData.map(({ wall, segments }) => (
-            <g key={wall.id} className={wall.kind === "interior" ? "text-foreground/60" : "text-foreground"}>
-              {segments.map((seg, i) => (
-                <line
-                  key={i}
-                  x1={seg.from.x}
-                  y1={seg.from.y}
-                  x2={seg.to.x}
-                  y2={seg.to.y}
-                  stroke="currentColor"
-                  strokeWidth={wall.kind === "interior" ? wallThickness.interior : wallThickness.exterior}
-                  strokeLinecap="square"
-                />
-              ))}
-            </g>
-          ))}
+          {wallRenderData.map(({ wall, segments }) => {
+            const erasable = mode === "erase-wall" && wall.kind === "interior";
+            return (
+              <g
+                key={wall.id}
+                className={erasable ? "text-destructive cursor-pointer" : wall.kind === "interior" ? "text-foreground/60" : "text-foreground"}
+                onPointerDown={erasable ? (e) => handleWallPointerDown(e, wall.id) : undefined}
+              >
+                {segments.map((seg, i) => (
+                  <g key={i}>
+                    {erasable && (
+                      // Fatter transparent hit-stroke so a thin wall line is
+                      // still easy to tap accurately on a phone screen —
+                      // same pattern as the door/window drag hit-stroke.
+                      <line
+                        x1={seg.from.x}
+                        y1={seg.from.y}
+                        x2={seg.to.x}
+                        y2={seg.to.y}
+                        stroke="transparent"
+                        strokeWidth={22 * px2scene()}
+                        vectorEffect="non-scaling-stroke"
+                        pointerEvents="stroke"
+                      />
+                    )}
+                    <line
+                      x1={seg.from.x}
+                      y1={seg.from.y}
+                      x2={seg.to.x}
+                      y2={seg.to.y}
+                      stroke="currentColor"
+                      strokeWidth={wall.kind === "interior" ? wallThickness.interior : wallThickness.exterior}
+                      strokeLinecap="square"
+                      pointerEvents={erasable ? "none" : undefined}
+                    />
+                  </g>
+                ))}
+              </g>
+            );
+          })}
           {wallRenderData.flatMap(({ wall, openings: wallOpenings }) =>
             wallOpenings.map((o) => {
               const len = wallLength(wall);

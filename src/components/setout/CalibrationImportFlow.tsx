@@ -117,7 +117,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
   const [lengths, setLengths] = useState<string[]>([]);
   const [interiorWalls, setInteriorWalls] = useState<WallSegment[]>([]);
   const [wallOpenings, setWallOpenings] = useState<WallOpening[]>([]);
-  const [wallTool, setWallTool] = useState<"perimeter" | "interior" | "opening">("perimeter");
+  const [wallTool, setWallTool] = useState<"perimeter" | "interior" | "opening" | "erase">("perimeter");
   const [straightInteriorWalls, setStraightInteriorWalls] = useState(true);
   const [interiorDraftStart, setInteriorDraftStart] = useState<Point | null>(null);
   const [openingKind, setOpeningKind] = useState<"door" | "window">("door");
@@ -365,7 +365,14 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     };
     const perimeterWalls = sketchPoints.length >= 3 ? polygonToWalls(sketchPoints) : [];
     const previewWalls = [...perimeterWalls, ...interiorWalls];
-    const canvasMode = wallTool === "perimeter" ? "sketch-walls" : wallTool === "interior" ? "sketch-interior-wall" : "place-opening";
+    const canvasMode =
+      wallTool === "perimeter"
+        ? "sketch-walls"
+        : wallTool === "interior"
+          ? "sketch-interior-wall"
+          : wallTool === "erase"
+            ? "erase-wall"
+            : "place-opening";
 
     const handleOpeningPlace = (wallId: string, offset: number) => {
       const wall = previewWalls.find((w) => w.id === wallId);
@@ -374,6 +381,13 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
       const len = wallLength(wall);
       const clampedOffset = Math.max(0, Math.min(Math.max(len - width, 0), offset - width / 2));
       setWallOpenings((prev) => [...prev, { id: nextOpeningId(), wallId, offset: clampedOffset, width, kind: openingKind }]);
+    };
+
+    // Deleting a wall orphans any door/window cut into it — drop those too
+    // rather than leaving a dangling opening with no wall to render against.
+    const handleWallDelete = (wallId: string) => {
+      setInteriorWalls((prev) => prev.filter((w) => w.id !== wallId));
+      setWallOpenings((prev) => prev.filter((o) => o.wallId !== wallId));
     };
 
     return (
@@ -391,7 +405,9 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
               : "Tap each corner of the room in order. Tap the first corner again (or the button below) to close the shape — you'll enter the real wall lengths next."
             : wallTool === "interior"
               ? `Tap point to point along the internal wall run — tap (or click) the same spot twice to finish it.${straightInteriorWalls ? " Each segment squares up to horizontal/vertical automatically." : ""}`
-              : `Tap a point on a wall to drop a ${openingKind} there — drag an existing one to reposition it, default width is editable below.`}
+              : wallTool === "erase"
+                ? "Tap an interior wall to delete it. The outer perimeter can't be erased this way — re-import the plan to fix that."
+                : `Tap a point on a wall to drop a ${openingKind} there — drag an existing one to reposition it, default width is editable below.`}
         </p>
 
         {perimeterFinalized && (
@@ -401,6 +417,9 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
             </Button>
             <Button size="sm" variant={wallTool === "opening" ? "default" : "outline"} onClick={() => setWallTool("opening")}>
               Add door/window
+            </Button>
+            <Button size="sm" variant={wallTool === "erase" ? "default" : "outline"} onClick={() => setWallTool("erase")}>
+              Delete wall
             </Button>
           </div>
         )}
@@ -451,6 +470,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
             onOpeningDrag={(openingId, offset) =>
               setWallOpenings((prev) => prev.map((o) => (o.id === openingId ? { ...o, offset } : o)))
             }
+            onWallDelete={handleWallDelete}
           />
         </div>
 
