@@ -101,10 +101,16 @@ interface SetoutCanvasProps {
   // gets straightened automatically. Set false to let a wall land exactly
   // where tapped (an intentionally angled partition).
   snapInteriorWalls?: boolean;
-  // "erase-wall" mode: tapping an interior wall deletes it outright — the
-  // exterior perimeter is never tappable here (fixing it needs a re-import,
-  // same boundary EditWallsFlow/CalibrationImportFlow already draw).
-  onWallDelete?: (wallId: string) => void;
+  // "erase-wall" mode: tapping an interior wall selects it (highlighted
+  // strongly below) — the parent decides what a tap means (select vs.
+  // toggle-off) and owns the actual delete, which happens via a separate
+  // confirm action outside this component. Two-step rather than
+  // delete-on-tap since a mis-tap between two close/thin walls used to be
+  // both easy to make and irreversible; selecting first is free to correct.
+  // The exterior perimeter is never tappable here (fixing it needs a
+  // re-import, same boundary EditWallsFlow/CalibrationImportFlow draw).
+  onWallTap?: (wallId: string) => void;
+  selectedEraseWallId?: string | null;
   // "place-opening" mode: a tap resolves to the nearest wall + offset along
   // it (via nearestWallAndOffset) — the parent turns that into a
   // WallOpening with whatever kind/width is currently selected.
@@ -172,7 +178,8 @@ export default function SetoutCanvas({
   onInteriorWallSegmentAdd,
   onInteriorWallChainEnd,
   snapInteriorWalls = true,
-  onWallDelete,
+  onWallTap,
+  selectedEraseWallId = null,
   onOpeningPlace,
   onOpeningDrag,
   onMeasurementRefPick,
@@ -507,29 +514,16 @@ export default function SetoutCanvas({
     [mode]
   );
 
-  // Deletion fires on pointer UP, not down — mutating the wall list
-  // straight out of the pointerdown handler removes that same element's
-  // DOM node mid-gesture, which on some browsers/devices leaves pointer
-  // capture stuck on the now-vanished node and silently swallows every
-  // tap after the first. Down only claims the gesture (stopPropagation so
-  // the background handler doesn't also treat it as a sketch tap); the
-  // actual delete waits for the matching up, by which point the down/up
-  // pair has finished dispatching normally on a still-present element.
+  // Selecting (not deleting) a wall is not destructive, so unlike the old
+  // delete-on-tap behaviour there's no DOM-node-removed-mid-gesture hazard
+  // here — a plain pointerdown is fine.
   const handleWallPointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      if (mode !== "erase-wall") return;
-      e.stopPropagation();
-    },
-    [mode]
-  );
-
-  const handleWallPointerUp = useCallback(
     (e: React.PointerEvent, wallId: string) => {
       if (mode !== "erase-wall") return;
       e.stopPropagation();
-      onWallDelete?.(wallId);
+      onWallTap?.(wallId);
     },
-    [mode, onWallDelete]
+    [mode, onWallTap]
   );
 
   const gridLines = useMemo(() => {
@@ -701,30 +695,57 @@ export default function SetoutCanvas({
         <g>
           {wallRenderData.map(({ wall, segments }) => {
             const erasable = mode === "erase-wall" && wall.kind === "interior";
+            const selected = erasable && wall.id === selectedEraseWallId;
             return (
               <g
                 key={wall.id}
-                className={erasable ? "text-destructive cursor-pointer" : wall.kind === "interior" ? "text-foreground/60" : "text-foreground"}
-                onPointerDown={erasable ? handleWallPointerDown : undefined}
-                onPointerUp={erasable ? (e) => handleWallPointerUp(e, wall.id) : undefined}
+                className={
+                  selected
+                    ? "text-destructive cursor-pointer"
+                    : erasable
+                      ? "text-destructive/45 cursor-pointer"
+                      : wall.kind === "interior"
+                        ? "text-foreground/60"
+                        : "text-foreground"
+                }
+                onPointerDown={erasable ? (e) => handleWallPointerDown(e, wall.id) : undefined}
               >
                 {segments.map((seg, i) => (
                   <g key={i}>
                     {erasable && (
-                      // Much fatter transparent hit-stroke than the
-                      // door/window one (22px) — a wall is a bare line with
-                      // no glyph to aim at, and confirmed too hard to tap
-                      // accurately on a phone at 22px. 56px gives a real
-                      // fingertip-sized target either side of the line.
+                      // Fatter transparent hit-stroke than the door/window
+                      // one (22px) — a wall is a bare line with no glyph to
+                      // aim at. Selecting isn't destructive (see onWallTap),
+                      // so being generous here costs nothing — a mis-tap
+                      // between two close walls just selects the wrong one,
+                      // easy to correct, rather than deleting it outright.
                       <line
                         x1={seg.from.x}
                         y1={seg.from.y}
                         x2={seg.to.x}
                         y2={seg.to.y}
                         stroke="transparent"
-                        strokeWidth={56 * px2scene()}
+                        strokeWidth={70 * px2scene()}
                         vectorEffect="non-scaling-stroke"
                         pointerEvents="stroke"
+                      />
+                    )}
+                    {selected && (
+                      // A bright, fixed-width halo under the selected wall —
+                      // independent of the wall's own (possibly very thin)
+                      // real thickness, so which wall is about to be deleted
+                      // is never in doubt.
+                      <line
+                        x1={seg.from.x}
+                        y1={seg.from.y}
+                        x2={seg.to.x}
+                        y2={seg.to.y}
+                        stroke="currentColor"
+                        strokeOpacity={0.35}
+                        strokeWidth={16 * px2scene()}
+                        strokeLinecap="round"
+                        vectorEffect="non-scaling-stroke"
+                        pointerEvents="none"
                       />
                     )}
                     <line

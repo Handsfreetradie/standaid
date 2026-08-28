@@ -31,6 +31,7 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
   const [openings, setOpenings] = useState<WallOpening[]>(plan.openings ?? []);
   const [tool, setTool] = useState<"interior" | "opening" | "erase">("interior");
   const [straightInteriorWalls, setStraightInteriorWalls] = useState(true);
+  const [selectedEraseWallId, setSelectedEraseWallId] = useState<string | null>(null);
   const [openingKind, setOpeningKind] = useState<"door" | "window">("door");
   const [draftStart, setDraftStart] = useState<Point | null>(null);
   const saveGeometry = useUpdateSetoutPlanGeometry(plan.id);
@@ -78,9 +79,12 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
 
   // Deleting a wall orphans any door/window cut into it — drop those too
   // rather than leaving a dangling opening with no wall to render against.
-  const handleWallDelete = (wallId: string) => {
+  const handleConfirmDeleteWall = () => {
+    if (!selectedEraseWallId) return;
+    const wallId = selectedEraseWallId;
     setInteriorWalls((prev) => prev.filter((w) => w.id !== wallId));
     setOpenings((prev) => prev.filter((o) => o.wallId !== wallId));
+    setSelectedEraseWallId(null);
   };
 
   const handleSave = async () => {
@@ -105,10 +109,24 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
       </p>
 
       <div className="flex gap-1.5 mb-3">
-        <Button size="sm" variant={tool === "interior" ? "default" : "outline"} onClick={() => setTool("interior")}>
+        <Button
+          size="sm"
+          variant={tool === "interior" ? "default" : "outline"}
+          onClick={() => {
+            setTool("interior");
+            setSelectedEraseWallId(null);
+          }}
+        >
           Add interior wall
         </Button>
-        <Button size="sm" variant={tool === "opening" ? "default" : "outline"} onClick={() => setTool("opening")}>
+        <Button
+          size="sm"
+          variant={tool === "opening" ? "default" : "outline"}
+          onClick={() => {
+            setTool("opening");
+            setSelectedEraseWallId(null);
+          }}
+        >
           Add door/window
         </Button>
         <Button size="sm" variant={tool === "erase" ? "default" : "outline"} onClick={() => setTool("erase")}>
@@ -118,7 +136,8 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
 
       {tool === "erase" && (
         <p className="text-xs text-muted-foreground mb-3">
-          Tap an interior wall to delete it. The outer perimeter can't be erased this way — re-import the plan to fix that.
+          Tap an interior wall to select it, then confirm below to delete it. The outer perimeter can't be erased this way —
+          re-import the plan to fix that.
         </p>
       )}
 
@@ -166,9 +185,16 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
           onOpeningDrag={(openingId, offset) =>
             setOpenings((prev) => prev.map((o) => (o.id === openingId ? { ...o, offset } : o)))
           }
-          onWallDelete={handleWallDelete}
+          onWallTap={(wallId) => setSelectedEraseWallId((prev) => (prev === wallId ? null : wallId))}
+          selectedEraseWallId={selectedEraseWallId}
         />
       </div>
+
+      {tool === "erase" && (
+        <Button variant="destructive" className="w-full mb-3" disabled={!selectedEraseWallId} onClick={handleConfirmDeleteWall}>
+          {selectedEraseWallId ? "Delete selected wall" : "Tap a wall to select it"}
+        </Button>
+      )}
 
       {tool === "interior" && (interiorWalls.length > 0 || draftStart) && (
         <Button

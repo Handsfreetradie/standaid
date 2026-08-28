@@ -119,6 +119,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
   const [wallOpenings, setWallOpenings] = useState<WallOpening[]>([]);
   const [wallTool, setWallTool] = useState<"perimeter" | "interior" | "opening" | "erase">("perimeter");
   const [straightInteriorWalls, setStraightInteriorWalls] = useState(true);
+  const [selectedEraseWallId, setSelectedEraseWallId] = useState<string | null>(null);
   const [interiorDraftStart, setInteriorDraftStart] = useState<Point | null>(null);
   const [openingKind, setOpeningKind] = useState<"door" | "window">("door");
   const [savedWalls, setSavedWalls] = useState<WallSegment[] | null>(null);
@@ -385,9 +386,12 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
 
     // Deleting a wall orphans any door/window cut into it — drop those too
     // rather than leaving a dangling opening with no wall to render against.
-    const handleWallDelete = (wallId: string) => {
+    const handleConfirmDeleteWall = () => {
+      if (!selectedEraseWallId) return;
+      const wallId = selectedEraseWallId;
       setInteriorWalls((prev) => prev.filter((w) => w.id !== wallId));
       setWallOpenings((prev) => prev.filter((o) => o.wallId !== wallId));
+      setSelectedEraseWallId(null);
     };
 
     return (
@@ -406,16 +410,30 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
             : wallTool === "interior"
               ? `Tap point to point along the internal wall run — tap (or click) the same spot twice to finish it.${straightInteriorWalls ? " Each segment squares up to horizontal/vertical automatically." : ""}`
               : wallTool === "erase"
-                ? "Tap an interior wall to delete it. The outer perimeter can't be erased this way — re-import the plan to fix that."
+                ? "Tap an interior wall to select it, then confirm below to delete it. The outer perimeter can't be erased this way — re-import the plan to fix that."
                 : `Tap a point on a wall to drop a ${openingKind} there — drag an existing one to reposition it, default width is editable below.`}
         </p>
 
         {perimeterFinalized && (
           <div className="flex gap-1.5 mb-3">
-            <Button size="sm" variant={wallTool === "interior" ? "default" : "outline"} onClick={() => setWallTool("interior")}>
+            <Button
+              size="sm"
+              variant={wallTool === "interior" ? "default" : "outline"}
+              onClick={() => {
+                setWallTool("interior");
+                setSelectedEraseWallId(null);
+              }}
+            >
               Add interior wall
             </Button>
-            <Button size="sm" variant={wallTool === "opening" ? "default" : "outline"} onClick={() => setWallTool("opening")}>
+            <Button
+              size="sm"
+              variant={wallTool === "opening" ? "default" : "outline"}
+              onClick={() => {
+                setWallTool("opening");
+                setSelectedEraseWallId(null);
+              }}
+            >
               Add door/window
             </Button>
             <Button size="sm" variant={wallTool === "erase" ? "default" : "outline"} onClick={() => setWallTool("erase")}>
@@ -470,9 +488,21 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
             onOpeningDrag={(openingId, offset) =>
               setWallOpenings((prev) => prev.map((o) => (o.id === openingId ? { ...o, offset } : o)))
             }
-            onWallDelete={handleWallDelete}
+            onWallTap={(wallId) => setSelectedEraseWallId((prev) => (prev === wallId ? null : wallId))}
+            selectedEraseWallId={selectedEraseWallId}
           />
         </div>
+
+        {wallTool === "erase" && (
+          <Button
+            variant="destructive"
+            className="w-full mb-4"
+            disabled={!selectedEraseWallId}
+            onClick={handleConfirmDeleteWall}
+          >
+            {selectedEraseWallId ? "Delete selected wall" : "Tap a wall to select it"}
+          </Button>
+        )}
 
         {wallTool === "interior" && interiorWalls.length > 0 && (
           <div className="space-y-1.5 mb-4 max-h-32 overflow-y-auto">
