@@ -281,10 +281,34 @@ export function offsetSymbolIntoRoom(position: Point, walls: WallSegment[], wall
   if (!wall) return position;
   const thickness = wall.kind === "interior" ? (wallThickness?.interior ?? 0.05) : (wallThickness?.exterior ?? 0.06);
   const offsetMetres = thickness * 0.6;
-  const normal = roomFacingNormal(wall, position, wallsCentroid(walls));
+
+  const dx = wall.end.x - wall.start.x;
+  const dy = wall.end.y - wall.start.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const n1 = { x: -dy / len, y: dx / len };
+  const n2 = { x: dy / len, y: -dx / len };
+
+  // Find the closest point on the wall to determine which side we're on
+  const closest = closestPointOnWall(position, wall);
+  const toPosition = { x: position.x - closest.x, y: position.y - closest.y };
+
+  // Pick the normal that points in the direction we're already offset
+  const d1 = toPosition.x * n1.x + toPosition.y * n1.y;
+  const d2 = toPosition.x * n2.x + toPosition.y * n2.y;
+  const normal = d2 > d1 ? n2 : n1;
+
+  // Calculate the current offset distance from the wall
+  const currentDist = Math.hypot(toPosition.x, toPosition.y);
+
+  // If already offset (within half offset), maintain the current side and just adjust to the correct distance
+  if (currentDist > offsetMetres * 0.5) {
+    return position;
+  }
+
+  // Otherwise apply the full offset
   return {
-    x: position.x + normal.x * offsetMetres,
-    y: position.y + normal.y * offsetMetres,
+    x: closest.x + normal.x * offsetMetres,
+    y: closest.y + normal.y * offsetMetres,
   };
 }
 
