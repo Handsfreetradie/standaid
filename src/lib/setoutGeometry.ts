@@ -275,7 +275,7 @@ export function autoRotationForWallMount(position: Point, walls: WallSegment[]):
 // Offset a wall-mounted symbol position into the room (not on the wall centerline).
 // Wall-mounted symbols snap onto the wall line itself, but visually we want them
 // sitting cleanly on the inside edge, not straddling the wall stroke.
-export function offsetSymbolIntoRoom(position: Point, walls: WallSegment[], offsetMetres = 0.06): Point {
+export function offsetSymbolIntoRoom(position: Point, walls: WallSegment[], offsetMetres = 0.12): Point {
   const wall = nearestMountWall(position, walls);
   if (!wall) return position;
   const normal = roomFacingNormal(wall, position, wallsCentroid(walls));
