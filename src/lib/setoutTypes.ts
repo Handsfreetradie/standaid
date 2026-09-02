@@ -178,6 +178,7 @@ export const SINGLE_WALL_FITTING_TYPES: FittingType[] = [
   "ubo_rhood",
   "switchboard",
   "data",
+  "data_cabinet",
   "wall_batten_holder",
   "wall_stair_light",
   "external_light",
