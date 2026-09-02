@@ -340,7 +340,7 @@ export default function SetoutCanvas({
       // 1. Pan mode is explicitly enabled
       // 2. In place-fittings mode with no type selected
       // 3. Clicking empty canvas in non-placement modes
-      const isActivelyPlacing = mode === "place-fittings" && selectedFittingType;
+      const isActivelyPlacing = (mode === "place-fittings" && selectedFittingType) || mode === "place-photo-points";
       const isSketchingMode = mode === "place-opening" || mode === "sketch-walls" || mode === "sketch-interior-wall";
       if (panMode || mode === "view") {
         panState.current = { clientX: e.clientX, clientY: e.clientY, vb: viewBox, scale: px2scene() };
