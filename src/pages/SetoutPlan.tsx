@@ -106,6 +106,7 @@ const SetoutPlan = () => {
   const [activeGangIndex, setActiveGangIndex] = useState(0);
   const [activeCabinetId, setActiveCabinetId] = useState<string | null>(null);
   const [multiSelectIds, setMultiSelectIds] = useState<Set<string>>(new Set());
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [bulkCircuitId, setBulkCircuitId] = useState<string>("unassigned");
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
   const pushUndo = (entry: UndoEntry) => setUndoStack((prev) => [...prev.slice(-19), entry]);
@@ -523,6 +524,7 @@ const SetoutPlan = () => {
   // canvas on mobile, in the sidebar on desktop/iPad) — defined once here
   // so the markup isn't duplicated.
   const layerToggleUI = <LayerVisibilityToggle value={layerVisibility} onChange={handleLayerVisibilityChange} />;
+  // Desktop mode toggle (horizontal flex wrap)
   const modeToggleUI = (
     <div className="flex flex-wrap gap-1.5">
       <button
@@ -575,6 +577,54 @@ const SetoutPlan = () => {
           )}
         >
           <Camera className="h-3.5 w-3.5" /> Photo points
+        </button>
+      )}
+    </div>
+  );
+
+  // Mobile bottom toolbar (large glove-friendly buttons)
+  const mobileToolbarUI = (
+    <div className="fixed bottom-0 left-0 right-0 md:hidden bg-card border-t border-border p-2 flex gap-2 overflow-x-auto">
+      <button
+        onClick={() => { handleWorkspaceModeChange("place-fittings"); setMobileDrawerOpen(true); }}
+        className={cn(
+          "flex flex-col items-center justify-center h-14 w-14 rounded-lg border transition-colors flex-shrink-0",
+          workspaceMode === "place-fittings" ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"
+        )}
+        title="Place fittings"
+      >
+        <MousePointerClick className="h-5 w-5" />
+      </button>
+      <button
+        onClick={() => { handleWorkspaceModeChange("link-switches"); setMobileDrawerOpen(true); }}
+        className={cn(
+          "flex flex-col items-center justify-center h-14 w-14 rounded-lg border transition-colors flex-shrink-0",
+          workspaceMode === "link-switches" ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"
+        )}
+        title="Link switches"
+      >
+        <Cable className="h-5 w-5" />
+      </button>
+      <button
+        onClick={() => { handleWorkspaceModeChange("link-data-cabinet"); setMobileDrawerOpen(true); }}
+        className={cn(
+          "flex flex-col items-center justify-center h-14 w-14 rounded-lg border transition-colors flex-shrink-0",
+          workspaceMode === "link-data-cabinet" ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"
+        )}
+        title="Link data cabinet"
+      >
+        <Network className="h-5 w-5" />
+      </button>
+      {hasPhotoPointsAccess && (
+        <button
+          onClick={() => { handleWorkspaceModeChange("place-photo-points"); setMobileDrawerOpen(true); }}
+          className={cn(
+            "flex flex-col items-center justify-center h-14 w-14 rounded-lg border transition-colors flex-shrink-0",
+            workspaceMode === "place-photo-points" ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"
+          )}
+          title="Photo points"
+        >
+          <Camera className="h-5 w-5" />
         </button>
       )}
     </div>
@@ -717,10 +767,11 @@ const SetoutPlan = () => {
         {/* Canvas dominates the left column on desktop/iPad, with the
             mode toggle moved into the sidebar there instead of stacked
             above it — frees up real vertical space for a full house plan
-            rather than just one room. */}
+            rather than just one room.
+            On mobile: full-screen canvas with bottom toolbar and drawer sidebar. */}
         <div className="md:flex md:gap-4 md:items-start">
           <div className="md:flex-1 md:min-w-0">
-            <div className="h-[65vh] md:h-[85vh] mb-4 md:mb-0">
+            <div className="h-[65vh] md:h-[85vh] mb-4 md:mb-0 md:mb-0" style={{ marginBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
               <SetoutCanvas
                 backgroundImage={showBackgroundReference ? (backgroundImage ?? undefined) : undefined}
                 walls={plan.walls}
@@ -763,8 +814,9 @@ const SetoutPlan = () => {
             </div>
           </div>
 
-          <div className="md:w-80 md:flex-shrink-0 space-y-4">
-            <div className="hidden md:block space-y-3">{modeToggleUI}</div>
+          {/* Desktop sidebar - hidden on mobile */}
+          <div className="hidden md:block md:w-80 md:flex-shrink-0 space-y-4">
+            <div className="space-y-3">{modeToggleUI}</div>
 
             {workspaceMode === "place-fittings" ? (
               <FittingPalette
@@ -864,6 +916,54 @@ const SetoutPlan = () => {
         </div>
       </div>
 
+      {/* Mobile drawer sidebar - shown below toolbar when mode selected */}
+      {mobileDrawerOpen && (
+        <div className="fixed inset-0 top-auto bottom-0 md:hidden bg-card border-t border-border rounded-t-lg overflow-y-auto z-40 max-h-[75vh]">
+          <div className="p-4 space-y-4">
+            {workspaceMode === "place-fittings" ? (
+              <FittingPalette
+                selectedType={selectedType}
+                onSelectType={setSelectedType}
+                selectedFittingId={selectedFittingId}
+                onDeleteSelected={handleDeleteSelected}
+                selectedFitting={selectedFitting}
+                onUpdateSpecs={handleUpdateSpecs}
+                onUpdateStatus={handleUpdateStatus}
+                onRotate={handleRotate}
+                onUpdateMeasurementLock={handleUpdateMeasurementLock}
+                onPickMeasurementRef={handlePickMeasurementRef}
+                pickingMeasurementSlot={pickingMeasurementSlot}
+                circuits={circuits}
+                onAssignCircuit={handleAssignCircuit}
+              />
+            ) : workspaceMode === "link-switches" ? (
+              <SwitchLinksPanel
+                fittings={fittings}
+                activeSwitchId={activeSwitchId}
+                activeGangIndex={activeGangIndex}
+                onSelectSwitch={handleSelectSwitch}
+                onSelectGang={setActiveGangIndex}
+                onAddGang={handleAddGang}
+                onRemoveGang={handleRemoveGang}
+              />
+            ) : workspaceMode === "link-data-cabinet" ? (
+              <DataCabinetLinksPanel fittings={fittings} activeCabinetId={activeCabinetId} onSelectCabinet={handleSelectCabinet} />
+            ) : workspaceMode === "place-photo-points" ? (
+              <div className="rounded-xl border border-border p-3 space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Tap anywhere on the plan to drop a pin and take a photo from there.
+                </p>
+                {uploadingPhotoPoint && (
+                  <p className="text-xs font-medium text-primary flex items-center gap-1.5 pt-1">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving photo…
+                  </p>
+                )}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
+
       <CameraCapture
         open={cameraOpen}
         onClose={() => setCameraOpen(false)}
@@ -890,6 +990,9 @@ const SetoutPlan = () => {
         onNextPhoto={handleNextPhoto}
         onPrevPhoto={handlePrevPhoto}
       />
+
+      {/* Mobile bottom toolbar */}
+      {mobileToolbarUI}
 
       <DropdownMenu open={!!switchMenu} onOpenChange={(open) => { if (!open) setSwitchMenu(null); }}>
         <DropdownMenuTrigger asChild>
