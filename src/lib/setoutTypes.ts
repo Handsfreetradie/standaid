@@ -389,8 +389,8 @@ export interface WallThickness {
 }
 
 export const DEFAULT_WALL_THICKNESS: WallThickness = {
-  exterior: 0.06, // 60mm — clean line for the plan
-  interior: 0.05, // 50mm — clean line for the plan
+  exterior: 0.03, // 30mm — clean, thin line for the plan
+  interior: 0.015, // 15mm — clean, thin line for the plan
 };
 
 export interface SetoutPlan {
