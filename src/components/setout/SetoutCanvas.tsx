@@ -373,26 +373,56 @@ export default function SetoutCanvas({
         const result = nearestWallAndOffset(scene, walls);
         if (result) onOpeningPlace?.(result.wall.id, result.offset);
       } else if (mode === "pick-measurement-ref") {
-        // Background tap = pick a wall, but only if the tap actually landed
-        // close to one — walls aren't labelled on the plan, so a tap in
-        // open space should do nothing rather than silently snapping to
-        // whatever wall happens to be nearest, however far away.
+        // Background tap = pick a wall or opening edge, but only if the tap
+        // actually landed close to one — walls/openings aren't labelled on
+        // the plan, so a tap in open space should do nothing.
         const TAP_TOLERANCE_PX = 20;
         const tolerance = TAP_TOLERANCE_PX * px2scene();
-        let nearestWall: WallSegment | null = null;
+        const selectedFitting = fittings.find((f) => f.id === selectedFittingId);
+        if (!selectedFitting) return;
+
+        let nearestRef: MeasurementRef | null = null;
         let nearestDistance = Infinity;
-        for (const wall of walls) {
-          const d = perpendicularDistanceToWall(scene, wall);
-          if (d < nearestDistance) {
-            nearestDistance = d;
-            nearestWall = wall;
+
+        // Check opening edges first
+        const wallById = new Map(walls.map((w) => [w.id, w]));
+        for (const opening of openings) {
+          const wall = wallById.get(opening.wallId);
+          if (!wall) continue;
+          const p1 = pointAtOffset(wall, Math.max(0, opening.offset));
+          const p2 = pointAtOffset(wall, Math.min(wallLength(wall), opening.offset + opening.width));
+
+          const d1 = distance(scene, p1);
+          const d2 = distance(scene, p2);
+
+          if (d1 < nearestDistance && d1 <= tolerance) {
+            nearestDistance = d1;
+            nearestRef = { kind: "opening", openingId: opening.id, distance: distance(selectedFitting.position, p1), edge: "start" };
+          }
+          if (d2 < nearestDistance && d2 <= tolerance) {
+            nearestDistance = d2;
+            nearestRef = { kind: "opening", openingId: opening.id, distance: distance(selectedFitting.position, p2), edge: "end" };
           }
         }
-        if (nearestWall && nearestDistance <= tolerance) {
-          const selectedFitting = fittings.find((f) => f.id === selectedFittingId);
-          if (selectedFitting) {
-            onMeasurementRefPick?.({ kind: "wall", wallId: nearestWall.id, distance: perpendicularDistanceToWall(selectedFitting.position, nearestWall) });
+
+        // If no opening was close enough, check walls
+        if (!nearestRef) {
+          let nearestWall: WallSegment | null = null;
+          let wallDistance = Infinity;
+          for (const wall of walls) {
+            const d = perpendicularDistanceToWall(scene, wall);
+            if (d < wallDistance) {
+              wallDistance = d;
+              nearestWall = wall;
+            }
           }
+          if (nearestWall && wallDistance <= tolerance) {
+            nearestRef = { kind: "wall", wallId: nearestWall.id, distance: perpendicularDistanceToWall(selectedFitting.position, nearestWall) };
+          }
+        }
+
+        if (nearestRef) {
+          onMeasurementRefPick?.(nearestRef);
         }
       } else if (mode === "place-fittings" && selectedFittingType) {
         // Alignment applies to every ceiling/surface-mounted fitting (not
@@ -769,7 +799,8 @@ export default function SetoutCanvas({
     if (!layerVisibility?.measurements) return [];
     const wallById = new Map(walls.map((w) => [w.id, w]));
     const fittingById = new Map(fittings.map((f) => [f.id, f]));
-    const lines: { key: string; from: Point; to: Point; label: string }[] = [];
+    const openingById = new Map(openings?.map((o) => [o.id, o]) ?? []);
+    const lines: { key: string; from: Point; to: Point; label: string; note?: string }[] = [];
     // visibleFittings, not the raw fittings list — a fitting whose category
     // layer is toggled off should have its measurement line disappear too,
     // otherwise a hidden GPO still leaves a dangling wall-measurement line
@@ -784,16 +815,26 @@ export default function SetoutCanvas({
           const wall = wallById.get(ref.wallId);
           if (!wall) continue;
           to = closestPointOnWall(pos, wall);
+        } else if (ref.kind === "opening") {
+          const opening = openingById.get(ref.openingId);
+          if (!opening) continue;
+          const wall = wallById.get(opening.wallId);
+          if (!wall) continue;
+          const len = wallLength(wall);
+          const edgeOffset = ref.edge === "start" ? opening.offset : Math.min(len, opening.offset + opening.width);
+          to = pointAtOffset(wall, edgeOffset);
         } else {
           const other = fittingById.get(ref.fittingId);
           if (!other) continue;
           to = dragPreview?.id === other.id ? dragPreview.position : other.position;
         }
-        lines.push({ key: `${f.id}-${ref.kind}-${ref.kind === "wall" ? ref.wallId : ref.fittingId}`, from: pos, to, label: `${ref.distance.toFixed(2)}m` });
+        const label = `${ref.distance.toFixed(2)}m`;
+        const refKey = ref.kind === "wall" ? ref.wallId : ref.kind === "opening" ? ref.openingId : ref.fittingId;
+        lines.push({ key: `${f.id}-${ref.kind}-${refKey}`, from: pos, to, label, note: f.measurement_lock.note });
       }
     }
     return lines;
-  }, [visibleFittings, walls, layerVisibility?.measurements, dragPreview]);
+  }, [visibleFittings, walls, openings, layerVisibility?.measurements, dragPreview]);
 
   const iconScale = (ICON_SCREEN_PX * px2scene()) / 24;
   const cursorClass = panMode || mode === "view" ? "cursor-grab active:cursor-grabbing" : "cursor-crosshair";
@@ -1179,6 +1220,11 @@ export default function SetoutCanvas({
                   <text x={midX} y={midY} fontSize={fontSize} textAnchor="middle" stroke="hsl(var(--background))" strokeWidth={fontSize * 0.28} className="text-primary" fill="currentColor" paintOrder="stroke">
                     {line.label}
                   </text>
+                  {line.note && (
+                    <text x={midX} y={midY + fontSize * 1.5} fontSize={fontSize * 0.8} textAnchor="middle" stroke="hsl(var(--background))" strokeWidth={fontSize * 0.22} className="text-muted-foreground" fill="currentColor" paintOrder="stroke" fontStyle="italic">
+                      {line.note}
+                    </text>
+                  )}
                 </g>
               );
             })}

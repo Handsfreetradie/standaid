@@ -146,7 +146,15 @@ export interface FittingRef {
   distance: number;
 }
 
-export type MeasurementRef = WallRef | FittingRef;
+export interface OpeningRef {
+  kind: "opening";
+  openingId: string;
+  distance: number;
+  // Which edge of the opening: "start" (near wall.start) or "end" (near wall.end)
+  edge: "start" | "end";
+}
+
+export type MeasurementRef = WallRef | FittingRef | OpeningRef;
 
 // GPOs and switches lock to a single nearest wall (plus a mounting height) —
 // that's how a tradie actually measures them on site. Everything else locks
@@ -157,6 +165,7 @@ export type MeasurementRef = WallRef | FittingRef;
 export interface MeasurementLock {
   refA: MeasurementRef;
   refB?: MeasurementRef;
+  note?: string; // Optional user note about where this measurement was taken
 }
 
 export const SINGLE_WALL_FITTING_TYPES: FittingType[] = [
