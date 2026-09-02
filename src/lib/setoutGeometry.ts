@@ -310,8 +310,8 @@ export function snapToNearestWall(p: Point, walls: WallSegment[], openings: Wall
   let searchPool: WallSegment[];
   if (dragOrigin) {
     const dragDist = Math.hypot(p.x - dragOrigin.x, p.y - dragOrigin.y);
-    // If dragged far enough (0.2m+), search all walls to allow changing walls
-    searchPool = dragDist > 0.2 ? walls : walls.filter((wall) => hasPerpendicularFoot(p, wall));
+    // If dragged at all (0.05m+), search all walls to allow changing walls immediately
+    searchPool = dragDist > 0.05 ? walls : walls.filter((wall) => hasPerpendicularFoot(p, wall));
   } else {
     const candidates = walls.filter((wall) => hasPerpendicularFoot(p, wall));
     searchPool = candidates.length > 0 ? candidates : walls;
