@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Trash2 } from "lucide-react";
+import { Loader2, Trash2, ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
@@ -101,6 +101,10 @@ interface PhotoPointDialogProps {
   onDirectionChange: (degrees: number) => void;
   onDelete: () => void;
   deleting?: boolean;
+  photoCount?: number;
+  currentPhotoIndex?: number;
+  onNextPhoto?: () => void;
+  onPrevPhoto?: () => void;
 }
 
 export default function PhotoPointDialog({
@@ -112,13 +116,59 @@ export default function PhotoPointDialog({
   onDirectionChange,
   onDelete,
   deleting,
+  photoCount = 1,
+  currentPhotoIndex = 0,
+  onNextPhoto,
+  onPrevPhoto,
 }: PhotoPointDialogProps) {
-  // Local draft so dragging the dial feels instant rather than waiting on
-  // the parent's mutation round-trip — the parent still owns persistence
-  // (onDirectionChange fires on every change, same as elsewhere the
-  // component reports geometry and the page saves it).
+  // Local draft for direction dial
   const [draftDegrees, setDraftDegrees] = useState(directionDegrees);
   useEffect(() => setDraftDegrees(directionDegrees), [directionDegrees, photoUrl]);
+
+  // Zoom and pan state for high-res photo viewing
+  const [zoom, setZoom] = useState(1);
+  const [panX, setPanX] = useState(0);
+  const [panY, setPanY] = useState(0);
+  const [lastDistance, setLastDistance] = useState(0);
+  const imageRef = useRef<HTMLImageElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const panStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  const handleZoom = (direction: number) => {
+    setZoom((prev) => Math.max(1, Math.min(4, prev + direction * 0.5)));
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    handleZoom(e.deltaY > 0 ? -1 : 1);
+  };
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (zoom > 1) {
+      panStartRef.current = { x: e.clientX, y: e.clientY };
+      (e.target as Element).setPointerCapture(e.pointerId);
+    }
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!panStartRef.current || zoom <= 1) return;
+    const dx = e.clientX - panStartRef.current.x;
+    const dy = e.clientY - panStartRef.current.y;
+    setPanX((prev) => prev + dx);
+    setPanY((prev) => prev + dy);
+    panStartRef.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const handlePointerUp = () => {
+    panStartRef.current = null;
+  };
+
+  // Reset zoom when photo changes
+  useEffect(() => {
+    setZoom(1);
+    setPanX(0);
+    setPanY(0);
+  }, [photoUrl]);
 
   const handleDialChange = (degrees: number) => {
     setDraftDegrees(degrees);
@@ -127,15 +177,92 @@ export default function PhotoPointDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm">
+      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>Site photo</DialogTitle>
+          <DialogTitle>
+            Site photo {photoCount > 1 && `(${currentPhotoIndex + 1} of ${photoCount})`}
+          </DialogTitle>
         </DialogHeader>
-        <div className="rounded-lg overflow-hidden bg-muted flex items-center justify-center aspect-[4/3]">
+        {/* High-res image viewer with zoom/pan */}
+        <div
+          ref={containerRef}
+          className="rounded-lg overflow-hidden bg-muted flex items-center justify-center flex-1 relative cursor-grab active:cursor-grabbing"
+          onWheel={handleWheel}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          style={{ minHeight: "400px" }}
+        >
           {loadingPhoto || !photoUrl ? (
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           ) : (
-            <img src={photoUrl} alt="Site photo" className="h-full w-full object-contain" />
+            <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
+              <img
+                ref={imageRef}
+                src={photoUrl}
+                alt="Site photo"
+                className="object-contain select-none"
+                style={{
+                  transform: `scale(${zoom}) translate(${panX / (zoom * 100)}px, ${panY / (zoom * 100)}px)`,
+                  transformOrigin: "center",
+                  transition: zoom === 1 ? "transform 0.2s ease-out" : "none",
+                  maxWidth: "100%",
+                  maxHeight: "100%",
+                }}
+              />
+            </div>
+          )}
+          {/* Zoom controls */}
+          {!loadingPhoto && photoUrl && (
+            <div className="absolute top-3 right-3 flex gap-1">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleZoom(1)}
+                disabled={zoom >= 4}
+                className="h-8 w-8 p-0"
+              >
+                <ZoomIn className="h-4 w-4" />
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleZoom(-1)}
+                disabled={zoom <= 1}
+                className="h-8 w-8 p-0"
+              >
+                <ZoomOut className="h-4 w-4" />
+              </Button>
+              {zoom > 1 && (
+                <span className="text-xs font-medium px-2 py-1 bg-card rounded border border-border">
+                  {zoom.toFixed(1)}x
+                </span>
+              )}
+            </div>
+          )}
+          {/* Gallery navigation */}
+          {photoCount > 1 && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onPrevPhoto}
+                disabled={currentPhotoIndex === 0}
+                className="absolute left-3 top-1/2 -translate-y-1/2 h-8 w-8 p-0"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onNextPhoto}
+                disabled={currentPhotoIndex === photoCount - 1}
+                className="absolute right-3 top-1/2 -translate-y-1/2 h-8 w-8 p-0"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </>
           )}
         </div>
         <div className="space-y-2">

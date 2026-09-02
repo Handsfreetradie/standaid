@@ -1,6 +1,6 @@
-// Downscale + JPEG-compress an image file in the browser before upload, so a
-// big phone photo becomes a few hundred KB. Returns a Blob ready to upload.
-export function compressImageToBlob(file: File, maxDim = 1280, quality = 0.8): Promise<Blob> {
+// Downscale + JPEG-compress an image file in the browser before upload.
+// For site photos: higher resolution (2048px) for zoom detail.
+export function compressImageToBlob(file: File, maxDim = 2048, quality = 0.9): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);

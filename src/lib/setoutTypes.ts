@@ -345,6 +345,12 @@ export interface SetoutPhotoPoint {
   updated_at: string;
 }
 
+// Gallery of photos at a single location (grouped by position)
+export interface SetoutPhotoGallery {
+  position: Point;
+  photos: SetoutPhotoPoint[];
+}
+
 export type PlanSourceType = "import" | "draw";
 
 export interface LayerVisibility {

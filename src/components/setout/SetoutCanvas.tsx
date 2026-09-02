@@ -15,6 +15,7 @@ import {
   type SetoutCircuit,
   type SetoutFitting,
   type SetoutPhotoPoint,
+  type SetoutPhotoGallery,
   type WallSegment,
   type WallOpening,
   type WallThickness,
@@ -37,6 +38,7 @@ import {
   perpendicularDistanceToWall,
   projectPointOntoWall,
   offsetSymbolIntoRoom,
+  groupPhotosByPosition,
 } from "@/lib/setoutGeometry";
 
 interface ViewBox {
@@ -704,9 +706,9 @@ export default function SetoutCanvas({
     return fittings.filter((f) => layerVisibility[f.category]);
   }, [fittings, layerVisibility]);
 
-  const visiblePhotoPoints = useMemo(() => {
-    if (!layerVisibility) return photoPoints;
-    return layerVisibility.photoPoints ? photoPoints : [];
+  const photoGalleries = useMemo(() => {
+    if (!layerVisibility?.photoPoints) return [];
+    return groupPhotosByPosition(photoPoints);
   }, [photoPoints, layerVisibility]);
 
   const lightPools = useMemo(() => {
@@ -1369,28 +1371,46 @@ export default function SetoutCanvas({
           );
         })}
 
-        {visiblePhotoPoints.map((p) => (
-          <g
-            key={p.id}
-            transform={`translate(${p.position.x} ${p.position.y}) scale(${iconScale}) translate(-12 -12)`}
-            onPointerDown={(e) => {
-              e.stopPropagation();
-              onPhotoPointTap?.(p.id);
-            }}
-            className="cursor-pointer"
-          >
-            {p.direction_degrees != null && (
-              // Triangle tip pointing "up" (plan-north), rotated to the
-              // saved heading — same 0deg-is-up, clockwise-positive
-              // convention as PhotoPointDialog's direction dial.
-              <g transform={`rotate(${p.direction_degrees} 12 12)`}>
-                <path d="M 12 -7 L 7 2 L 17 2 Z" className="text-primary" fill="currentColor" />
+        {photoGalleries.map((gallery) => {
+          const firstPhoto = gallery.photos[0];
+          const photoCount = gallery.photos.length;
+          return (
+            <g key={`gallery-${firstPhoto.id}`} transform={`translate(${gallery.position.x} ${gallery.position.y}) scale(${iconScale})`}>
+              {/* Draw stacked thumbnails for multiple photos */}
+              {gallery.photos.slice(0, 3).map((photo, idx) => {
+                const offset = idx * 3;
+                return (
+                  <g key={photo.id} transform={`translate(${offset} ${offset}) translate(-12 -12)`}>
+                    <circle cx={12} cy={12} r={13} fill="hsl(var(--primary))" stroke="hsl(var(--background))" strokeWidth={2} opacity={0.7 + idx * 0.1} />
+                  </g>
+                );
+              })}
+              {/* Main icon on top */}
+              <g
+                transform={`translate(-12 -12)`}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  onPhotoPointTap?.(firstPhoto.id);
+                }}
+                className="cursor-pointer"
+              >
+                {firstPhoto.direction_degrees != null && (
+                  <g transform={`rotate(${firstPhoto.direction_degrees} 12 12)`}>
+                    <path d="M 12 -7 L 7 2 L 17 2 Z" className="text-primary" fill="currentColor" />
+                  </g>
+                )}
+                <circle cx={12} cy={12} r={13} className="text-primary" fill="hsl(var(--primary))" stroke="hsl(var(--background))" strokeWidth={2} />
+                <Camera x={4} y={4} size={16} className="text-primary-foreground" strokeWidth={2} />
               </g>
-            )}
-            <circle cx={12} cy={12} r={13} className="text-primary" fill="hsl(var(--primary))" stroke="hsl(var(--background))" strokeWidth={2} />
-            <Camera x={4} y={4} size={16} className="text-primary-foreground" strokeWidth={2} />
-          </g>
-        ))}
+              {/* Photo count badge if more than 1 */}
+              {photoCount > 1 && (
+                <text x={20} y={-8} fontSize={10} fontWeight="bold" fill="hsl(var(--primary))" textAnchor="middle">
+                  {photoCount}
+                </text>
+              )}
+            </g>
+          );
+        })}
       </svg>
 
       <div className="absolute bottom-3 right-3 flex flex-col gap-1.5">

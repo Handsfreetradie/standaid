@@ -1,4 +1,4 @@
-import { distance, isSingleWallFitting, type Point, type WallSegment, type WallOpening, type FittingSpecs, type MeasurementLock } from "./setoutTypes";
+import { distance, isSingleWallFitting, type Point, type WallSegment, type WallOpening, type FittingSpecs, type MeasurementLock, type SetoutPhotoPoint, type SetoutPhotoGallery } from "./setoutTypes";
 import type { FittingType } from "@/components/setout/symbols";
 
 let wallIdCounter = 0;
@@ -424,4 +424,25 @@ export function computeMeasurementLock(position: Point, walls: WallSegment[], fi
   }
   if (ranked.length < 2) return { refA: ranked[0] };
   return { refA: ranked[0], refB: ranked[1] };
+}
+
+// Group photo points by position to create photo galleries at each location
+export function groupPhotosByPosition(photos: SetoutPhotoPoint[]): SetoutPhotoGallery[] {
+  const tolerance = 0.01; // Group photos within 1cm of each other
+  const galleries: SetoutPhotoGallery[] = [];
+
+  for (const photo of photos) {
+    const existing = galleries.find(
+      (g) => Math.abs(g.position.x - photo.position.x) < tolerance && Math.abs(g.position.y - photo.position.y) < tolerance
+    );
+    if (existing) {
+      existing.photos.push(photo);
+    } else {
+      galleries.push({ position: photo.position, photos: [photo] });
+    }
+  }
+
+  // Sort photos within each gallery by creation date
+  galleries.forEach((g) => g.photos.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()));
+  return galleries;
 }

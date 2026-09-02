@@ -26,6 +26,7 @@ import { generateSetoutReportPdf } from "@/lib/setoutReport";
 import CircuitsPanel from "@/components/setout/CircuitsPanel";
 import EditWallsFlow from "@/components/setout/EditWallsFlow";
 import MeasurementListPanel from "@/components/setout/MeasurementListPanel";
+import { groupPhotosByPosition } from "@/lib/setoutGeometry";
 import {
   useSetoutPlan,
   useSetoutFittings,
@@ -180,14 +181,37 @@ const SetoutPlan = () => {
   const pendingPhotoPointPosition = useRef<Point | null>(null);
   const [uploadingPhotoPoint, setUploadingPhotoPoint] = useState(false);
   const [activePhotoPointId, setActivePhotoPointId] = useState<string | null>(null);
+  const [activePhotoIndex, setActivePhotoIndex] = useState(0);
   const [activePhotoUrl, setActivePhotoUrl] = useState<string | null>(null);
   const [loadingActivePhoto, setLoadingActivePhoto] = useState(false);
 
+  // Find the current photo and its gallery
   const activePhotoPoint = photoPoints.find((p) => p.id === activePhotoPointId) ?? null;
+  const photoGalleries = groupPhotosByPosition(photoPoints);
+  const activeGallery = activePhotoPoint ? photoGalleries.find((g) => g.photos.some((p) => p.id === activePhotoPointId)) : null;
+  const currentPhotoInGallery = activeGallery?.photos[activePhotoIndex] ?? activePhotoPoint;
 
   const handlePhotoPointPlace = (point: Point) => {
     pendingPhotoPointPosition.current = point;
     photoInputRef.current?.click();
+  };
+
+  const handleNextPhoto = () => {
+    if (activeGallery && activePhotoIndex < activeGallery.photos.length - 1) {
+      setActivePhotoIndex((prev) => prev + 1);
+      const nextPhoto = activeGallery.photos[activePhotoIndex + 1];
+      setActivePhotoPointId(nextPhoto.id);
+      loadPhotoPointUrl(nextPhoto.storage_path);
+    }
+  };
+
+  const handlePrevPhoto = () => {
+    if (activePhotoIndex > 0) {
+      setActivePhotoIndex((prev) => prev - 1);
+      const prevPhoto = activeGallery!.photos[activePhotoIndex - 1];
+      setActivePhotoPointId(prevPhoto.id);
+      loadPhotoPointUrl(prevPhoto.storage_path);
+    }
   };
 
   const loadPhotoPointUrl = async (storagePath: string) => {
@@ -202,6 +226,10 @@ const SetoutPlan = () => {
     if (!point) return;
     setActivePhotoPointId(photoPointId);
     setActivePhotoUrl(null);
+    // Find which index this photo is in its gallery
+    const gallery = photoGalleries.find((g) => g.photos.some((p) => p.id === photoPointId));
+    const index = gallery?.photos.findIndex((p) => p.id === photoPointId) ?? 0;
+    setActivePhotoIndex(index);
     loadPhotoPointUrl(point.storage_path);
   };
 
@@ -808,13 +836,22 @@ const SetoutPlan = () => {
 
       <PhotoPointDialog
         open={!!activePhotoPointId}
-        onOpenChange={(open) => { if (!open) setActivePhotoPointId(null); }}
+        onOpenChange={(open) => {
+          if (!open) {
+            setActivePhotoPointId(null);
+            setActivePhotoIndex(0);
+          }
+        }}
         photoUrl={activePhotoUrl}
         loadingPhoto={loadingActivePhoto}
-        directionDegrees={activePhotoPoint?.direction_degrees ?? null}
+        directionDegrees={currentPhotoInGallery?.direction_degrees ?? null}
         onDirectionChange={handlePhotoPointDirectionChange}
         onDelete={handleDeletePhotoPoint}
         deleting={deletePhotoPoint.isPending}
+        photoCount={activeGallery?.photos.length ?? 1}
+        currentPhotoIndex={activePhotoIndex}
+        onNextPhoto={handleNextPhoto}
+        onPrevPhoto={handlePrevPhoto}
       />
 
       <DropdownMenu open={!!switchMenu} onOpenChange={(open) => { if (!open) setSwitchMenu(null); }}>
