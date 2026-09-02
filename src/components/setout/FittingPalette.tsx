@@ -339,7 +339,7 @@ const FittingPalette = ({
                 <input
                   type="text"
                   placeholder="Optional measurement note"
-                  className="w-full h-7 text-xs px-2 rounded border border-border bg-background"
+                  className="w-full h-7 text-xs px-2 rounded border border-input bg-background text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                   value={selectedFitting.measurement_lock.note ?? ""}
                   onChange={(e) =>
                     onUpdateMeasurementLock({
