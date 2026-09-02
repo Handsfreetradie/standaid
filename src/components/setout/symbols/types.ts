@@ -33,8 +33,10 @@ export type FittingType =
   | "meter_box"
   | "nbn_box"
   | "ubo_rhood"
+  | "switchboard"
   // Data
   | "data"
+  | "data_cabinet"
   // Safety
   | "smoke_detector"
   // Heat/cool

@@ -1,21 +1,26 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download, Undo2, PencilRuler, Ruler, Image as ImageIcon, EyeOff } from "lucide-react";
+import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download, Undo2, PencilRuler, Ruler, Image as ImageIcon, EyeOff, Camera, Plus, Minus, Trash2, Network } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { compressImageToBlob } from "@/lib/image";
 import SetoutCanvas, { type SetoutCanvasMode } from "@/components/setout/SetoutCanvas";
 import FittingPalette from "@/components/setout/FittingPalette";
 import LayerVisibilityToggle from "@/components/setout/LayerVisibilityToggle";
 import SwitchLinksPanel from "@/components/setout/SwitchLinksPanel";
+import DataCabinetLinksPanel from "@/components/setout/DataCabinetLinksPanel";
+import PhotoPointDialog from "@/components/setout/PhotoPointDialog";
 import type { FittingType } from "@/components/setout/symbols";
-import { DEFAULT_LAYER_VISIBILITY, distance, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type MeasurementRef, type Point, type SetoutFitting } from "@/lib/setoutTypes";
+import { DEFAULT_LAYER_VISIBILITY, distance, gangsFor, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type MeasurementRef, type Point, type SetoutFitting } from "@/lib/setoutTypes";
 import { autoRotationForWallMount, computeMeasurementLock, defaultHeightForType } from "@/lib/setoutGeometry";
 import { generateSetoutReportPdf } from "@/lib/setoutReport";
 import CircuitsPanel from "@/components/setout/CircuitsPanel";
@@ -36,10 +41,17 @@ import {
   useRemoveSwitchGang,
   useDeleteSetoutFitting,
   useRestoreSetoutFitting,
+  useSetoutPhotoPoints,
+  useCreateSetoutPhotoPoint,
+  useUpdateSetoutPhotoPointDirection,
+  useDeleteSetoutPhotoPoint,
 } from "@/hooks/useSetoutPlans";
 import { useSetoutCircuits, useAssignFittingCircuit } from "@/hooks/useSetoutCircuits";
 
-type WorkspaceMode = Extract<SetoutCanvasMode, "place-fittings" | "link-switches" | "select-multiple">;
+type WorkspaceMode = Extract<
+  SetoutCanvasMode,
+  "place-fittings" | "link-switches" | "select-multiple" | "place-photo-points" | "link-data-cabinet"
+>;
 
 // A small in-memory undo history for the most common accidental actions —
 // placing, deleting, or dragging a fitting. Not persisted across reload,
@@ -55,9 +67,11 @@ const SetoutPlan = () => {
   const { planId } = useParams();
   const navigate = useNavigate();
 
+  const { user } = useAuth();
   const { data: plan, isLoading: planLoading } = useSetoutPlan(planId);
   const { data: fittings = [], isLoading: fittingsLoading } = useSetoutFittings(planId);
   const { data: circuits = [] } = useSetoutCircuits(planId);
+  const { data: photoPoints = [] } = useSetoutPhotoPoints(planId);
   const [exporting, setExporting] = useState(false);
 
   const createFitting = useCreateSetoutFitting(planId || "");
@@ -73,12 +87,16 @@ const SetoutPlan = () => {
   const deleteFitting = useDeleteSetoutFitting(planId || "");
   const restoreFitting = useRestoreSetoutFitting(planId || "");
   const assignFittingCircuit = useAssignFittingCircuit(planId || "");
+  const createPhotoPoint = useCreateSetoutPhotoPoint(planId || "");
+  const updatePhotoPointDirection = useUpdateSetoutPhotoPointDirection(planId || "");
+  const deletePhotoPoint = useDeleteSetoutPhotoPoint(planId || "");
 
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("place-fittings");
   const [selectedType, setSelectedType] = useState<FittingType | null>(null);
   const [selectedFittingId, setSelectedFittingId] = useState<string | null>(null);
   const [activeSwitchId, setActiveSwitchId] = useState<string | null>(null);
   const [activeGangIndex, setActiveGangIndex] = useState(0);
+  const [activeCabinetId, setActiveCabinetId] = useState<string | null>(null);
   const [multiSelectIds, setMultiSelectIds] = useState<Set<string>>(new Set());
   const [bulkCircuitId, setBulkCircuitId] = useState<string>("unassigned");
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
@@ -90,7 +108,11 @@ const SetoutPlan = () => {
 
   useEffect(() => {
     if (plan && !layerSyncedRef.current) {
-      setLayerVisibility(plan.layer_visibility);
+      // Merge over the defaults rather than using the saved value outright —
+      // a plan saved before a new layer (e.g. photoPoints) existed won't
+      // have that key yet, and a missing key should mean "default", not
+      // "hidden".
+      setLayerVisibility({ ...DEFAULT_LAYER_VISIBILITY, ...plan.layer_visibility });
       layerSyncedRef.current = true;
     }
   }, [plan]);
@@ -148,6 +170,73 @@ const SetoutPlan = () => {
       cancelled = true;
     };
   }, [plan?.background_image_path, plan?.scale_calibration]);
+
+  // Photo points: tap a spot in "place-photo-points" mode → stash that
+  // position here → immediately click the hidden camera input. The row
+  // only gets created once a photo actually comes back (onPhotoFilePicked),
+  // so cancelling the camera just discards the pending position — nothing
+  // to clean up.
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const pendingPhotoPointPosition = useRef<Point | null>(null);
+  const [uploadingPhotoPoint, setUploadingPhotoPoint] = useState(false);
+  const [activePhotoPointId, setActivePhotoPointId] = useState<string | null>(null);
+  const [activePhotoUrl, setActivePhotoUrl] = useState<string | null>(null);
+  const [loadingActivePhoto, setLoadingActivePhoto] = useState(false);
+
+  const activePhotoPoint = photoPoints.find((p) => p.id === activePhotoPointId) ?? null;
+
+  const handlePhotoPointPlace = (point: Point) => {
+    pendingPhotoPointPosition.current = point;
+    photoInputRef.current?.click();
+  };
+
+  const loadPhotoPointUrl = async (storagePath: string) => {
+    setLoadingActivePhoto(true);
+    const { data: signed } = await supabase.storage.from("setout-photo-points").createSignedUrl(storagePath, 3600);
+    setActivePhotoUrl(signed?.signedUrl ?? null);
+    setLoadingActivePhoto(false);
+  };
+
+  const handlePhotoPointTap = (photoPointId: string) => {
+    const point = photoPoints.find((p) => p.id === photoPointId);
+    if (!point) return;
+    setActivePhotoPointId(photoPointId);
+    setActivePhotoUrl(null);
+    loadPhotoPointUrl(point.storage_path);
+  };
+
+  const handlePhotoFilePicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    const position = pendingPhotoPointPosition.current;
+    pendingPhotoPointPosition.current = null;
+    if (!file || !user || !planId || !position) return;
+    setUploadingPhotoPoint(true);
+    try {
+      const blob = await compressImageToBlob(file);
+      const path = `${user.id}/${planId}/${crypto.randomUUID()}.jpg`;
+      const { error: upErr } = await supabase.storage.from("setout-photo-points").upload(path, blob, { contentType: "image/jpeg" });
+      if (upErr) throw upErr;
+      const created = await createPhotoPoint.mutateAsync({ position, storage_path: path });
+      setActivePhotoPointId(created.id);
+      loadPhotoPointUrl(path);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't save that photo.");
+    } finally {
+      setUploadingPhotoPoint(false);
+    }
+  };
+
+  const handlePhotoPointDirectionChange = (degrees: number) => {
+    if (!activePhotoPointId) return;
+    updatePhotoPointDirection.mutate({ photoPointId: activePhotoPointId, direction_degrees: degrees });
+  };
+
+  const handleDeletePhotoPoint = () => {
+    if (!activePhotoPoint) return;
+    deletePhotoPoint.mutate(activePhotoPoint);
+    setActivePhotoPointId(null);
+  };
 
   const handleLayerVisibilityChange = (next: LayerVisibility) => {
     setLayerVisibility(next);
@@ -252,13 +341,18 @@ const SetoutPlan = () => {
     toggleGangLink.mutate({ switchFitting: activeSwitch, gangIndex: activeGangIndex, targetId });
   };
 
-  // 2-way/3-way/4-way switching: a gang's chain can continue on to another
-  // switch instead of ending at a light — same toggle mutation as linking a
-  // light, just with a switch id as the target. The referenced switch
-  // doesn't need its own mirrored gang entry; it's simply the last stop in
-  // this gang's run.
-  const handleLinkSwitchTarget = (switchFitting: SetoutFitting, gangIndex: number, targetSwitchId: string) => {
-    toggleGangLink.mutate({ switchFitting, gangIndex, targetId: targetSwitchId });
+  // Data cabling is always a home run (see FittingSpecs.dataCabinetId) — no
+  // gangs, so this is a plain toggle on the data point's own specs rather
+  // than a mutation on the cabinet like toggleGangLink above.
+  const handleDataLinkTargetTap = (targetId: string) => {
+    const target = fittings.find((f) => f.id === targetId);
+    if (!target || !activeCabinetId) return;
+    const nextCabinetId = target.specs.dataCabinetId === activeCabinetId ? null : activeCabinetId;
+    updateFittingSpecs.mutate({ fittingId: targetId, specs: { ...target.specs, dataCabinetId: nextCabinetId } });
+  };
+
+  const handleSelectCabinet = (cabinetId: string | null) => {
+    setActiveCabinetId(cabinetId);
   };
 
   const handleSelectSwitch = (switchId: string | null) => {
@@ -268,6 +362,33 @@ const SetoutPlan = () => {
 
   const handleAddGang = (switchFitting: SetoutFitting) => {
     addSwitchGang.mutate(switchFitting);
+  };
+
+  // Double-tapping a switch on the canvas (see SetoutCanvas's
+  // onSwitchDoubleTap) opens a small menu right where it was tapped, rather
+  // than making the tradie scroll to that switch's card in the side panel
+  // just to add a gang.
+  const [switchMenu, setSwitchMenu] = useState<{ switchId: string; x: number; y: number } | null>(null);
+  const switchMenuFitting = fittings.find((f) => f.id === switchMenu?.switchId) ?? null;
+
+  const handleSwitchDoubleTap = (switchFitting: SetoutFitting, clientPos: { x: number; y: number }) => {
+    setSwitchMenu({ switchId: switchFitting.id, x: clientPos.x, y: clientPos.y });
+  };
+
+  const handleRemoveLastGangFromMenu = () => {
+    if (!switchMenuFitting) return;
+    const gangs = gangsFor(switchMenuFitting);
+    handleRemoveGang(switchMenuFitting, gangs.length - 1);
+    setSwitchMenu(null);
+  };
+
+  const handleDeleteSwitchFromMenu = () => {
+    if (!switchMenuFitting) return;
+    pushUndo({ type: "delete", fitting: switchMenuFitting });
+    deleteFitting.mutate(switchMenuFitting.id);
+    if (selectedFittingId === switchMenuFitting.id) setSelectedFittingId(null);
+    if (activeSwitchId === switchMenuFitting.id) setActiveSwitchId(null);
+    setSwitchMenu(null);
   };
 
   const handleRemoveGang = (switchFitting: SetoutFitting, gangIndex: number) => {
@@ -295,6 +416,7 @@ const SetoutPlan = () => {
     setSelectedType(null);
     setActiveSwitchId(null);
     setActiveGangIndex(0);
+    setActiveCabinetId(null);
     setMultiSelectIds(new Set());
     setPickingMeasurementSlot(null);
   };
@@ -346,7 +468,7 @@ const SetoutPlan = () => {
   // so the markup isn't duplicated.
   const layerToggleUI = <LayerVisibilityToggle value={layerVisibility} onChange={handleLayerVisibilityChange} />;
   const modeToggleUI = (
-    <div className="flex gap-1.5">
+    <div className="flex flex-wrap gap-1.5">
       <button
         type="button"
         onClick={() => handleWorkspaceModeChange("place-fittings")}
@@ -369,6 +491,16 @@ const SetoutPlan = () => {
       </button>
       <button
         type="button"
+        onClick={() => handleWorkspaceModeChange("link-data-cabinet")}
+        className={cn(
+          "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+          workspaceMode === "link-data-cabinet" ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"
+        )}
+      >
+        <Network className="h-3.5 w-3.5" /> Link data cabinet
+      </button>
+      <button
+        type="button"
         onClick={() => handleWorkspaceModeChange("select-multiple")}
         className={cn(
           "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
@@ -376,6 +508,16 @@ const SetoutPlan = () => {
         )}
       >
         <CheckSquare className="h-3.5 w-3.5" /> Select multiple
+      </button>
+      <button
+        type="button"
+        onClick={() => handleWorkspaceModeChange("place-photo-points")}
+        className={cn(
+          "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+          workspaceMode === "place-photo-points" ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"
+        )}
+      >
+        <Camera className="h-3.5 w-3.5" /> Photo points
       </button>
     </div>
   );
@@ -534,15 +676,31 @@ const SetoutPlan = () => {
                 onFittingDrag={handleFittingDrag}
                 selectedFittingId={selectedFittingId}
                 onFittingSelect={setSelectedFittingId}
+                onFittingRotate={handleRotate}
                 layerVisibility={layerVisibility}
                 linkActiveSwitchId={activeSwitchId}
                 linkActiveGangIndex={activeGangIndex}
                 onSwitchTap={handleSelectSwitch}
                 onLinkTargetTap={handleLinkTargetTap}
+                onSwitchDoubleTap={handleSwitchDoubleTap}
+                linkActiveCabinetId={activeCabinetId}
+                onCabinetTap={handleSelectCabinet}
+                onDataLinkTargetTap={handleDataLinkTargetTap}
                 multiSelectIds={multiSelectIds}
                 onMultiSelectToggle={handleMultiSelectToggle}
                 circuits={circuits}
+                photoPoints={photoPoints}
+                onPhotoPointPlace={handlePhotoPointPlace}
+                onPhotoPointTap={handlePhotoPointTap}
                 className="h-full"
+              />
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={handlePhotoFilePicked}
               />
             </div>
           </div>
@@ -575,8 +733,23 @@ const SetoutPlan = () => {
                 onSelectGang={setActiveGangIndex}
                 onAddGang={handleAddGang}
                 onRemoveGang={handleRemoveGang}
-                onLinkSwitchTarget={handleLinkSwitchTarget}
               />
+            ) : workspaceMode === "link-data-cabinet" ? (
+              <DataCabinetLinksPanel fittings={fittings} activeCabinetId={activeCabinetId} onSelectCabinet={handleSelectCabinet} />
+            ) : workspaceMode === "place-photo-points" ? (
+              <div className="rounded-xl border border-border p-3 space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Tap anywhere on the plan to drop a pin and take a photo from there — the camera opens straight away.
+                </p>
+                <p className="text-xs font-medium text-muted-foreground">
+                  Tap an existing camera pin to view its photo or set which way it was facing.
+                </p>
+                {uploadingPhotoPoint && (
+                  <p className="text-xs font-medium text-primary flex items-center gap-1.5 pt-1">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving photo…
+                  </p>
+                )}
+              </div>
             ) : (
               <div className="rounded-xl border border-border p-3 space-y-2">
                 <p className="text-xs font-medium text-muted-foreground">
@@ -632,6 +805,49 @@ const SetoutPlan = () => {
           </div>
         </div>
       </div>
+
+      <PhotoPointDialog
+        open={!!activePhotoPointId}
+        onOpenChange={(open) => { if (!open) setActivePhotoPointId(null); }}
+        photoUrl={activePhotoUrl}
+        loadingPhoto={loadingActivePhoto}
+        directionDegrees={activePhotoPoint?.direction_degrees ?? null}
+        onDirectionChange={handlePhotoPointDirectionChange}
+        onDelete={handleDeletePhotoPoint}
+        deleting={deletePhotoPoint.isPending}
+      />
+
+      <DropdownMenu open={!!switchMenu} onOpenChange={(open) => { if (!open) setSwitchMenu(null); }}>
+        <DropdownMenuTrigger asChild>
+          {/* Invisible 0x0 trigger positioned at the exact double-tap point
+              — Radix anchors the menu to this element and keeps it clear of
+              the screen edge on its own, same as every other menu in the
+              app, just anchored by coordinates instead of a visible button. */}
+          <div style={{ position: "fixed", left: switchMenu?.x ?? 0, top: switchMenu?.y ?? 0, width: 1, height: 1 }} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start">
+          <DropdownMenuItem
+            onClick={() => {
+              if (switchMenuFitting) handleAddGang(switchMenuFitting);
+              setSwitchMenu(null);
+            }}
+          >
+            <Plus className="h-3.5 w-3.5 mr-1.5" />
+            Add gang
+          </DropdownMenuItem>
+          {switchMenuFitting && gangsFor(switchMenuFitting).length > 1 && (
+            <DropdownMenuItem onClick={handleRemoveLastGangFromMenu}>
+              <Minus className="h-3.5 w-3.5 mr-1.5" />
+              Remove last gang
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={handleDeleteSwitchFromMenu}>
+            <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+            Delete switch
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 };

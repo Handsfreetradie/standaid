@@ -5,6 +5,7 @@ import BattenHolderSymbol from "./BattenHolderSymbol";
 import CeilingFanLightSymbol from "./CeilingFanLightSymbol";
 import CeilingFanSymbol from "./CeilingFanSymbol";
 import CoolingUnitSymbol from "./CoolingUnitSymbol";
+import DataCabinetSymbol from "./DataCabinetSymbol";
 import DataOutletSymbol from "./DataOutletSymbol";
 import DownlightSymbol from "./DownlightSymbol";
 import DuctedHeatingUnitSymbol from "./DuctedHeatingUnitSymbol";
@@ -30,6 +31,7 @@ import ReturnAirSymbol from "./ReturnAirSymbol";
 import RevCycleUnitSymbol from "./RevCycleUnitSymbol";
 import RoundFluoroSymbol from "./RoundFluoroSymbol";
 import SmokeDetectorSymbol from "./SmokeDetectorSymbol";
+import SwitchboardSymbol from "./SwitchboardSymbol";
 import SwitchSymbol from "./SwitchSymbol";
 import ThermostatSymbol from "./ThermostatSymbol";
 import TvPointSymbol from "./TvPointSymbol";
@@ -68,8 +70,10 @@ export const FITTING_SYMBOLS: Record<FittingType, ComponentType<SetoutSymbolProp
   meter_box: MeterBoxSymbol,
   nbn_box: NbnBoxSymbol,
   ubo_rhood: UboRhoodSymbol,
+  switchboard: SwitchboardSymbol,
   // Data
   data: DataOutletSymbol,
+  data_cabinet: DataCabinetSymbol,
   // Safety
   smoke_detector: SmokeDetectorSymbol,
   // Heat/cool
@@ -117,8 +121,10 @@ export const FITTING_LABELS: Record<FittingType, string> = {
   meter_box: "Meter box",
   nbn_box: "NBN box",
   ubo_rhood: "UBO/RHOOD connection",
+  switchboard: "MSB",
   // Data
   data: "Data outlet",
+  data_cabinet: "Data cabinet",
   // Safety
   smoke_detector: "Smoke alarm",
   // Heat/cool

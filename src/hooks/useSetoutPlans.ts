@@ -5,6 +5,7 @@ import {
   DEFAULT_LAYER_VISIBILITY,
   DEFAULT_WALL_THICKNESS,
   type SetoutFitting,
+  type SetoutPhotoPoint,
   type SetoutPlan,
   type WallSegment,
   type ScaleCalibration,
@@ -73,6 +74,77 @@ export function useSetoutFittings(planId: string | undefined) {
       return data as SetoutFitting[];
     },
     enabled: !!planId,
+  });
+}
+
+export function useSetoutPhotoPoints(planId: string | undefined) {
+  return useQuery({
+    queryKey: ["setout_photo_points", planId],
+    queryFn: async () => {
+      const { data, error } = await sb
+        .from("setout_photo_points")
+        .select("*")
+        .eq("plan_id", planId)
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      return data as SetoutPhotoPoint[];
+    },
+    enabled: !!planId,
+  });
+}
+
+export function useCreateSetoutPhotoPoint(planId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: { position: Point; storage_path: string }) => {
+      const { data, error } = await sb
+        .from("setout_photo_points")
+        .insert({ plan_id: planId, position: input.position, storage_path: input.storage_path })
+        .select()
+        .single();
+      if (error) throw error;
+      return data as SetoutPhotoPoint;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["setout_photo_points", planId] });
+    },
+  });
+}
+
+export function useUpdateSetoutPhotoPointDirection(planId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: { photoPointId: string; direction_degrees: number | null }) => {
+      const { error } = await sb
+        .from("setout_photo_points")
+        .update({ direction_degrees: input.direction_degrees })
+        .eq("id", input.photoPointId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["setout_photo_points", planId] });
+    },
+  });
+}
+
+// Deletes the row first (source of truth for what shows on the plan), then
+// best-effort removes the storage file — an orphaned file left behind by a
+// failed remove is harmless, whereas leaving the row behind would show a
+// pin with no photo.
+export function useDeleteSetoutPhotoPoint(planId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (photoPoint: SetoutPhotoPoint) => {
+      const { error } = await sb.from("setout_photo_points").delete().eq("id", photoPoint.id);
+      if (error) throw error;
+      await supabase.storage.from("setout-photo-points").remove([photoPoint.storage_path]);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["setout_photo_points", planId] });
+    },
   });
 }
 

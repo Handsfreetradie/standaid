@@ -1,10 +1,9 @@
 import { ArrowRight, Cable, Plus, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { FITTING_LABELS, FITTING_SYMBOLS } from "@/components/setout/symbols";
-import { gangsFor, type SetoutFitting } from "@/lib/setoutTypes";
+import { gangsFor, wayCountForTarget, runGroupFittingIds, type SetoutFitting } from "@/lib/setoutTypes";
 
 interface SwitchLinksPanelProps {
   fittings: SetoutFitting[];
@@ -14,17 +13,6 @@ interface SwitchLinksPanelProps {
   onSelectGang: (gangIndex: number) => void;
   onAddGang: (switchFitting: SetoutFitting) => void;
   onRemoveGang: (switchFitting: SetoutFitting, gangIndex: number) => void;
-  onLinkSwitchTarget: (switchFitting: SetoutFitting, gangIndex: number, targetSwitchId: string) => void;
-}
-
-// A 2-way/3-way/4-way run is one continuous chain that passes through
-// multiple switches (switch A -> lights -> switch B, optionally on to C/D)
-// rather than two switches independently claiming the same light — a gang
-// can include another switch's id as its last stop(s), same as any light.
-// Every light in that gang shares the same way-count: the owning switch
-// plus however many other switches the chain passes through.
-function wayCountForGang(gang: string[], switches: SetoutFitting[]): number {
-  return 1 + gang.filter((id) => switches.some((s) => s.id === id)).length;
 }
 
 export default function SwitchLinksPanel({
@@ -35,7 +23,6 @@ export default function SwitchLinksPanel({
   onSelectGang,
   onAddGang,
   onRemoveGang,
-  onLinkSwitchTarget,
 }: SwitchLinksPanelProps) {
   const switches = fittings.filter((f) => f.type === "switch");
 
@@ -62,9 +49,13 @@ export default function SwitchLinksPanel({
             <div className="space-y-1.5">
               {gangs.map((gang, gangIndex) => {
                 const isActiveGang = isActiveSwitch && gangIndex === activeGangIndex;
-                const links = gang.map((id) => fittings.find((f) => f.id === id)).filter((f): f is SetoutFitting => !!f);
-                const ways = wayCountForGang(gang, switches);
-                const otherSwitches = switches.filter((other) => other.id !== sw.id && !gang.includes(other.id));
+                // A gang only ever targets lights now — an older model let a
+                // gang chain on to another switch's id to mark a 2-way run;
+                // any leftover switch ids from that (pre-automatic-detection)
+                // data are just dropped here rather than shown as a target.
+                const links = gang
+                  .map((id) => fittings.find((f) => f.id === id))
+                  .filter((f): f is SetoutFitting => !!f && f.type !== "switch");
                 return (
                   <div
                     key={gangIndex}
@@ -85,35 +76,40 @@ export default function SwitchLinksPanel({
                     ) : (
                       links.map((target) => {
                         const Icon = FITTING_SYMBOLS[target.type];
+                        // Automatic: this light is N-way the moment N
+                        // switches each independently link it — tap the same
+                        // light from another switch's gang and it picks this
+                        // up on its own, no separate switch-to-switch step.
+                        const ways = wayCountForTarget(target.id, switches);
+                        // Every other switch in this light's run — not just
+                        // ones that directly share this exact light, but the
+                        // whole connected chain (switch A - light1, switch B
+                        // - light1 & light2, switch C - light2 is still one
+                        // 3-way run) — so selecting a switch surfaces them
+                        // all here rather than making the tradie hunt
+                        // through every other card.
+                        const runGroup = runGroupFittingIds(target.id, switches);
+                        const siblingSwitches = switches.filter((other) => other.id !== sw.id && runGroup.has(other.id));
                         return (
                           <span key={target.id} className="contents">
                             <ArrowRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
                             <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/50 px-1.5 py-1 text-[11px] text-foreground">
                               <Icon size={14} className="text-primary" strokeWidth={1.5} />
                               {FITTING_LABELS[target.type]}
-                              {target.type !== "switch" && ways > 1 && <span className="text-primary font-medium">· {ways}-way</span>}
+                              {ways > 1 && <span className="text-primary font-medium">· {ways}-way</span>}
                             </span>
+                            {siblingSwitches.map((sib) => (
+                              <span
+                                key={sib.id}
+                                className="inline-flex items-center gap-1 rounded-md border border-dashed border-primary/40 bg-primary/5 px-1.5 py-1 text-[11px] text-primary"
+                              >
+                                <Cable className="h-3 w-3" />
+                                Switch {switches.indexOf(sib) + 1}
+                              </span>
+                            ))}
                           </span>
                         );
                       })
-                    )}
-                    {otherSwitches.length > 0 && (
-                      <Select onValueChange={(targetId) => onLinkSwitchTarget(sw, gangIndex, targetId)}>
-                        <SelectTrigger
-                          className="h-6 w-auto gap-1 rounded-md border-dashed px-1.5 text-[10px] flex-shrink-0"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <Plus className="h-3 w-3" />
-                          <SelectValue placeholder="Link switch (2-way)" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {otherSwitches.map((other) => (
-                            <SelectItem key={other.id} value={other.id}>
-                              Switch {switches.indexOf(other) + 1}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
                     )}
                     {gangs.length > 1 && (
                       <Button
@@ -138,8 +134,9 @@ export default function SwitchLinksPanel({
 
       <div className="flex items-start gap-1.5 pt-1 text-[11px] text-muted-foreground">
         <Cable className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
-        Each gang is its own cable run — tap a gang, then tap lights on the canvas to link them. Use "Add gang" for a plate that
-        controls more than one thing (e.g. downlights on one gang, a fan on another).
+        Each gang is its own cable run — tap a gang, then tap lights on the canvas to link them. Link the same light from a
+        second switch's gang and it's automatically picked up as 2-way (a third switch makes it 3-way, and so on). Use
+        "Add gang" for a plate that controls more than one thing (e.g. downlights on one gang, a fan on another).
       </div>
     </div>
   );

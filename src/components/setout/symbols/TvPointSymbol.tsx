@@ -14,7 +14,11 @@ const TvPointSymbol = ({ size = 24, className, ...props }: SetoutSymbolProps) =>
     className={className}
     {...props}
   >
-    <path d="M5 6.5h14L12 18.5Z" />
+    {/* A screen-on-a-stand — was a triangle before, too easily mistaken
+        for the data outlet's triangle at a glance. */}
+    <rect x="4" y="5.5" width="16" height="10.5" rx="1.5" />
+    <path d="M9 19.5h6" />
+    <path d="M12 16v3.5" />
   </svg>
 );
 

@@ -12,6 +12,7 @@ import {
   gangsFor,
   isSingleWallFitting,
   symbolExtraPropsFor,
+  wayCountForTarget,
   LAYER_LABELS,
   type Point,
   type MeasurementRef,
@@ -115,8 +116,10 @@ const CODE_PREFIX: Record<FittingType, string> = {
   meter_box: "MB",
   nbn_box: "NBN",
   ubo_rhood: "UBO",
+  switchboard: "MSB",
   // Data
   data: "DATA",
+  data_cabinet: "DC",
   // Safety
   smoke_detector: "SD",
   // Heat/cool
@@ -399,7 +402,7 @@ function drawMeasurementPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitti
 }
 
 function drawCableRunPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting[], codes: Map<string, string>): void {
-  let y = drawPageHeader(doc, plan, "Cable-run / switch order list");
+  let y = drawPageHeader(doc, plan, "Cable-run / switch & data order list");
   const ensureSpace = (needed: number) => {
     if (y + needed > PAGE_H - MARGIN) {
       doc.addPage();
@@ -408,20 +411,14 @@ function drawCableRunPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting[
   };
 
   const switches = fittings.filter((f) => f.type === "switch");
-  if (switches.length === 0) {
+  const cabinets = fittings.filter((f) => f.type === "data_cabinet");
+
+  if (switches.length === 0 && cabinets.length === 0) {
     doc.setFontSize(10);
     doc.setTextColor(120);
-    doc.text("No switches placed yet.", MARGIN, y + 4);
+    doc.text("No switches or data cabinets placed yet.", MARGIN, y + 4);
     return;
   }
-
-  // A 2-way/3-way/4-way run is one continuous chain that passes through
-  // multiple switches (switch A -> lights -> switch B, optionally on to
-  // C/D), not two switches independently claiming the same light — a
-  // gang's chain can include another switch's id as its last stop(s).
-  // Every light in a gang shares that gang's way-count: the owning switch
-  // plus however many other switches the chain passes through.
-  const wayCountForGang = (gang: string[]) => 1 + gang.filter((id) => switches.some((s) => s.id === id)).length;
 
   for (const sw of switches) {
     const gangs = gangsFor(sw);
@@ -435,28 +432,58 @@ function drawCableRunPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting[
     doc.setTextColor(60);
     gangs.forEach((gang, gangIndex) => {
       const gangLabel = gangs.length > 1 ? `Gang ${gangIndex + 1}: ` : "";
-      if (gang.length === 0) {
+      // Each gang is a loop-in chain in tap order (switch -> first light ->
+      // second light -> ...), not a set of separate home-runs — same
+      // topology as SetoutCanvas.tsx's switchLinks and SwitchLinksPanel.tsx.
+      // A leftover switch id from the older chain-based model (a gang only
+      // ever targets lights now) is dropped rather than printed, so "empty"
+      // is judged after that filter, not on the raw gang array.
+      const parts = gang
+        .map((id) => fittings.find((f) => f.id === id))
+        .filter((f): f is SetoutFitting => !!f && f.type !== "switch")
+        .map((target) => {
+          const code = codes.get(target.id) ?? "?";
+          const ways = wayCountForTarget(target.id, switches);
+          return ways > 1 ? `${code} (${ways}-way)` : code;
+        });
+      if (parts.length === 0) {
         ensureSpace(5);
         doc.text(`${gangLabel}Not linked to anything yet`, MARGIN + 4, y);
         y += 5;
         return;
       }
-      // Each gang is a loop-in chain in tap order (switch -> first light ->
-      // second light -> ...), not a set of separate home-runs — same
-      // topology as SetoutCanvas.tsx's switchLinks and SwitchLinksPanel.tsx.
-      const ways = wayCountForGang(gang);
-      const parts = gang
-        .map((id) => fittings.find((f) => f.id === id))
-        .filter((f): f is SetoutFitting => !!f)
-        .map((target) => {
-          const code = codes.get(target.id) ?? "?";
-          return target.type !== "switch" && ways > 1 ? `${code} (${ways}-way)` : code;
-        });
       const lines = doc.splitTextToSize(`${gangLabel}${codes.get(sw.id) ?? "?"} -> ${parts.join(" -> ")}`, CONTENT_W - 4);
       ensureSpace(lines.length * 4.2);
       doc.text(lines, MARGIN + 4, y);
       y += lines.length * 4.2;
     });
+    y += 3;
+  }
+
+  // Data cabling is always a home run, never a loop-in chain — one line per
+  // point rather than gang rows.
+  for (const cabinet of cabinets) {
+    ensureSpace(6);
+    doc.setFontSize(10);
+    doc.setTextColor(20);
+    doc.text(codes.get(cabinet.id) ?? "?", MARGIN, y);
+    y += 5;
+
+    doc.setFontSize(9);
+    doc.setTextColor(60);
+    const points = fittings.filter((f) => f.type === "data" && f.specs.dataCabinetId === cabinet.id);
+    if (points.length === 0) {
+      ensureSpace(5);
+      doc.text("Not linked to anything yet", MARGIN + 4, y);
+      y += 5;
+    } else {
+      for (const point of points) {
+        const lines = doc.splitTextToSize(`${codes.get(cabinet.id) ?? "?"} -> ${codes.get(point.id) ?? "?"}`, CONTENT_W - 4);
+        ensureSpace(lines.length * 4.2);
+        doc.text(lines, MARGIN + 4, y);
+        y += lines.length * 4.2;
+      }
+    }
     y += 3;
   }
 }

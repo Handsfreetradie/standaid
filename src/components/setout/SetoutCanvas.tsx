@@ -136,6 +136,7 @@ interface SetoutCanvasProps {
   selectedFittingType?: FittingType | null;
   onPlaceFitting?: (point: Point) => void;
   onFittingDrag?: (fittingId: string, position: Point) => void;
+  onFittingRotate?: (fittingId: string) => void;
   selectedFittingId?: string | null;
   onFittingSelect?: (fittingId: string | null) => void;
   layerVisibility?: LayerVisibility;
@@ -1244,6 +1245,19 @@ export default function SetoutCanvas({
                 <g transform="translate(15 -3)">
                   <circle r={5} fill="hsl(var(--primary))" />
                   <path d="M-2 0l1.5 1.5L2.5 -2" stroke="hsl(var(--primary-foreground))" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                </g>
+              )}
+              {selected && isSingleWallFitting(f.type) && (
+                <g
+                  transform="translate(27 -3)"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    onFittingRotate?.(f.id);
+                  }}
+                  style={{ cursor: "pointer" }}
+                >
+                  <circle r={5} fill="hsl(var(--primary))" />
+                  <path d="M-2 -1a2.5 2.5 0 0 1 3 0M0.5 1v-2M0.5 -1h2" stroke="hsl(var(--primary-foreground))" strokeWidth={1} strokeLinecap="round" fill="none" />
                 </g>
               )}
               {f.specs.locked && (
