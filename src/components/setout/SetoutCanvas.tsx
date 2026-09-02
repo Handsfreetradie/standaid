@@ -316,12 +316,68 @@ export default function SetoutCanvas({
   // nothing — the browser scrolls the page underneath the zoom regardless.
   // A native, explicitly non-passive listener is the only way to actually
   // stop that scroll.
+  const touchStateRef = useRef<{ distance: number } | null>(null);
+
+  const handleTouchStart = useCallback((e: TouchEvent) => {
+    if (e.touches.length !== 2) {
+      touchStateRef.current = null;
+      return;
+    }
+    const touch1 = e.touches[0];
+    const touch2 = e.touches[1];
+    const dx = touch1.clientX - touch2.clientX;
+    const dy = touch1.clientY - touch2.clientY;
+    const distance = Math.hypot(dx, dy);
+    touchStateRef.current = { distance };
+  }, []);
+
+  const handleTouchMove = useCallback(
+    (e: TouchEvent) => {
+      if (e.touches.length !== 2 || !touchStateRef.current) return;
+      e.preventDefault();
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      const dx = touch1.clientX - touch2.clientX;
+      const dy = touch1.clientY - touch2.clientY;
+      const distance = Math.hypot(dx, dy);
+      const lastDistance = touchStateRef.current.distance;
+      if (lastDistance === 0) return;
+
+      const svg = svgRef.current;
+      if (!svg) return;
+      const centerX = (touch1.clientX + touch2.clientX) / 2;
+      const centerY = (touch1.clientY + touch2.clientY) / 2;
+      const pt = svg.createSVGPoint();
+      pt.x = centerX;
+      pt.y = centerY;
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return;
+      const scene = pt.matrixTransform(ctm.inverse());
+      const factor = lastDistance / distance;
+      zoomAround({ x: scene.x, y: scene.y }, factor);
+      touchStateRef.current.distance = distance;
+    },
+    [zoomAround]
+  );
+
+  const handleTouchEnd = useCallback(() => {
+    touchStateRef.current = null;
+  }, []);
+
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
     svg.addEventListener("wheel", handleWheel, { passive: false });
-    return () => svg.removeEventListener("wheel", handleWheel);
-  }, [handleWheel]);
+    svg.addEventListener("touchstart", handleTouchStart, { passive: true });
+    svg.addEventListener("touchmove", handleTouchMove, { passive: false });
+    svg.addEventListener("touchend", handleTouchEnd, { passive: true });
+    return () => {
+      svg.removeEventListener("wheel", handleWheel);
+      svg.removeEventListener("touchstart", handleTouchStart);
+      svg.removeEventListener("touchmove", handleTouchMove);
+      svg.removeEventListener("touchend", handleTouchEnd);
+    };
+  }, [handleWheel, handleTouchStart, handleTouchMove, handleTouchEnd]);
 
   const sceneFromClient = useCallback((clientX: number, clientY: number): Point => {
     const svg = svgRef.current;
