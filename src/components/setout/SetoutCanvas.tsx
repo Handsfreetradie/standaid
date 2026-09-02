@@ -384,7 +384,7 @@ export default function SetoutCanvas({
         let nearestRef: MeasurementRef | null = null;
         let nearestDistance = Infinity;
 
-        // Check opening edges first
+        // Check opening edges first (using offset positions to match visual rendering)
         const wallById = new Map(walls.map((w) => [w.id, w]));
         for (const opening of openings) {
           const wall = wallById.get(opening.wallId);
@@ -392,16 +392,22 @@ export default function SetoutCanvas({
           const p1 = pointAtOffset(wall, Math.max(0, opening.offset));
           const p2 = pointAtOffset(wall, Math.min(wallLength(wall), opening.offset + opening.width));
 
-          const d1 = distance(scene, p1);
-          const d2 = distance(scene, p2);
+          // Apply same offset as door/window rendering (half wall thickness inward)
+          const thickness = wall.kind === "interior" ? wallThickness.interior : wallThickness.exterior;
+          const normal = roomFacingNormal(wall, p1, wallsCentroid(walls));
+          const p1Offset = { x: p1.x + normal.x * (thickness / 2), y: p1.y + normal.y * (thickness / 2) };
+          const p2Offset = { x: p2.x + normal.x * (thickness / 2), y: p2.y + normal.y * (thickness / 2) };
+
+          const d1 = distance(scene, p1Offset);
+          const d2 = distance(scene, p2Offset);
 
           if (d1 < nearestDistance && d1 <= tolerance) {
             nearestDistance = d1;
-            nearestRef = { kind: "opening", openingId: opening.id, distance: distance(selectedFitting.position, p1), edge: "start" };
+            nearestRef = { kind: "opening", openingId: opening.id, distance: distance(selectedFitting.position, p1Offset), edge: "start" };
           }
           if (d2 < nearestDistance && d2 <= tolerance) {
             nearestDistance = d2;
-            nearestRef = { kind: "opening", openingId: opening.id, distance: distance(selectedFitting.position, p2), edge: "end" };
+            nearestRef = { kind: "opening", openingId: opening.id, distance: distance(selectedFitting.position, p2Offset), edge: "end" };
           }
         }
 
@@ -822,7 +828,11 @@ export default function SetoutCanvas({
           if (!wall) continue;
           const len = wallLength(wall);
           const edgeOffset = ref.edge === "start" ? opening.offset : Math.min(len, opening.offset + opening.width);
-          to = pointAtOffset(wall, edgeOffset);
+          let edgePoint = pointAtOffset(wall, edgeOffset);
+          // Apply same offset as door/window rendering
+          const thickness = wall.kind === "interior" ? wallThickness.interior : wallThickness.exterior;
+          const normal = roomFacingNormal(wall, edgePoint, wallsCentroid(walls));
+          to = { x: edgePoint.x + normal.x * (thickness / 2), y: edgePoint.y + normal.y * (thickness / 2) };
         } else {
           const other = fittingById.get(ref.fittingId);
           if (!other) continue;
