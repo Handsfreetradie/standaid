@@ -101,11 +101,13 @@ const DEFAULT_HEIGHT_BY_TYPE: Partial<Record<FittingType, number>> = {
   tv_point: 0.3,
   phone_point: 0.3,
   data: 0.3,
+  data_cabinet: 0.3,
   nbn_box: 0.3,
   ubo_rhood: 0.3,
   vacuum_outlet: 0.3,
   wall_stair_light: 0.3,
   meter_box: 1.5,
+  switchboard: 1.5,
   thermostat: 1.5,
   wall_batten_holder: 2.0,
   ac_head_unit: 2.1,
@@ -268,6 +270,19 @@ export function autoRotationForWallMount(position: Point, walls: WallSegment[]):
   const wall = nearestMountWall(position, walls);
   if (!wall) return 0;
   return rotationFacingRoom(wall, position, wallsCentroid(walls));
+}
+
+// Offset a wall-mounted symbol position into the room (not on the wall centerline).
+// Wall-mounted symbols snap onto the wall line itself, but visually we want them
+// sitting cleanly on the inside edge, not straddling the wall stroke.
+export function offsetSymbolIntoRoom(position: Point, walls: WallSegment[], offsetMetres = 0.06): Point {
+  const wall = nearestMountWall(position, walls);
+  if (!wall) return position;
+  const normal = roomFacingNormal(wall, position, wallsCentroid(walls));
+  return {
+    x: position.x + normal.x * offsetMetres,
+    y: position.y + normal.y * offsetMetres,
+  };
 }
 
 // Snaps a point onto the nearest wall — used for GPOs, switches, and other

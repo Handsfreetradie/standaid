@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback, useMemo, useEffect } from "react";
-import { Hand, Minus, Plus, MousePointer2 } from "lucide-react";
+import { Hand, Minus, Plus, MousePointer2, Camera } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
 import {
@@ -8,10 +8,13 @@ import {
   gangsFor,
   isSingleWallFitting,
   symbolExtraPropsFor,
+  wayCountForTarget,
+  runGroupFittingIds,
   DEFAULT_WALL_THICKNESS,
   type Point,
   type SetoutCircuit,
   type SetoutFitting,
+  type SetoutPhotoPoint,
   type WallSegment,
   type WallOpening,
   type WallThickness,
@@ -33,6 +36,7 @@ import {
   nearestWallAndOffset,
   perpendicularDistanceToWall,
   projectPointOntoWall,
+  offsetSymbolIntoRoom,
 } from "@/lib/setoutGeometry";
 
 interface ViewBox {
@@ -61,7 +65,9 @@ export type SetoutCanvasMode =
   | "place-fittings"
   | "link-switches"
   | "select-multiple"
-  | "pick-measurement-ref";
+  | "pick-measurement-ref"
+  | "place-photo-points"
+  | "link-data-cabinet";
 
 interface SetoutCanvasProps {
   backgroundImage?: BackgroundImage;
@@ -137,9 +143,29 @@ interface SetoutCanvasProps {
   linkActiveGangIndex?: number;
   onSwitchTap?: (switchId: string | null) => void;
   onLinkTargetTap?: (fittingId: string) => void;
+  // Double-tap/double-click a switch to open its "add gang" menu — reports
+  // the raw client (screen) coordinates so the parent can anchor a
+  // position-controlled menu right where the tradie tapped, rather than
+  // making them find the switch's card in the side panel.
+  onSwitchDoubleTap?: (switchFitting: SetoutFitting, clientPos: { x: number; y: number }) => void;
+  // "link-data-cabinet" mode: same select-then-tap pattern as switches, but
+  // simpler — a data point either home-runs to the active cabinet or it
+  // doesn't (see FittingSpecs.dataCabinetId), no gangs/N-way concept.
+  linkActiveCabinetId?: string | null;
+  onCabinetTap?: (cabinetId: string | null) => void;
+  onDataLinkTargetTap?: (fittingId: string) => void;
   multiSelectIds?: Set<string>;
   onMultiSelectToggle?: (fittingId: string) => void;
   circuits?: SetoutCircuit[];
+  // "place-photo-points" mode: a tap on empty canvas drops a pin at that
+  // spot — the parent takes it from there (opens the camera, uploads, then
+  // creates the row once a photo actually exists; a cancelled camera means
+  // this never turns into a saved point). Tapping an existing pin instead
+  // opens it for viewing/editing (onPhotoPointTap) — same division as
+  // fittings' select-vs-place split.
+  photoPoints?: SetoutPhotoPoint[];
+  onPhotoPointPlace?: (point: Point) => void;
+  onPhotoPointTap?: (photoPointId: string) => void;
   className?: string;
 }
 
@@ -194,9 +220,16 @@ export default function SetoutCanvas({
   linkActiveGangIndex = 0,
   onSwitchTap,
   onLinkTargetTap,
+  onSwitchDoubleTap,
+  linkActiveCabinetId,
+  onCabinetTap,
+  onDataLinkTargetTap,
   multiSelectIds,
   onMultiSelectToggle,
   circuits = [],
+  photoPoints = [],
+  onPhotoPointPlace,
+  onPhotoPointTap,
   className,
 }: SetoutCanvasProps) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -225,6 +258,10 @@ export default function SetoutCanvas({
   // (browsers don't reliably surface dblclick for touch on a manually
   // pointer-driven SVG) — see the sketch-interior-wall branch below.
   const lastInteriorTapRef = useRef<{ time: number; point: Point } | null>(null);
+  // Same double-tap recognition as above, scoped to "was the last tap this
+  // same switch fitting" rather than screen position — opens the add-gang
+  // menu on the second tap.
+  const lastSwitchTapRef = useRef<{ time: number; fittingId: string } | null>(null);
 
   const clampSpan = useCallback((v: number) => {
     const bounds = spanBoundsRef.current;
@@ -371,6 +408,10 @@ export default function SetoutCanvas({
         onFittingSelect?.(null);
       } else if (mode === "link-switches") {
         onSwitchTap?.(null);
+      } else if (mode === "link-data-cabinet") {
+        onCabinetTap?.(null);
+      } else if (mode === "place-photo-points") {
+        onPhotoPointPlace?.(scene);
       }
     },
     [
@@ -392,11 +433,13 @@ export default function SetoutCanvas({
       snapInteriorWalls,
       onOpeningPlace,
       onMeasurementRefPick,
+      onPhotoPointPlace,
       selectedFittingId,
       selectedFittingType,
       onPlaceFitting,
       onFittingSelect,
       onSwitchTap,
+      onCabinetTap,
       walls,
       openings,
       fittings,
@@ -464,11 +507,30 @@ export default function SetoutCanvas({
   const handleFittingPointerDown = useCallback(
     (e: React.PointerEvent<SVGGElement>, fitting: SetoutFitting) => {
       e.stopPropagation();
+      if (fitting.type === "switch" && onSwitchDoubleTap) {
+        const DOUBLE_TAP_MS = 400;
+        const now = Date.now();
+        const lastTap = lastSwitchTapRef.current;
+        if (lastTap && lastTap.fittingId === fitting.id && now - lastTap.time < DOUBLE_TAP_MS) {
+          lastSwitchTapRef.current = null;
+          onSwitchDoubleTap(fitting, { x: e.clientX, y: e.clientY });
+          return;
+        }
+        lastSwitchTapRef.current = { time: now, fittingId: fitting.id };
+      }
       if (mode === "link-switches") {
         if (fitting.type === "switch") {
           onSwitchTap?.(fitting.id === linkActiveSwitchId ? null : fitting.id);
         } else if (linkActiveSwitchId) {
           onLinkTargetTap?.(fitting.id);
+        }
+        return;
+      }
+      if (mode === "link-data-cabinet") {
+        if (fitting.type === "data_cabinet") {
+          onCabinetTap?.(fitting.id === linkActiveCabinetId ? null : fitting.id);
+        } else if (fitting.type === "data" && linkActiveCabinetId) {
+          onDataLinkTargetTap?.(fitting.id);
         }
         return;
       }
@@ -496,7 +558,22 @@ export default function SetoutCanvas({
       setDragPreview({ id: fitting.id, position: fitting.position });
       (e.target as Element).setPointerCapture(e.pointerId);
     },
-    [mode, panMode, px2scene, onFittingSelect, linkActiveSwitchId, onSwitchTap, onLinkTargetTap, selectedFittingId, fittings, onMeasurementRefPick]
+    [
+      mode,
+      panMode,
+      px2scene,
+      onFittingSelect,
+      linkActiveSwitchId,
+      onSwitchTap,
+      onLinkTargetTap,
+      onSwitchDoubleTap,
+      linkActiveCabinetId,
+      onCabinetTap,
+      onDataLinkTargetTap,
+      selectedFittingId,
+      fittings,
+      onMeasurementRefPick,
+    ]
   );
 
   // Grabbing an already-placed door/window slides it along its own wall
@@ -576,6 +653,11 @@ export default function SetoutCanvas({
     return fittings.filter((f) => layerVisibility[f.category]);
   }, [fittings, layerVisibility]);
 
+  const visiblePhotoPoints = useMemo(() => {
+    if (!layerVisibility) return photoPoints;
+    return layerVisibility.photoPoints ? photoPoints : [];
+  }, [photoPoints, layerVisibility]);
+
   const lightPools = useMemo(() => {
     if (!layerVisibility?.coverage) return [];
     const downlights = fittings.filter((f) => f.type === "downlight");
@@ -596,36 +678,32 @@ export default function SetoutCanvas({
   // within that gang, same as a real 2-core-and-earth loop threaded through
   // each fitting, not a separate home-run from the switch to every light.
   // A 2-gang plate draws two independent chains leaving the same switch
-  // icon; a light fed by 2+ gangs (from any switch) is 2-way by definition.
+  // icon. A light is automatically N-way the moment N different switches
+  // each independently link it (see wayCountForTarget) — no separate
+  // switch-to-switch step, so a gang only ever targets lights, never
+  // another switch.
   const switchLinks = useMemo(() => {
     if (layerVisibility && !layerVisibility.switches) return [];
     const switches = fittings.filter((f) => f.type === "switch");
-    // A 2-way/3-way/4-way run is one continuous chain that passes through
-    // multiple switches (switch A -> lights -> switch B, optionally on to
-    // C/D) rather than two switches independently claiming the same light —
-    // a gang's chain can include another switch's id as its last stop(s).
-    // Every light in that gang shares the same way-count: the owning switch
-    // plus however many other switches the chain passes through.
-    const wayCountForGang = (gang: string[]) => 1 + gang.filter((id) => switches.some((s) => s.id === id)).length;
-    const links: { key: string; switchPos: Point; targetPos: Point; active: boolean; wayCount: number; targetIsSwitch: boolean }[] = [];
+    const links: { key: string; switchPos: Point; targetPos: Point; active: boolean; wayCount: number }[] = [];
     for (const sw of switches) {
       const swPos = dragPreview?.id === sw.id ? dragPreview.position : sw.position;
       const gangs = gangsFor(sw);
       gangs.forEach((gang, gangIndex) => {
-        const wayCount = wayCountForGang(gang);
         let fromPos = swPos;
         let fromId = sw.id;
         for (const targetId of gang) {
           const target = fittings.find((f) => f.id === targetId);
-          if (!target) continue;
+          // Leftover switch ids from the older chain-based model don't draw
+          // as a link target any more — a gang only points at lights now.
+          if (!target || target.type === "switch") continue;
           const targetPos = dragPreview?.id === target.id ? dragPreview.position : target.position;
           links.push({
             key: `${sw.id}-g${gangIndex}-${fromId}-${targetId}`,
             switchPos: fromPos,
             targetPos,
             active: sw.id === linkActiveSwitchId && gangIndex === linkActiveGangIndex,
-            wayCount,
-            targetIsSwitch: target.type === "switch",
+            wayCount: wayCountForTarget(targetId, switches),
           });
           fromPos = targetPos;
           fromId = targetId;
@@ -634,6 +712,56 @@ export default function SetoutCanvas({
     }
     return links;
   }, [fittings, layerVisibility?.switches, dragPreview, linkActiveSwitchId, linkActiveGangIndex]);
+
+  // Data cabling is always a home run, never a loop-in chain — no
+  // gangs/N-way concept, just "does this point's dataCabinetId match this
+  // cabinet". Far simpler than switchLinks above.
+  const dataCabinetLinks = useMemo(() => {
+    if (layerVisibility && !layerVisibility.data) return [];
+    const cabinets = fittings.filter((f) => f.type === "data_cabinet");
+    const links: { key: string; cabinetPos: Point; targetPos: Point; active: boolean }[] = [];
+    for (const cabinet of cabinets) {
+      const cabinetPos = dragPreview?.id === cabinet.id ? dragPreview.position : cabinet.position;
+      for (const f of fittings) {
+        if (f.type !== "data" || f.specs.dataCabinetId !== cabinet.id) continue;
+        const targetPos = dragPreview?.id === f.id ? dragPreview.position : f.position;
+        links.push({
+          key: `${cabinet.id}-${f.id}`,
+          cabinetPos,
+          targetPos,
+          active: cabinet.id === linkActiveCabinetId,
+        });
+      }
+    }
+    return links;
+  }, [fittings, layerVisibility?.data, dragPreview, linkActiveCabinetId]);
+
+  // Selecting any one member of a 2-way/3-way/4-way run — a switch's active
+  // gang (while linking) or a light (its usual selection elsewhere) —
+  // lights up every other switch and light wired into that same run on the
+  // canvas itself, not just in the side panel list. runGroupFittingIds
+  // follows the whole connected run (an indirect chain like switch A -
+  // light1, switch B - light1 & light2, switch C - light2 still lights up
+  // as one group), but — passing linkActiveGangIndex — never crosses into
+  // an unrelated gang on the same multi-gang plate. Selecting a data
+  // cabinet or one of its points highlights that simpler one-to-many group
+  // the same way.
+  const selectionGroupIds = useMemo(() => {
+    const triggerId = mode === "link-switches" ? linkActiveSwitchId : mode === "link-data-cabinet" ? linkActiveCabinetId : selectedFittingId;
+    if (!triggerId) return new Set<string>();
+    const triggerFitting = fittings.find((f) => f.id === triggerId);
+    if (triggerFitting && (triggerFitting.type === "data_cabinet" || triggerFitting.type === "data")) {
+      const cabinetId = triggerFitting.type === "data_cabinet" ? triggerFitting.id : triggerFitting.specs.dataCabinetId;
+      if (!cabinetId) return new Set<string>();
+      const group = new Set<string>([cabinetId]);
+      for (const f of fittings) {
+        if (f.type === "data" && f.specs.dataCabinetId === cabinetId) group.add(f.id);
+      }
+      return group;
+    }
+    const switches = fittings.filter((f) => f.type === "switch");
+    return runGroupFittingIds(triggerId, switches, mode === "link-switches" ? linkActiveGangIndex : undefined);
+  }, [mode, linkActiveSwitchId, linkActiveGangIndex, linkActiveCabinetId, selectedFittingId, fittings]);
 
   const measurementLines = useMemo(() => {
     if (!layerVisibility?.measurements) return [];
@@ -704,37 +832,48 @@ export default function SetoutCanvas({
                     ? "text-destructive cursor-pointer"
                     : erasable
                       ? "text-destructive/45 cursor-pointer"
-                      : wall.kind === "interior"
-                        ? "text-foreground/60"
-                        : "text-foreground"
+                      : backgroundImage
+                        // Over a reference photo, black wall lines vanish
+                        // against the photo's own (often black) linework —
+                        // a colour the photo won't contain keeps the traced
+                        // walls readable.
+                        ? wall.kind === "interior"
+                          ? "text-blue-600/70"
+                          : "text-blue-600"
+                        : wall.kind === "interior"
+                          ? "text-foreground/60"
+                          : "text-foreground"
                 }
                 onPointerDown={erasable ? (e) => handleWallPointerDown(e, wall.id) : undefined}
               >
                 {segments.map((seg, i) => (
                   <g key={i}>
                     {erasable && (
-                      // Fatter transparent hit-stroke than the door/window
-                      // one (22px) — a wall is a bare line with no glyph to
-                      // aim at. Selecting isn't destructive (see onWallTap),
-                      // so being generous here costs nothing — a mis-tap
-                      // between two close walls just selects the wrong one,
-                      // easy to correct, rather than deleting it outright.
+                      // Hit-stroke sized off the wall's own real thickness
+                      // (erasable walls are always "interior") plus a fixed
+                      // on-screen margin, so thicker walls get a proportionally
+                      // fatter tap zone rather than every wall sharing one
+                      // flat number. Selecting isn't destructive (see
+                      // onWallTap), so being generous with the margin costs
+                      // nothing — a mis-tap between two close walls just
+                      // selects the wrong one, easy to correct.
                       <line
                         x1={seg.from.x}
                         y1={seg.from.y}
                         x2={seg.to.x}
                         y2={seg.to.y}
                         stroke="transparent"
-                        strokeWidth={70 * px2scene()}
+                        strokeWidth={wallThickness.interior + 90 * px2scene()}
                         vectorEffect="non-scaling-stroke"
                         pointerEvents="stroke"
                       />
                     )}
                     {selected && (
-                      // A bright, fixed-width halo under the selected wall —
-                      // independent of the wall's own (possibly very thin)
-                      // real thickness, so which wall is about to be deleted
-                      // is never in doubt.
+                      // Halo under the selected wall, sized off the wall's
+                      // own real thickness (erasable walls are always
+                      // "interior") plus a small fixed on-screen margin so
+                      // it still reads as a glow around the wall rather than
+                      // being swallowed by the solid line drawn on top.
                       <line
                         x1={seg.from.x}
                         y1={seg.from.y}
@@ -742,7 +881,7 @@ export default function SetoutCanvas({
                         y2={seg.to.y}
                         stroke="currentColor"
                         strokeOpacity={0.35}
-                        strokeWidth={16 * px2scene()}
+                        strokeWidth={wallThickness.interior + 14 * px2scene()}
                         strokeLinecap="round"
                         vectorEffect="non-scaling-stroke"
                         pointerEvents="none"
@@ -945,7 +1084,7 @@ export default function SetoutCanvas({
                     strokeDasharray="0.12 0.08"
                     vectorEffect="non-scaling-stroke"
                   />
-                  {!link.targetIsSwitch && link.wayCount > 1 && (
+                  {link.wayCount > 1 && (
                     <text
                       x={0.25 * link.switchPos.x + 0.5 * cx + 0.25 * link.targetPos.x}
                       y={0.25 * link.switchPos.y + 0.5 * cy + 0.25 * link.targetPos.y}
@@ -961,6 +1100,36 @@ export default function SetoutCanvas({
                     </text>
                   )}
                 </g>
+              );
+            })}
+          </g>
+        )}
+
+        {dataCabinetLinks.length > 0 && (
+          <g>
+            {dataCabinetLinks.map((link) => {
+              // Same bowed-run convention as switchLinks — no way-count
+              // label here, data cabling is always a plain home run.
+              const dx = link.targetPos.x - link.cabinetPos.x;
+              const dy = link.targetPos.y - link.cabinetPos.y;
+              const len = Math.hypot(dx, dy) || 1;
+              const nx = -dy / len;
+              const ny = dx / len;
+              const bow = Math.min(len * 0.15, 0.4);
+              const cx = (link.cabinetPos.x + link.targetPos.x) / 2 + nx * bow;
+              const cy = (link.cabinetPos.y + link.targetPos.y) / 2 + ny * bow;
+              return (
+                <path
+                  key={link.key}
+                  d={`M ${link.cabinetPos.x} ${link.cabinetPos.y} Q ${cx} ${cy} ${link.targetPos.x} ${link.targetPos.y}`}
+                  fill="none"
+                  className={link.active ? "text-primary" : "text-muted-foreground"}
+                  stroke="currentColor"
+                  strokeOpacity={link.active ? 0.8 : 0.35}
+                  strokeWidth={link.active ? 1.5 : 1}
+                  strokeDasharray="0.12 0.08"
+                  vectorEffect="non-scaling-stroke"
+                />
               );
             })}
           </g>
@@ -1015,10 +1184,16 @@ export default function SetoutCanvas({
         {visibleFittings.map((f) => {
           const Icon = FITTING_SYMBOLS[f.type];
           if (!Icon) return null;
-          const pos = dragPreview?.id === f.id ? dragPreview.position : f.position;
+          let pos = dragPreview?.id === f.id ? dragPreview.position : f.position;
+          // Wall-mounted symbols offset into the room so they sit on the inside
+          // edge of the wall, not straddling the wall centerline
+          if (isSingleWallFitting(f.type)) {
+            pos = offsetSymbolIntoRoom(pos, walls);
+          }
           const selected = selectedFittingId === f.id;
           const isActiveSwitch = mode === "link-switches" && f.id === linkActiveSwitchId;
           const isLinkTarget = mode === "link-switches" && !!linkActiveSwitchId;
+          const isInSelectionGroup = selectionGroupIds.has(f.id);
           const isMultiSelected = mode === "select-multiple" && !!multiSelectIds?.has(f.id);
           const symbolExtraProps = symbolExtraPropsFor(f);
           const rotation = f.specs.rotation ?? 0;
@@ -1053,16 +1228,16 @@ export default function SetoutCanvas({
                 cx={12}
                 cy={12}
                 r={13}
-                fill={isActiveSwitch || isMultiSelected ? "hsl(var(--primary) / 0.15)" : "transparent"}
+                fill={isActiveSwitch || isMultiSelected || isInSelectionGroup ? "hsl(var(--primary) / 0.15)" : "transparent"}
                 pointerEvents="all"
-                stroke={isActiveSwitch || isMultiSelected ? "hsl(var(--primary))" : "none"}
-                strokeWidth={isActiveSwitch || isMultiSelected ? 1.5 : 0}
+                stroke={isActiveSwitch || isMultiSelected || isInSelectionGroup ? "hsl(var(--primary))" : "none"}
+                strokeWidth={isActiveSwitch || isMultiSelected || isInSelectionGroup ? 1.5 : 0}
               />
               <Icon
                 size={24}
-                className={selected || isActiveSwitch || circuitColor ? "text-primary" : "text-foreground"}
-                style={circuitColor && !selected && !isActiveSwitch ? { color: circuitColor } : undefined}
-                strokeWidth={selected || isActiveSwitch ? 2 : 1.5}
+                className={selected || isActiveSwitch || isInSelectionGroup || circuitColor ? "text-primary" : "text-foreground"}
+                style={circuitColor && !selected && !isActiveSwitch && !isInSelectionGroup ? { color: circuitColor } : undefined}
+                strokeWidth={selected || isActiveSwitch || isInSelectionGroup ? 2 : 1.5}
                 {...symbolExtraProps}
               />
               {f.status === "confirmed" && (
@@ -1081,6 +1256,29 @@ export default function SetoutCanvas({
             </g>
           );
         })}
+
+        {visiblePhotoPoints.map((p) => (
+          <g
+            key={p.id}
+            transform={`translate(${p.position.x} ${p.position.y}) scale(${iconScale}) translate(-12 -12)`}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              onPhotoPointTap?.(p.id);
+            }}
+            className="cursor-pointer"
+          >
+            {p.direction_degrees != null && (
+              // Triangle tip pointing "up" (plan-north), rotated to the
+              // saved heading — same 0deg-is-up, clockwise-positive
+              // convention as PhotoPointDialog's direction dial.
+              <g transform={`rotate(${p.direction_degrees} 12 12)`}>
+                <path d="M 12 -7 L 7 2 L 17 2 Z" className="text-primary" fill="currentColor" />
+              </g>
+            )}
+            <circle cx={12} cy={12} r={13} className="text-primary" fill="hsl(var(--primary))" stroke="hsl(var(--background))" strokeWidth={2} />
+            <Camera x={4} y={4} size={16} className="text-primary-foreground" strokeWidth={2} />
+          </g>
+        ))}
       </svg>
 
       <div className="absolute bottom-3 right-3 flex flex-col gap-1.5">

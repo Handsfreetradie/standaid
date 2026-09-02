@@ -30,8 +30,10 @@ export const CATEGORY_FOR_TYPE: Record<FittingType, FittingCategory> = {
   meter_box: "power",
   nbn_box: "power",
   ubo_rhood: "power",
+  switchboard: "power",
   // Data
   data: "data",
+  data_cabinet: "data",
   // Safety
   smoke_detector: "safety",
   // Heat/cool
@@ -118,6 +120,12 @@ export interface FittingSpecs {
   // auto-recomputing its facing on every drag — otherwise a manual fix
   // would just get overwritten the next time it's nudged.
   rotationLocked?: boolean;
+  // A data outlet's cabinet (patch panel) it home-runs back to. Unlike a
+  // switch's gangs, data cabling is always one home run per point — no
+  // loop-in, no N-way — so this is a plain one-to-many reference (many
+  // points, one id each) rather than an ordered chain the cabinet itself
+  // owns.
+  dataCabinetId?: string | null;
 }
 
 export interface WallRef {
@@ -158,7 +166,9 @@ export const SINGLE_WALL_FITTING_TYPES: FittingType[] = [
   "meter_box",
   "nbn_box",
   "ubo_rhood",
+  "switchboard",
   "data",
+  "data_cabinet",
   "wall_batten_holder",
   "wall_stair_light",
   "external_light",
@@ -178,6 +188,101 @@ export function isSingleWallFitting(type: FittingType): boolean {
 // "no gangs yet" and "one empty gang" are always treated the same way.
 export function gangsFor(fitting: Pick<SetoutFitting, "specs">): string[][] {
   return fitting.specs.gangs && fitting.specs.gangs.length > 0 ? fitting.specs.gangs : [[]];
+}
+
+// Groups every gang and light into its wired-together "run" — a connected
+// component over the gang<->light bipartite graph. The node for a gang is
+// keyed by (switch id, gang index), never the switch alone — a 2-gang
+// plate's two gangs are unrelated circuits (e.g. downlights on gang 1, an
+// exhaust fan on gang 2) that must NOT merge into one run just because
+// they share a physical plate; only an actually-shared light connects two
+// gangs (from the same or different switches). Two switches also don't
+// need to share the exact same light directly to be part of one
+// 3-way/4-way run: switch A - light1, switch B - light1 & light2, switch C
+// - light2 is still one continuous run touching 3 switches, even though no
+// single light in it is directly linked from all 3.
+function gangNodeId(switchId: string, gangIndex: number): string {
+  return `${switchId}::gang${gangIndex}`;
+}
+
+function computeRunGroups(switches: Pick<SetoutFitting, "id" | "specs">[]): {
+  groups: Map<string, Set<string>>;
+  switchOfGangNode: Map<string, string>;
+} {
+  const adjacency = new Map<string, Set<string>>();
+  const switchOfGangNode = new Map<string, string>();
+  const connect = (a: string, b: string) => {
+    if (!adjacency.has(a)) adjacency.set(a, new Set());
+    if (!adjacency.has(b)) adjacency.set(b, new Set());
+    adjacency.get(a)!.add(b);
+    adjacency.get(b)!.add(a);
+  };
+  for (const sw of switches) {
+    gangsFor(sw).forEach((gang, gangIndex) => {
+      const node = gangNodeId(sw.id, gangIndex);
+      switchOfGangNode.set(node, sw.id);
+      for (const lightId of gang) connect(node, lightId);
+    });
+  }
+  const groups = new Map<string, Set<string>>();
+  const visited = new Set<string>();
+  for (const start of adjacency.keys()) {
+    if (visited.has(start)) continue;
+    const group = new Set<string>();
+    const stack = [start];
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      if (group.has(current)) continue;
+      group.add(current);
+      visited.add(current);
+      for (const next of adjacency.get(current) ?? []) stack.push(next);
+    }
+    for (const id of group) groups.set(id, group);
+  }
+  return { groups, switchOfGangNode };
+}
+
+// How many switches are wired into the same run as a light — the "N-way"
+// count a tradie would mark on a real plan. Follows the whole connected
+// run (see computeRunGroups), not just direct links, so an indirect chain
+// still reads as one 3-way rather than two separate 2-ways — but never
+// crosses into an unrelated gang on the same switch plate. Single source
+// of truth for the canvas connector labels, SwitchLinksPanel's badges, and
+// the PDF cable-run list.
+export function wayCountForTarget(targetId: string, switches: Pick<SetoutFitting, "id" | "specs">[]): number {
+  const { groups, switchOfGangNode } = computeRunGroups(switches);
+  const group = groups.get(targetId);
+  if (!group) return 0;
+  const switchIds = new Set<string>();
+  for (const nodeId of group) {
+    const switchId = switchOfGangNode.get(nodeId);
+    if (switchId) switchIds.add(switchId);
+  }
+  return switchIds.size;
+}
+
+// Every other switch/light fitting id in the same run as `id` (id's own
+// fitting included) — used to highlight a whole 2-way/3-way/4-way run
+// together the moment any one member is selected. `id` can be a light's id
+// (unambiguous — a light only ever belongs to one run) or a switch's id;
+// for a switch, pass `gangIndex` too so only that specific gang's run
+// lights up rather than every unrelated gang on the same plate.
+export function runGroupFittingIds(
+  id: string,
+  switches: Pick<SetoutFitting, "id" | "specs">[],
+  gangIndex?: number
+): Set<string> {
+  const { groups, switchOfGangNode } = computeRunGroups(switches);
+  const isSwitch = switches.some((s) => s.id === id);
+  const startNode = isSwitch ? gangNodeId(id, gangIndex ?? 0) : id;
+  const group = groups.get(startNode);
+  if (!group) return new Set(isSwitch ? [id] : []);
+  const fittingIds = new Set<string>();
+  for (const nodeId of group) {
+    const switchId = switchOfGangNode.get(nodeId);
+    fittingIds.add(switchId ?? nodeId);
+  }
+  return fittingIds;
 }
 
 // GPO/para-flood/1200-fluoro carry a `count` spec and GPO also a `variant`;
@@ -214,6 +319,22 @@ export interface SetoutFitting {
   updated_at: string;
 }
 
+// A pin dropped on the plan marking where a site photo was taken from —
+// e.g. what was behind a wall before it got sheeted. Not an electrical
+// fitting (no category/specs/circuit), so it's its own table rather than
+// riding on SetoutFitting.
+export interface SetoutPhotoPoint {
+  id: string;
+  plan_id: string;
+  position: Point;
+  storage_path: string;
+  // Degrees clockwise from plan "up" — the direction the tradie was facing
+  // when they took the photo. Null until set.
+  direction_degrees: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export type PlanSourceType = "import" | "draw";
 
 export interface LayerVisibility {
@@ -226,6 +347,7 @@ export interface LayerVisibility {
   ductedVacuum: boolean;
   coverage: boolean;
   measurements: boolean;
+  photoPoints: boolean;
 }
 
 export const DEFAULT_LAYER_VISIBILITY: LayerVisibility = {
@@ -238,6 +360,7 @@ export const DEFAULT_LAYER_VISIBILITY: LayerVisibility = {
   ductedVacuum: true,
   coverage: false,
   measurements: true,
+  photoPoints: true,
 };
 
 export const LAYER_LABELS: Record<keyof LayerVisibility, string> = {
@@ -250,6 +373,7 @@ export const LAYER_LABELS: Record<keyof LayerVisibility, string> = {
   ductedVacuum: "Ducted vacuum",
   coverage: "Coverage overlay",
   measurements: "Measurements",
+  photoPoints: "Photo points",
 };
 
 // Real-world wall thickness (metres), one value per wall kind rather than
@@ -265,8 +389,8 @@ export interface WallThickness {
 }
 
 export const DEFAULT_WALL_THICKNESS: WallThickness = {
-  exterior: 0.23, // 230mm brick veneer — the common AU external wall
-  interior: 0.11, // 90mm stud + plasterboard both sides — the common AU internal wall
+  exterior: 0.12, // 120mm — substantial enough to read but not visually dominating
+  interior: 0.10, // 90mm stud + plasterboard both sides — the common AU internal wall
 };
 
 export interface SetoutPlan {
