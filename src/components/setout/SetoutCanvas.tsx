@@ -214,6 +214,7 @@ export default function SetoutCanvas({
   selectedFittingType,
   onPlaceFitting,
   onFittingDrag,
+  onFittingRotate,
   selectedFittingId,
   onFittingSelect,
   layerVisibility,
@@ -1255,9 +1256,10 @@ export default function SetoutCanvas({
                     onFittingRotate?.(f.id);
                   }}
                   style={{ cursor: "pointer" }}
+                  pointerEvents="all"
                 >
-                  <circle r={5} fill="hsl(var(--primary))" />
-                  <path d="M-2 -1a2.5 2.5 0 0 1 3 0M0.5 1v-2M0.5 -1h2" stroke="hsl(var(--primary-foreground))" strokeWidth={1} strokeLinecap="round" fill="none" />
+                  <circle r={5} fill="hsl(var(--primary))" pointerEvents="all" />
+                  <path d="M-2 -1a2.5 2.5 0 0 1 3 0M0.5 1v-2M0.5 -1h2" stroke="hsl(var(--primary-foreground))" strokeWidth={1} strokeLinecap="round" fill="none" pointerEvents="all" />
                 </g>
               )}
               {f.specs.locked && (
