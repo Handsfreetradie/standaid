@@ -334,6 +334,21 @@ const FittingPalette = ({
                   );
                 })}
               </div>
+              <div className="border-t border-border/30 mt-2 pt-2">
+                <label className="text-[10px] text-muted-foreground block mb-1">Note (e.g., "from left window edge")</label>
+                <input
+                  type="text"
+                  placeholder="Optional measurement note"
+                  className="w-full h-7 text-xs px-2 rounded border border-border bg-background"
+                  value={selectedFitting.measurement_lock.note ?? ""}
+                  onChange={(e) =>
+                    onUpdateMeasurementLock({
+                      ...selectedFitting.measurement_lock!,
+                      note: e.target.value || undefined,
+                    })
+                  }
+                />
+              </div>
             </div>
           )}
 
