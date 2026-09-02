@@ -950,16 +950,23 @@ export default function SetoutCanvas({
               const len = wallLength(wall);
               const p1 = pointAtOffset(wall, Math.max(0, o.offset));
               const p2 = pointAtOffset(wall, Math.min(len, o.offset + o.width));
+              // Offset door/window hinge point inward by half wall thickness so it sits
+              // at the edge of the wall stroke (not centerline), making it clear the
+              // door/window is inside the wall opening, not on top of the wall.
+              const thickness = wall.kind === "interior" ? wallThickness.interior : wallThickness.exterior;
+              const normal = roomFacingNormal(wall, p1, wallCentroid);
+              const p1Offset = { x: p1.x + normal.x * (thickness / 2), y: p1.y + normal.y * (thickness / 2) };
+              const p2Offset = { x: p2.x + normal.x * (thickness / 2), y: p2.y + normal.y * (thickness / 2) };
               const draggable = mode === "place-opening";
               // A transparent, much fatter line sitting over the same span as
               // the visible glyph — the actual door/window line is only 1px
               // wide, far too thin to reliably grab on a phone screen.
               const hitStroke = (
                 <line
-                  x1={p1.x}
-                  y1={p1.y}
-                  x2={p2.x}
-                  y2={p2.y}
+                  x1={p1Offset.x}
+                  y1={p1Offset.y}
+                  x2={p2Offset.x}
+                  y2={p2Offset.y}
                   stroke="transparent"
                   strokeWidth={22 * px2scene()}
                   vectorEffect="non-scaling-stroke"
@@ -975,10 +982,10 @@ export default function SetoutCanvas({
                   >
                     {hitStroke}
                     <line
-                      x1={p1.x}
-                      y1={p1.y}
-                      x2={p2.x}
-                      y2={p2.y}
+                      x1={p1Offset.x}
+                      y1={p1Offset.y}
+                      x2={p2Offset.x}
+                      y2={p2Offset.y}
                       stroke="currentColor"
                       strokeWidth={1}
                       vectorEffect="non-scaling-stroke"
@@ -993,7 +1000,7 @@ export default function SetoutCanvas({
                 const wallDir = { x: wall.end.x - wall.start.x, y: wall.end.y - wall.start.y };
                 const wallLen = Math.hypot(wallDir.x, wallDir.y) || 1;
                 const wallUnit = { x: wallDir.x / wallLen, y: wallDir.y / wallLen };
-                const slideEnd = { x: p1.x + wallUnit.x * o.width, y: p1.y + wallUnit.y * o.width };
+                const slideEnd = { x: p1Offset.x + wallUnit.x * o.width, y: p1Offset.y + wallUnit.y * o.width };
                 return (
                   <g
                     key={o.id}
@@ -1001,8 +1008,8 @@ export default function SetoutCanvas({
                     onPointerDown={draggable ? (e) => handleOpeningPointerDown(e, o, wall) : undefined}
                   >
                     {hitStroke}
-                    <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="currentColor" strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                    <line x1={p1.x} y1={p1.y} x2={slideEnd.x} y2={slideEnd.y} stroke="currentColor" strokeWidth={1} strokeDasharray="0.06 0.06" vectorEffect="non-scaling-stroke" />
+                    <line x1={p1Offset.x} y1={p1Offset.y} x2={p2Offset.x} y2={p2Offset.y} stroke="currentColor" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                    <line x1={p1Offset.x} y1={p1Offset.y} x2={slideEnd.x} y2={slideEnd.y} stroke="currentColor" strokeWidth={1} strokeDasharray="0.06 0.06" vectorEffect="non-scaling-stroke" />
                   </g>
                 );
               }
@@ -1012,9 +1019,9 @@ export default function SetoutCanvas({
               // swingFlipped negates the room-facing normal to swing the
               // leaf out instead, for the doors where the default guess
               // (always inward) doesn't match reality.
-              const roomNormal = roomFacingNormal(wall, p1, wallCentroid);
-              const normal = o.swingFlipped ? { x: -roomNormal.x, y: -roomNormal.y } : roomNormal;
-              const openEnd = { x: p1.x + normal.x * o.width, y: p1.y + normal.y * o.width };
+              const roomNormal = roomFacingNormal(wall, p1Offset, wallCentroid);
+              const doorNormal = o.swingFlipped ? { x: -roomNormal.x, y: -roomNormal.y } : roomNormal;
+              const openEnd = { x: p1Offset.x + doorNormal.x * o.width, y: p1Offset.y + doorNormal.y * o.width };
               return (
                 <g
                   key={o.id}
@@ -1022,13 +1029,13 @@ export default function SetoutCanvas({
                   onPointerDown={draggable ? (e) => handleOpeningPointerDown(e, o, wall) : undefined}
                 >
                   {hitStroke}
-                  <line x1={p1.x} y1={p1.y} x2={openEnd.x} y2={openEnd.y} stroke="currentColor" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                  <line x1={p1Offset.x} y1={p1Offset.y} x2={openEnd.x} y2={openEnd.y} stroke="currentColor" strokeWidth={1} vectorEffect="non-scaling-stroke" />
                   {/* Flipping the normal mirrors openEnd across the wall
                       line, which also flips the arc's rotational sense —
                       the sweep flag has to flip along with it or the arc
                       bows the wrong way. */}
                   <path
-                    d={`M ${openEnd.x} ${openEnd.y} A ${o.width} ${o.width} 0 0 ${o.swingFlipped ? 0 : 1} ${p2.x} ${p2.y}`}
+                    d={`M ${openEnd.x} ${openEnd.y} A ${o.width} ${o.width} 0 0 ${o.swingFlipped ? 0 : 1} ${p2Offset.x} ${p2Offset.y}`}
                     fill="none"
                     stroke="currentColor"
                     strokeWidth={1}
