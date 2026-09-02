@@ -299,7 +299,10 @@ export function offsetSymbolIntoRoom(position: Point, walls: WallSegment[], wall
 // If the snapped spot falls inside a door/window opening on that wall (plus
 // a small clearance either side), it's nudged out to whichever edge of the
 // opening is closer — a GPO or switch mounted mid-doorway isn't usable.
-export function snapToNearestWall(p: Point, walls: WallSegment[], openings: WallOpening[] = []): Point {
+//
+// Optional dragOrigin: if provided, prioritizes walls in the direction of
+// the drag, allowing fittings to move between interior and exterior walls.
+export function snapToNearestWall(p: Point, walls: WallSegment[], openings: WallOpening[] = [], dragOrigin?: Point): Point {
   if (walls.length === 0) return p;
   const candidates = walls.filter((wall) => hasPerpendicularFoot(p, wall));
   const pool = candidates.length > 0 ? candidates : walls;
@@ -310,6 +313,28 @@ export function snapToNearestWall(p: Point, walls: WallSegment[], openings: Wall
     if (d < nearestDistance) {
       nearestDistance = d;
       nearestWall = wall;
+    }
+  }
+
+  // If dragging, also consider walls in the drag direction
+  if (dragOrigin) {
+    const dragDir = { x: p.x - dragOrigin.x, y: p.y - dragOrigin.y };
+    const dragDist = Math.hypot(dragDir.x, dragDir.y);
+    // If dragged far enough (0.2m+), look for walls further along drag direction
+    if (dragDist > 0.2) {
+      const normalizedDir = dragDist > 0 ? { x: dragDir.x / dragDist, y: dragDir.y / dragDist } : { x: 0, y: 0 };
+      for (const wall of pool) {
+        const d = perpendicularDistanceToWall(p, wall);
+        const toWall = closestPointOnWall(p, wall);
+        const toWallDir = { x: toWall.x - p.x, y: toWall.y - p.y };
+        // Prefer walls in the drag direction (dot product > 0)
+        const alignment = normalizedDir.x * toWallDir.x + normalizedDir.y * toWallDir.y;
+        // Prefer walls that are in drag direction and within 1.5x the nearest distance
+        if (alignment > 0.3 && d < nearestDistance * 1.5) {
+          nearestDistance = d;
+          nearestWall = wall;
+        }
+      }
     }
   }
   const snapped = closestPointOnWall(p, nearestWall);

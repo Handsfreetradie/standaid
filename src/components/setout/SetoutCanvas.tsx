@@ -510,7 +510,8 @@ export default function SetoutCanvas({
         const raw = { x: origin.x + dx, y: origin.y + dy };
         let position = raw;
         if (isSingleWallFitting(type)) {
-          position = snapToNearestWall(raw, walls, openings);
+          // Pass dragOrigin to allow snapping to different walls during drag
+          position = snapToNearestWall(raw, walls, openings, origin);
           setAlignGuides(null);
         } else {
           const others = fittings.filter((f) => !isSingleWallFitting(f.type) && f.id !== fittingId).map((f) => f.position);
