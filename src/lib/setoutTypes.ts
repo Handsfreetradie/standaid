@@ -78,10 +78,11 @@ export interface WallOpening {
   wallId: string;
   offset: number; // metres from wall.start to the opening's near edge
   width: number; // metres
-  kind: "door" | "window";
+  kind: "door" | "window" | "sliding_door";
   // Doors only — the leaf swings into the room by default (the common
   // case); flip it to swing out instead (e.g. an external door for fire
-  // egress, or wherever the default guess was wrong). Ignored for windows.
+  // egress, or wherever the default guess was wrong). Ignored for windows
+  // and sliding doors.
   swingFlipped?: boolean;
 }
 

@@ -121,7 +121,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
   const [straightInteriorWalls, setStraightInteriorWalls] = useState(true);
   const [selectedEraseWallId, setSelectedEraseWallId] = useState<string | null>(null);
   const [interiorDraftStart, setInteriorDraftStart] = useState<Point | null>(null);
-  const [openingKind, setOpeningKind] = useState<"door" | "window">("door");
+  const [openingKind, setOpeningKind] = useState<"door" | "window" | "sliding_door">("door");
   const [savedWalls, setSavedWalls] = useState<WallSegment[] | null>(null);
   const [savedOpenings, setSavedOpenings] = useState<WallOpening[]>([]);
   const [uploadedImagePath, setUploadedImagePath] = useState<string | null>(null);
@@ -378,7 +378,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     const handleOpeningPlace = (wallId: string, offset: number) => {
       const wall = previewWalls.find((w) => w.id === wallId);
       if (!wall) return;
-      const width = openingKind === "door" ? DEFAULT_DOOR_WIDTH : DEFAULT_WINDOW_WIDTH;
+      const width = openingKind === "window" ? DEFAULT_WINDOW_WIDTH : DEFAULT_DOOR_WIDTH;
       const len = wallLength(wall);
       const clampedOffset = Math.max(0, Math.min(Math.max(len - width, 0), offset - width / 2));
       setWallOpenings((prev) => [...prev, { id: nextOpeningId(), wallId, offset: clampedOffset, width, kind: openingKind }]);
@@ -458,6 +458,9 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
             </Button>
             <Button size="sm" variant={openingKind === "window" ? "default" : "outline"} onClick={() => setOpeningKind("window")}>
               Window
+            </Button>
+            <Button size="sm" variant={openingKind === "sliding_door" ? "default" : "outline"} onClick={() => setOpeningKind("sliding_door")}>
+              Sliding
             </Button>
           </div>
         )}

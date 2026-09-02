@@ -946,6 +946,25 @@ export default function SetoutCanvas({
                   </g>
                 );
               }
+              if (o.kind === "sliding_door") {
+                // Sliding door: two parallel lines showing the door slides along the wall
+                // Top line marks the closed position, bottom marks the open position
+                const wallDir = { x: wall.end.x - wall.start.x, y: wall.end.y - wall.start.y };
+                const wallLen = Math.hypot(wallDir.x, wallDir.y) || 1;
+                const wallUnit = { x: wallDir.x / wallLen, y: wallDir.y / wallLen };
+                const slideEnd = { x: p1.x + wallUnit.x * o.width, y: p1.y + wallUnit.y * o.width };
+                return (
+                  <g
+                    key={o.id}
+                    className={cn("text-amber-600", draggable && "cursor-grab active:cursor-grabbing")}
+                    onPointerDown={draggable ? (e) => handleOpeningPointerDown(e, o, wall) : undefined}
+                  >
+                    {hitStroke}
+                    <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="currentColor" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                    <line x1={p1.x} y1={p1.y} x2={slideEnd.x} y2={slideEnd.y} stroke="currentColor" strokeWidth={1} strokeDasharray="0.06 0.06" vectorEffect="non-scaling-stroke" />
+                  </g>
+                );
+              }
               // Door: a leaf line from the hinge (p1) swinging into the room,
               // plus a quarter-circle arc tracing the leaf's sweep back to
               // the far jamb (p2) — the standard architectural door glyph.

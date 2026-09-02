@@ -32,7 +32,7 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
   const [tool, setTool] = useState<"interior" | "opening" | "erase">("interior");
   const [straightInteriorWalls, setStraightInteriorWalls] = useState(true);
   const [selectedEraseWallId, setSelectedEraseWallId] = useState<string | null>(null);
-  const [openingKind, setOpeningKind] = useState<"door" | "window">("door");
+  const [openingKind, setOpeningKind] = useState<"door" | "window" | "sliding_door">("door");
   const [draftStart, setDraftStart] = useState<Point | null>(null);
   const saveGeometry = useUpdateSetoutPlanGeometry(plan.id);
 
@@ -71,7 +71,7 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
   const handleOpeningPlace = (wallId: string, offset: number) => {
     const wall = walls.find((w) => w.id === wallId);
     if (!wall) return;
-    const width = openingKind === "door" ? DEFAULT_DOOR_WIDTH : DEFAULT_WINDOW_WIDTH;
+    const width = openingKind === "window" ? DEFAULT_WINDOW_WIDTH : DEFAULT_DOOR_WIDTH;
     const len = wallLength(wall);
     const clampedOffset = Math.max(0, Math.min(Math.max(len - width, 0), offset - width / 2));
     setOpenings((prev) => [...prev, { id: nextOpeningId(), wallId, offset: clampedOffset, width, kind: openingKind }]);
@@ -162,6 +162,9 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
           </Button>
           <Button size="sm" variant={openingKind === "window" ? "default" : "outline"} onClick={() => setOpeningKind("window")}>
             Window
+          </Button>
+          <Button size="sm" variant={openingKind === "sliding_door" ? "default" : "outline"} onClick={() => setOpeningKind("sliding_door")}>
+            Sliding
           </Button>
         </div>
       )}
