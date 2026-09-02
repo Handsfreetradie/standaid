@@ -389,8 +389,8 @@ export interface WallThickness {
 }
 
 export const DEFAULT_WALL_THICKNESS: WallThickness = {
-  exterior: 0.12, // 120mm — substantial enough to read but not visually dominating
-  interior: 0.10, // 90mm stud + plasterboard both sides — the common AU internal wall
+  exterior: 0.06, // 60mm — clean line for the plan
+  interior: 0.05, // 50mm — clean line for the plan
 };
 
 export interface SetoutPlan {

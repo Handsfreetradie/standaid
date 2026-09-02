@@ -1247,7 +1247,7 @@ export default function SetoutCanvas({
                   <path d="M-2 0l1.5 1.5L2.5 -2" stroke="hsl(var(--primary-foreground))" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" fill="none" />
                 </g>
               )}
-              {selected && isSingleWallFitting(f.type) && (
+              {selected && (
                 <g
                   transform="translate(27 -3)"
                   onPointerDown={(e) => {
