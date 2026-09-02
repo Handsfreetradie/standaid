@@ -336,7 +336,17 @@ export default function SetoutCanvas({
   const handleBackgroundPointerDown = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
       if (dragState.current || openingDragState.current) return;
+      // Allow panning in two cases:
+      // 1. Pan mode is explicitly enabled
+      // 2. Clicking empty canvas (not on a fitting) in non-placement modes
+      const isPlacementMode = mode === "place-fittings" || mode === "place-opening" || mode === "sketch-walls" || mode === "sketch-interior-wall";
       if (panMode || mode === "view") {
+        panState.current = { clientX: e.clientX, clientY: e.clientY, vb: viewBox, scale: px2scene() };
+        (e.target as Element).setPointerCapture(e.pointerId);
+        return;
+      }
+      // Allow panning on empty canvas (SVG background) in non-placement modes by checking if target is the SVG itself
+      if (!isPlacementMode && e.target === e.currentTarget) {
         panState.current = { clientX: e.clientX, clientY: e.clientY, vb: viewBox, scale: px2scene() };
         (e.target as Element).setPointerCapture(e.pointerId);
         return;
