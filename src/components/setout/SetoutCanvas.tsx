@@ -1188,9 +1188,10 @@ export default function SetoutCanvas({
           if (!Icon) return null;
           let pos = dragPreview?.id === f.id ? dragPreview.position : f.position;
           // Wall-mounted symbols offset into the room so they sit on the inside
-          // edge of the wall, not straddling the wall centerline
+          // edge of the wall, not straddling the wall centerline. Offset scales
+          // with wall thickness so it adapts when wall thickness is changed.
           if (isSingleWallFitting(f.type)) {
-            pos = offsetSymbolIntoRoom(pos, walls);
+            pos = offsetSymbolIntoRoom(pos, walls, wallThickness);
           }
           const selected = selectedFittingId === f.id;
           const isActiveSwitch = mode === "link-switches" && f.id === linkActiveSwitchId;
