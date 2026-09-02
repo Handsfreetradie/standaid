@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useProfile } from "@/hooks/useData";
 import { compressImageToBlob } from "@/lib/image";
 import SetoutCanvas, { type SetoutCanvasMode } from "@/components/setout/SetoutCanvas";
 import FittingPalette from "@/components/setout/FittingPalette";
@@ -69,7 +70,12 @@ const SetoutPlan = () => {
   const navigate = useNavigate();
 
   const { user } = useAuth();
+  const { data: profile } = useProfile();
   const { data: plan, isLoading: planLoading } = useSetoutPlan(planId);
+
+  // Feature gate: photo points only for electricians and HVAC
+  const allowedTrades = profile?.trade_type ? profile.trade_type.split(",").filter(Boolean) : [];
+  const hasPhotoPointsAccess = allowedTrades.includes("electrical") || allowedTrades.includes("hvac");
   const { data: fittings = [], isLoading: fittingsLoading } = useSetoutFittings(planId);
   const { data: circuits = [] } = useSetoutCircuits(planId);
   const { data: photoPoints = [] } = useSetoutPhotoPoints(planId);
@@ -537,16 +543,18 @@ const SetoutPlan = () => {
       >
         <CheckSquare className="h-3.5 w-3.5" /> Select multiple
       </button>
-      <button
-        type="button"
-        onClick={() => handleWorkspaceModeChange("place-photo-points")}
-        className={cn(
-          "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-          workspaceMode === "place-photo-points" ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"
-        )}
-      >
-        <Camera className="h-3.5 w-3.5" /> Photo points
-      </button>
+      {hasPhotoPointsAccess && (
+        <button
+          type="button"
+          onClick={() => handleWorkspaceModeChange("place-photo-points")}
+          className={cn(
+            "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+            workspaceMode === "place-photo-points" ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"
+          )}
+        >
+          <Camera className="h-3.5 w-3.5" /> Photo points
+        </button>
+      )}
     </div>
   );
 
