@@ -104,6 +104,8 @@ const Tools = () => {
   // has_setout_addon isn't in the generated Supabase types yet (new column) —
   // same `as any` escape hatch used elsewhere in this repo for newer columns.
   const hasSetoutAddon = Boolean((profile as { has_setout_addon?: boolean } | null)?.has_setout_addon);
+  // Setout feature gated to electricians and HVAC techs
+  const hasSetoutAccess = (profileTrades.includes("electrical") || profileTrades.includes("hvac")) && hasSetoutAddon;
 
   // Deep-link from Learn's Scenario Walkthrough ("Work this out in the
   // Cable Sizer tool" button) — same ?q= prefill pattern Chat.tsx uses.
@@ -158,10 +160,10 @@ const Tools = () => {
         </div>
       </div>
 
-      {isElectrical && (
+      {hasSetoutAccess && (
         <Card
           className="p-4 mb-5 cursor-pointer hover:border-primary/50 transition-colors active:scale-[0.99] border-primary/20 bg-primary/5"
-          onClick={() => (hasSetoutAddon ? navigate("/setout") : navigate("/profile"))}
+          onClick={() => navigate("/setout")}
         >
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
