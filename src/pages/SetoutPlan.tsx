@@ -20,6 +20,7 @@ import LayerVisibilityToggle from "@/components/setout/LayerVisibilityToggle";
 import SwitchLinksPanel from "@/components/setout/SwitchLinksPanel";
 import DataCabinetLinksPanel from "@/components/setout/DataCabinetLinksPanel";
 import PhotoPointDialog from "@/components/setout/PhotoPointDialog";
+import CameraCapture from "@/components/setout/CameraCapture";
 import type { FittingType } from "@/components/setout/symbols";
 import { DEFAULT_LAYER_VISIBILITY, distance, gangsFor, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type MeasurementRef, type Point, type SetoutFitting } from "@/lib/setoutTypes";
 import { autoRotationForWallMount, computeMeasurementLock, defaultHeightForType } from "@/lib/setoutGeometry";
@@ -188,6 +189,7 @@ const SetoutPlan = () => {
   const [uploadingPhotoPoint, setUploadingPhotoPoint] = useState(false);
   const [activePhotoPointId, setActivePhotoPointId] = useState<string | null>(null);
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [activePhotoUrl, setActivePhotoUrl] = useState<string | null>(null);
   const [loadingActivePhoto, setLoadingActivePhoto] = useState(false);
 
@@ -199,7 +201,27 @@ const SetoutPlan = () => {
 
   const handlePhotoPointPlace = (point: Point) => {
     pendingPhotoPointPosition.current = point;
-    photoInputRef.current?.click();
+    setCameraOpen(true);
+  };
+
+  const handleCameraCapture = async (blob: Blob) => {
+    if (!user || !planId) return;
+    setUploadingPhotoPoint(true);
+    try {
+      const path = `${user.id}/${planId}/${crypto.randomUUID()}.jpg`;
+      const { error: upErr } = await supabase.storage.from("setout-photo-points").upload(path, blob, { contentType: "image/jpeg" });
+      if (upErr) throw upErr;
+      const position = pendingPhotoPointPosition.current;
+      pendingPhotoPointPosition.current = null;
+      if (!position) throw new Error("Photo point position lost");
+      const created = await createPhotoPoint.mutateAsync({ position, storage_path: path });
+      setActivePhotoPointId(created.id);
+      loadPhotoPointUrl(path);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't save that photo.");
+    } finally {
+      setUploadingPhotoPoint(false);
+    }
   };
 
   const handleNextPhoto = () => {
@@ -841,6 +863,13 @@ const SetoutPlan = () => {
           </div>
         </div>
       </div>
+
+      <CameraCapture
+        open={cameraOpen}
+        onClose={() => setCameraOpen(false)}
+        onCapture={handleCameraCapture}
+        capturing={uploadingPhotoPoint}
+      />
 
       <PhotoPointDialog
         open={!!activePhotoPointId}
