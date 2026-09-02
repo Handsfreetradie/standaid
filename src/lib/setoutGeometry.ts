@@ -316,21 +316,23 @@ export function snapToNearestWall(p: Point, walls: WallSegment[], openings: Wall
     }
   }
 
-  // If dragging, also consider walls in the drag direction
-  if (dragOrigin) {
+  // If dragging significantly, look for walls further out (enables interior→exterior transitions)
+  if (dragOrigin && nearestWall) {
     const dragDir = { x: p.x - dragOrigin.x, y: p.y - dragOrigin.y };
     const dragDist = Math.hypot(dragDir.x, dragDir.y);
-    // If dragged far enough (0.2m+), look for walls further along drag direction
-    if (dragDist > 0.2) {
+    // If dragged far enough (0.15m+), check for walls further from drag origin
+    if (dragDist > 0.15) {
+      const currentWallDist = perpendicularDistanceToWall(dragOrigin, nearestWall);
       const normalizedDir = dragDist > 0 ? { x: dragDir.x / dragDist, y: dragDir.y / dragDist } : { x: 0, y: 0 };
-      for (const wall of pool) {
+      for (const wall of walls) {
         const d = perpendicularDistanceToWall(p, wall);
+        // Prefer walls that are further along the drag direction from the starting point
+        const wallDistFromOrigin = perpendicularDistanceToWall(dragOrigin, wall);
         const toWall = closestPointOnWall(p, wall);
-        const toWallDir = { x: toWall.x - p.x, y: toWall.y - p.y };
-        // Prefer walls in the drag direction (dot product > 0)
+        const toWallDir = { x: toWall.x - dragOrigin.x, y: toWall.y - dragOrigin.y };
         const alignment = normalizedDir.x * toWallDir.x + normalizedDir.y * toWallDir.y;
-        // Prefer walls that are in drag direction and within 1.5x the nearest distance
-        if (alignment > 0.3 && d < nearestDistance * 1.5) {
+        // Snap to wall if it's in the drag direction and reasonably close
+        if (alignment > 0.1 && d < nearestDistance * 2.0) {
           nearestDistance = d;
           nearestWall = wall;
         }
