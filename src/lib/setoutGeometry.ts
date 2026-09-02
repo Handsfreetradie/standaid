@@ -304,39 +304,26 @@ export function offsetSymbolIntoRoom(position: Point, walls: WallSegment[], wall
 // the drag, allowing fittings to move between interior and exterior walls.
 export function snapToNearestWall(p: Point, walls: WallSegment[], openings: WallOpening[] = [], dragOrigin?: Point): Point {
   if (walls.length === 0) return p;
-  const candidates = walls.filter((wall) => hasPerpendicularFoot(p, wall));
-  const pool = candidates.length > 0 ? candidates : walls;
-  let nearestWall = pool[0];
+
+  // When dragging, use all walls to find nearest (allows interior→exterior transitions)
+  // Otherwise use smart pool (walls with perpendicular feet only)
+  let searchPool: WallSegment[];
+  if (dragOrigin) {
+    const dragDist = Math.hypot(p.x - dragOrigin.x, p.y - dragOrigin.y);
+    // If dragged far enough (0.2m+), search all walls to allow changing walls
+    searchPool = dragDist > 0.2 ? walls : walls.filter((wall) => hasPerpendicularFoot(p, wall));
+  } else {
+    const candidates = walls.filter((wall) => hasPerpendicularFoot(p, wall));
+    searchPool = candidates.length > 0 ? candidates : walls;
+  }
+
+  let nearestWall = searchPool[0];
   let nearestDistance = perpendicularDistanceToWall(p, nearestWall);
-  for (const wall of pool.slice(1)) {
+  for (const wall of searchPool.slice(1)) {
     const d = perpendicularDistanceToWall(p, wall);
     if (d < nearestDistance) {
       nearestDistance = d;
       nearestWall = wall;
-    }
-  }
-
-  // If dragging significantly, look for walls further out (enables interior→exterior transitions)
-  if (dragOrigin && nearestWall) {
-    const dragDir = { x: p.x - dragOrigin.x, y: p.y - dragOrigin.y };
-    const dragDist = Math.hypot(dragDir.x, dragDir.y);
-    // If dragged far enough (0.15m+), check for walls further from drag origin
-    if (dragDist > 0.15) {
-      const currentWallDist = perpendicularDistanceToWall(dragOrigin, nearestWall);
-      const normalizedDir = dragDist > 0 ? { x: dragDir.x / dragDist, y: dragDir.y / dragDist } : { x: 0, y: 0 };
-      for (const wall of walls) {
-        const d = perpendicularDistanceToWall(p, wall);
-        // Prefer walls that are further along the drag direction from the starting point
-        const wallDistFromOrigin = perpendicularDistanceToWall(dragOrigin, wall);
-        const toWall = closestPointOnWall(p, wall);
-        const toWallDir = { x: toWall.x - dragOrigin.x, y: toWall.y - dragOrigin.y };
-        const alignment = normalizedDir.x * toWallDir.x + normalizedDir.y * toWallDir.y;
-        // Snap to wall if it's in the drag direction and reasonably close
-        if (alignment > 0.1 && d < nearestDistance * 2.0) {
-          nearestDistance = d;
-          nearestWall = wall;
-        }
-      }
     }
   }
   const snapped = closestPointOnWall(p, nearestWall);
