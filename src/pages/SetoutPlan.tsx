@@ -586,6 +586,13 @@ const SetoutPlan = () => {
   const mobileToolbarUI = (
     <div className="fixed bottom-0 left-0 right-0 md:hidden bg-card border-t border-border p-2 flex gap-2 overflow-x-auto">
       <button
+        onClick={() => setSelectedType(null)}
+        className="flex flex-col items-center justify-center h-14 w-14 rounded-lg border border-border text-muted-foreground transition-colors flex-shrink-0 hover:bg-muted"
+        title="Pan map (drag to move)"
+      >
+        <Hand className="h-5 w-5" />
+      </button>
+      <button
         onClick={() => { handleWorkspaceModeChange("place-fittings"); setMobileDrawerOpen(true); }}
         className={cn(
           "flex flex-col items-center justify-center h-14 w-14 rounded-lg border transition-colors flex-shrink-0",

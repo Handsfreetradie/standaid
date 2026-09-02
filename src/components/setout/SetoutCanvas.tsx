@@ -317,23 +317,64 @@ export default function SetoutCanvas({
   // A native, explicitly non-passive listener is the only way to actually
   // stop that scroll.
   const touchStateRef = useRef<{ distance: number } | null>(null);
+  const lastTapRef = useRef<{ time: number; x: number; y: number } | null>(null);
 
-  const handleTouchStart = useCallback((e: TouchEvent) => {
-    if (e.touches.length !== 2) {
-      touchStateRef.current = null;
-      return;
-    }
-    const touch1 = e.touches[0];
-    const touch2 = e.touches[1];
-    const dx = touch1.clientX - touch2.clientX;
-    const dy = touch1.clientY - touch2.clientY;
-    const distance = Math.hypot(dx, dy);
-    touchStateRef.current = { distance };
-  }, []);
+  const handleTouchStart = useCallback(
+    (e: TouchEvent) => {
+      // Double-tap zoom (single touch)
+      if (e.touches.length === 1) {
+        const now = Date.now();
+        const lastTap = lastTapRef.current;
+        const touch = e.touches[0];
+        const isDoubleTap =
+          !!lastTap &&
+          now - lastTap.time < 400 &&
+          Math.hypot(touch.clientX - lastTap.x, touch.clientY - lastTap.y) < 20;
+        lastTapRef.current = { time: now, x: touch.clientX, y: touch.clientY };
+
+        if (isDoubleTap) {
+          lastTapRef.current = null;
+          // Double-tap zooms in/out at that point
+          const svg = svgRef.current;
+          if (!svg) return;
+          const pt = svg.createSVGPoint();
+          pt.x = touch.clientX;
+          pt.y = touch.clientY;
+          const ctm = svg.getScreenCTM();
+          if (!ctm) return;
+          const scene = pt.matrixTransform(ctm.inverse());
+          // Zoom in at 1.4x, or out if already zoomed
+          const currentZoom = viewBox.w / 50; // Estimate current zoom level
+          const factor = currentZoom > 1.5 ? 1 / 1.4 : 1.4;
+          zoomAround({ x: scene.x, y: scene.y }, factor);
+        }
+        touchStateRef.current = null;
+        return;
+      }
+
+      // Pinch zoom (two touches)
+      if (e.touches.length !== 2) {
+        touchStateRef.current = null;
+        return;
+      }
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      const dx = touch1.clientX - touch2.clientX;
+      const dy = touch1.clientY - touch2.clientY;
+      const distance = Math.hypot(dx, dy);
+      touchStateRef.current = { distance };
+    },
+    [zoomAround, viewBox.w]
+  );
 
   const handleTouchMove = useCallback(
     (e: TouchEvent) => {
-      if (e.touches.length !== 2 || !touchStateRef.current) return;
+      // Only pinch-zoom with 2 touches
+      if (e.touches.length !== 2) {
+        touchStateRef.current = null;
+        return;
+      }
+      if (!touchStateRef.current) return;
       e.preventDefault();
       const touch1 = e.touches[0];
       const touch2 = e.touches[1];
