@@ -320,3 +320,34 @@ export class PlanVectorIndex {
     return { point: { x: fx + ox * line.halfWidth, y: fy + oy * line.halfWidth }, line };
   }
 }
+
+/**
+ * Loads a stored plan PDF and reads its geometry.
+ *
+ * Used by the workspace, which only has the file in storage — the setup flow
+ * already holds the page object and calls extractPlanLines directly.
+ * Resolves null when the file isn't a PDF or has no real geometry in it (a
+ * scan), leaving the caller to fall back to the pixel detector.
+ */
+export async function loadPlanVectorIndex(
+  fileUrl: string,
+  contentType: string | null,
+  pixelsPerMetre: number,
+  baseScale: number
+): Promise<PlanVectorIndex | null> {
+  if (contentType && !contentType.includes("pdf")) return null;
+  // A page with real drawn geometry has thousands of lines; a scan wrapped in
+  // a PDF has a handful, and is better served by detecting them in pixels.
+  const MIN_VECTOR_LINES = 20;
+  try {
+    const pdfjsLib = await import("pdfjs-dist");
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+    const buffer = await (await fetch(fileUrl)).arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+    const page = await pdf.getPage(1);
+    const lines = await extractPlanLines(page as unknown as PdfPageForVector, pixelsPerMetre, baseScale);
+    return lines.length >= MIN_VECTOR_LINES ? new PlanVectorIndex(lines) : null;
+  } catch {
+    return null;
+  }
+}

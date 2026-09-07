@@ -226,6 +226,8 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
   const [openingKind, setOpeningKind] = useState<"door" | "window" | "sliding_door">("door");
   const [uploadedImagePath, setUploadedImagePath] = useState<string | null>(null);
   const [uploadedImageContentType, setUploadedImageContentType] = useState<string | null>(null);
+  const [sourceFilePath, setSourceFilePath] = useState<string | null>(null);
+  const [sourceFileContentType, setSourceFileContentType] = useState<string | null>(null);
   // Exact line geometry read straight out of the PDF. Preferred over the pixel
   // detector whenever the plan actually is vector, because it needs no
   // estimating at all — see planVector.ts.
@@ -376,18 +378,37 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
   // Keeps the plan image as the permanent background reference for the
   // workspace. Nothing is read off it automatically — the tradie calibrates
   // and traces by hand, with the detected lines only offered as a snap guide.
-  const uploadPlanImage = async (source: RasterSource) => {
+  const uploadPlanImage = async (source: RasterSource, original: File) => {
     if (!user) return;
     try {
       const blob = await (await fetch(source.href)).blob();
       const ext = source.mimeType === "image/jpeg" ? "jpg" : "png";
-      const path = `${user.id}/${plan.id}/${crypto.randomUUID()}.${ext}`;
+      const folder = `${user.id}/${plan.id}/${crypto.randomUUID()}`;
+      const path = `${folder}.${ext}`;
       const { error } = await supabase.storage
         .from("setout-plan-uploads")
         .upload(path, blob, { contentType: source.mimeType, upsert: true });
       if (error) throw error;
       setUploadedImagePath(path);
       setUploadedImageContentType(source.mimeType);
+
+      // Keep the file the tradie actually chose, too. A PDF carries the real
+      // line geometry, and the workspace needs it to snap fittings to a true
+      // wall face — the render above has already thrown that away. Failing
+      // here costs exactness later but nothing else, so it doesn't stop the
+      // import.
+      try {
+        const srcExt = original.name.split(".").pop()?.toLowerCase() || "bin";
+        const srcPath = `${folder}-source.${srcExt}`;
+        const { error: srcErr } = await supabase.storage
+          .from("setout-plan-uploads")
+          .upload(srcPath, original, { contentType: original.type || "application/octet-stream", upsert: true });
+        if (srcErr) throw srcErr;
+        setSourceFilePath(srcPath);
+        setSourceFileContentType(original.type || "application/octet-stream");
+      } catch (srcErr) {
+        console.error("[CalibrationImportFlow] Source file upload failed:", srcErr);
+      }
     } catch (err) {
       // Non-fatal: the tradie can still calibrate and trace, they just won't
       // get the plan as a backdrop in the workspace afterwards.
@@ -406,7 +427,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
       tileCleanupRef.current?.();
       tileCleanupRef.current = null;
       setTile(null);
-      await uploadPlanImage(source);
+      await uploadPlanImage(source, file);
       setStep("calibrate");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not load that file");
@@ -466,6 +487,12 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
           : { pointA: calibPoints[0], pointB: calibPoints[1], realDistanceMetres: distanceMetres },
         openings: wallOpenings,
         ...(uploadedImagePath ? { background_image_path: uploadedImagePath, background_image_content_type: uploadedImageContentType ?? "image/png" } : {}),
+        // NOT YET WRITTEN: the source_file_* columns land with
+        // 20260907000000_setout_source_file.sql, and sending them before that
+        // migration is applied fails the whole save. The file is already
+        // uploaded above, so switching this on afterwards is a one-line change
+        // and nothing has been lost in the meantime.
+        // ...(sourceFilePath ? { source_file_path: sourceFilePath, source_file_content_type: sourceFileContentType ?? "application/octet-stream" } : {}),
       });
       toast.success(skipWalls ? "Plan saved" : "Walls saved");
       onComplete();

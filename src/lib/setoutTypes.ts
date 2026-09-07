@@ -421,6 +421,10 @@ export interface SetoutPlan {
   layer_visibility: LayerVisibility;
   wall_thickness: WallThickness;
   background_image_path: string | null;
+  // The file as uploaded. A PDF here means the plan's exact geometry is still
+  // available; null means there is none (an older plan, or a photo).
+  source_file_path?: string | null;
+  source_file_content_type?: string | null;
   background_image_content_type: string | null;
   created_at: string;
   updated_at: string;

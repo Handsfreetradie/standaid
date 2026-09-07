@@ -287,6 +287,22 @@ export default function SetoutCanvas({
     spanBoundsRef.current = { min: initialSpan / 200, max: initialSpan * 1.5 };
     return vb;
   });
+  // Whether the view has ever been fitted to something real. A plan loaded
+  // from storage arrives after this component mounts, and a plan whose walls
+  // were skipped has nothing else to fit to — so without this the view keeps
+  // the 10m fallback window and the tradie stares at blank paper beside a plan
+  // that is, say, eighty metres wide.
+  const fittedToContentRef = useRef(!!backgroundImage || (walls?.length ?? 0) > 0);
+
+  useEffect(() => {
+    if (fittedToContentRef.current) return;
+    if (!backgroundImage && (walls?.length ?? 0) === 0) return;
+    const vb = initialViewBox(backgroundImage, walls);
+    const span = Math.max(vb.w, vb.h);
+    spanBoundsRef.current = { min: span / 200, max: span * 1.5 };
+    fittedToContentRef.current = true;
+    setViewBox(vb);
+  }, [backgroundImage, walls]);
   const [panMode, setPanMode] = useState(false);
   const panState = useRef<{ clientX: number; clientY: number; vb: ViewBox; scale: number } | null>(null);
   const dragState = useRef<{ fittingId: string; type: FittingType; clientX: number; clientY: number; scale: number; origin: Point } | null>(null);

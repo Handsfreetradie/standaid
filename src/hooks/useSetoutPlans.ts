@@ -187,6 +187,8 @@ export function useUpdateSetoutPlanGeometry(planId: string) {
       openings?: WallOpening[];
       background_image_path?: string;
       background_image_content_type?: string;
+      source_file_path?: string;
+      source_file_content_type?: string;
     }) => {
       // background_image_path/content_type are only ever set once, at
       // initial import save (CalibrationImportFlow.tsx) — later geometry-
@@ -196,6 +198,8 @@ export function useUpdateSetoutPlanGeometry(planId: string) {
       const update: Record<string, unknown> = { walls: input.walls, scale_calibration: input.scale_calibration, openings: input.openings ?? [] };
       if (input.background_image_path !== undefined) update.background_image_path = input.background_image_path;
       if (input.background_image_content_type !== undefined) update.background_image_content_type = input.background_image_content_type;
+      if (input.source_file_path !== undefined) update.source_file_path = input.source_file_path;
+      if (input.source_file_content_type !== undefined) update.source_file_content_type = input.source_file_content_type;
       const { data, error } = await sb
         .from("setout_plans")
         .update(update)
