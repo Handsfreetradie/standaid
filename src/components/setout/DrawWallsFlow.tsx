@@ -68,6 +68,7 @@ export default function DrawWallsFlow({ plan, onBack, onComplete }: DrawWallsFlo
             mode="sketch-walls"
             sketchPoints={sketchPoints}
             onSketchPointAdd={(p) => setSketchPoints((prev) => [...prev, p])}
+            onSketchPointUndo={() => setSketchPoints((prev) => prev.slice(0, -1))}
             onSketchClose={closeSketch}
             snapWalls
           />

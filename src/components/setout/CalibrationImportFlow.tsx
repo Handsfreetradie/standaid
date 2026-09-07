@@ -1,30 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, FileImage, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { cn } from "@/lib/utils";
-import SetoutCanvas from "./SetoutCanvas";
+import SetoutCanvas, { type BackgroundTile } from "./SetoutCanvas";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { useUpdateSetoutPlanGeometry, useCreateSetoutFittingsBulk } from "@/hooks/useSetoutPlans";
-import { FITTING_LABELS, FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
-import { CATEGORY_FOR_TYPE, distance, isSingleWallFitting, type FittingSpecs, type Point, type SetoutFitting, type SetoutPlan, type WallOpening, type WallSegment } from "@/lib/setoutTypes";
-import {
-  applyWallLengths,
-  autoRotationForWallMount,
-  computeMeasurementLock,
-  defaultHeightForType,
-  nextOpeningId,
-  nextWallId,
-  polygonToWalls,
-  snapToNearestWall,
-  wallLength,
-} from "@/lib/setoutGeometry";
+import { useUpdateSetoutPlanGeometry } from "@/hooks/useSetoutPlans";
+import { distance, type Point, type SetoutPlan, type WallOpening, type WallSegment } from "@/lib/setoutTypes";
+import { applyWallLengths, nextOpeningId, nextWallId, polygonToWalls, wallLength } from "@/lib/setoutGeometry";
+import { detectPlanEdges, type PlanEdges } from "@/lib/edgeDetection";
 
 // Standard Australian residential door/window widths — used as the default
 // when a door/window is placed, then editable per-opening afterward.
@@ -36,39 +24,144 @@ interface RasterSource {
   naturalWidth: number;
   naturalHeight: number;
   mimeType: string;
+  // Kept alive for PDFs so the plan can be rasterised again at whatever zoom
+  // the tradie is on. A photo has no such source — it's stuck at the
+  // resolution it was taken.
+  pdfPage?: PdfPage;
 }
 
-// AI extraction result — normalized 0-1 image coordinates throughout, since
-// at extraction time no real-world scale exists yet.
-interface NormalizedPoint {
-  x: number;
-  y: number;
-}
-// A hand-marked fixture location the tradie added themselves (highlighter/
-// pen dot) — colour is a small fixed enum the AI classifies into, since
-// asking it to classify the actual fixture TYPE is exactly what proved
-// unreliable on real plans. The tradie assigns colour -> fitting type
-// themselves in the review step below.
-const MARK_COLORS = ["red", "orange", "yellow", "green", "blue", "purple", "pink", "black"] as const;
-type MarkColor = (typeof MARK_COLORS)[number];
-const MARK_COLOR_SWATCH_CLASS: Record<MarkColor, string> = {
-  red: "bg-red-500",
-  orange: "bg-orange-500",
-  yellow: "bg-yellow-400",
-  green: "bg-green-500",
-  blue: "bg-blue-500",
-  purple: "bg-purple-500",
-  pink: "bg-pink-500",
-  black: "bg-black",
-};
+// Scale the plan is first rasterised at. Everything that converts between
+// scene metres and PDF points goes through this, so it must not drift.
+const BASE_PDF_SCALE = 2;
+// A re-render never exceeds this on either side, so a deep zoom on a big
+// screen can't allocate a canvas a phone won't survive.
+// Only binds on large desktop viewports; a phone never gets near it. Sized so
+// a typical screen renders at full device resolution rather than being capped
+// back into softness.
+const MAX_TILE_PX = 4096;
+// Rasterise this much more than is actually on screen, so a nudge of the plan
+// doesn't immediately expose the soft base image at the edges. Every pixel
+// spent on margin is a pixel not spent on what's actually visible, and the
+// view re-renders once panning stops anyway — so this stays modest, and the
+// on-screen area keeps full device resolution.
+const TILE_MARGIN = 1.35;
 
-interface AiMark extends NormalizedPoint {
-  color: MarkColor;
+// The slice of pdf.js's page API used here, named so this file doesn't depend
+// on pdfjs-dist's types at module load (it's imported lazily below).
+interface PdfPage {
+  getViewport(options: { scale: number }): { width: number; height: number };
+  render(options: {
+    canvasContext: CanvasRenderingContext2D;
+    viewport: { width: number; height: number };
+    transform?: number[];
+  }): { promise: Promise<void>; cancel(): void };
 }
-interface AiExtraction {
-  corners: NormalizedPoint[];
-  suggested_scale: { corner_a_index: number; corner_b_index: number; real_distance_metres: number } | null;
-  marks: AiMark[];
+
+/**
+ * Rasterises just the part of the plan currently on screen, at the screen's
+ * own pixel density.
+ *
+ * This is what makes a deep zoom sharp. The base image is rendered once at a
+ * fixed scale, so magnifying it past that is magnifying pixels — at 600% the
+ * linework turns to mush. A PDF is vector, so instead of stretching pixels we
+ * ask it for the visible rectangle again at the resolution actually needed.
+ *
+ * @param view  the on-screen region, in scene metres
+ * @returns the tile plus the region it ACTUALLY covers — rounding the canvas
+ *          to whole pixels means that isn't exactly what was asked for, and
+ *          placing it as if it were would stretch it very slightly.
+ */
+async function renderPdfTile(
+  page: PdfPage,
+  view: { x: number; y: number; w: number; h: number; screenWidth: number },
+  plan: { w: number; h: number },
+  pixelsPerMetre: number
+): Promise<{ href: string; revoke: () => void; x: number; y: number; coveredW: number; coveredH: number } | null> {
+  // Scene metres -> PDF points. Base image pixels are scene * ppm, and those
+  // were themselves rendered at BASE_PDF_SCALE points-to-pixels.
+  const toPdfPoints = pixelsPerMetre / BASE_PDF_SCALE;
+  if (view.w <= 0 || view.h <= 0) return null;
+
+  const dprEarly = window.devicePixelRatio || 1;
+  // Pixels per scene unit the screen is actually asking for right now. Render
+  // at this and the result is exactly as sharp as the display can show.
+  const wantedDensity = (view.screenWidth * dprEarly) / view.w;
+
+  // Prefer to rasterise the ENTIRE plan: then there's no tile boundary at all,
+  // panning never exposes anything soft, and one render serves every position
+  // at this zoom. Only when the whole plan won't fit the pixel budget — a deep
+  // zoom on a big drawing — fall back to the part that's on screen plus a
+  // margin.
+  const wholePlanPx = plan.w * wantedDensity;
+  const wholePlanFits =
+    wholePlanPx <= MAX_TILE_PX && plan.h * wantedDensity <= MAX_TILE_PX;
+  const region = wholePlanFits
+    ? { x: 0, y: 0, w: plan.w, h: plan.h }
+    : {
+        x: view.x - (view.w * (TILE_MARGIN - 1)) / 2,
+        y: view.y - (view.h * (TILE_MARGIN - 1)) / 2,
+        w: view.w * TILE_MARGIN,
+        h: view.h * TILE_MARGIN,
+      };
+  const viewPts = region.w * toPdfPoints;
+  if (viewPts <= 0) return null;
+
+  const aspect = region.h / region.w;
+  // Both sides have to come down together — clamping only the taller one would
+  // render less of the plan than the tile then claims to cover, squashing it.
+  // Enough pixels to hold `wantedDensity` across whatever region was chosen,
+  // so widening the area never costs sharpness — only the cap can.
+  let targetPx = Math.min(Math.round(region.w * wantedDensity), MAX_TILE_PX);
+  if (targetPx * aspect > MAX_TILE_PX) targetPx = Math.floor(MAX_TILE_PX / aspect);
+
+  const width = targetPx;
+  const height = Math.round(targetPx * aspect);
+  if (width < 1 || height < 1) return null;
+
+  const scale = width / viewPts;
+  if (!Number.isFinite(scale) || scale <= 0) return null;
+  const viewport = page.getViewport({ scale });
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  // The page is drawn full size and shifted so the requested region lands at
+  // the canvas origin — pdf.js has no crop, but it does take a transform.
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  await page.render({
+    canvasContext: ctx,
+    viewport,
+    transform: [1, 0, 0, 1, -region.x * toPdfPoints * scale, -region.y * toPdfPoints * scale],
+  }).promise;
+
+  // WebP encodes far faster than PNG at this size. Quality is high enough to
+  // be indistinguishable on linework, and browsers without WebP encoding hand
+  // back a PNG instead, which still works.
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp", 0.95));
+  if (!blob) return null;
+  const href = URL.createObjectURL(blob);
+  // Decode before handing it over. Swapping in an undecoded image makes the
+  // plan visibly blink and jump as the browser catches up mid-frame.
+  try {
+    const img = new Image();
+    img.src = href;
+    await img.decode();
+  } catch {
+    // Older browsers without decode() just paint a frame later.
+  }
+  return {
+    href,
+    revoke: () => URL.revokeObjectURL(href),
+    // Where the tile actually landed, which is the grown region and — because
+    // the canvas is a whole number of pixels — not quite its requested size.
+    x: region.x,
+    y: region.y,
+    coveredW: width / scale / toPdfPoints,
+    coveredH: height / scale / toPdfPoints,
+  };
 }
 
 async function renderPdfFirstPage(file: File): Promise<RasterSource> {
@@ -77,14 +170,21 @@ async function renderPdfFirstPage(file: File): Promise<RasterSource> {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   const page = await pdf.getPage(1);
-  const viewport = page.getViewport({ scale: 2 });
+  const viewport = page.getViewport({ scale: BASE_PDF_SCALE });
   const canvas = document.createElement("canvas");
   canvas.width = viewport.width;
   canvas.height = viewport.height;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not create canvas context");
   await page.render({ canvasContext: ctx, viewport }).promise;
-  return { href: canvas.toDataURL("image/png"), naturalWidth: canvas.width, naturalHeight: canvas.height, mimeType: "image/png" };
+  return {
+    href: canvas.toDataURL("image/png"),
+    naturalWidth: canvas.width,
+    naturalHeight: canvas.height,
+    mimeType: "image/png",
+    // Held for re-rendering at zoom; a plain image upload has no equivalent.
+    pdfPage: page as unknown as PdfPage,
+  };
 }
 
 function loadImageFile(file: File): Promise<RasterSource> {
@@ -97,7 +197,7 @@ function loadImageFile(file: File): Promise<RasterSource> {
   });
 }
 
-type Step = "select-file" | "loading" | "extracting" | "calibrate" | "trace-walls" | "adjust-lengths" | "review-marks";
+type Step = "select-file" | "loading" | "calibrate" | "trace-walls" | "adjust-lengths";
 
 interface CalibrationImportFlowProps {
   plan: SetoutPlan;
@@ -122,16 +222,20 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
   const [selectedEraseWallId, setSelectedEraseWallId] = useState<string | null>(null);
   const [interiorDraftStart, setInteriorDraftStart] = useState<Point | null>(null);
   const [openingKind, setOpeningKind] = useState<"door" | "window" | "sliding_door">("door");
-  const [savedWalls, setSavedWalls] = useState<WallSegment[] | null>(null);
-  const [savedOpenings, setSavedOpenings] = useState<WallOpening[]>([]);
   const [uploadedImagePath, setUploadedImagePath] = useState<string | null>(null);
   const [uploadedImageContentType, setUploadedImageContentType] = useState<string | null>(null);
-  const [aiCorners, setAiCorners] = useState<NormalizedPoint[] | null>(null);
-  const [aiMarks, setAiMarks] = useState<AiMark[]>([]);
-  const [colorAssignments, setColorAssignments] = useState<Record<string, FittingType | "skip">>({});
+  const [planEdges, setPlanEdges] = useState<PlanEdges | null>(null);
+  const [snapEnabled, setSnapEnabled] = useState(true);
+  const [detectingEdges, setDetectingEdges] = useState(false);
+  // The sharp re-render of whatever's on screen. Null until the first one
+  // lands, and while a photo (rather than a PDF) is the source.
+  const [tile, setTile] = useState<BackgroundTile | null>(null);
+  const tileCleanupRef = useRef<(() => void) | null>(null);
+  // Bumped per request so a slow render that finishes after the tradie has
+  // moved on gets dropped instead of painting a stale region.
+  const tileRequestRef = useRef(0);
   const fileRef = useRef<HTMLInputElement>(null);
   const saveGeometry = useUpdateSetoutPlanGeometry(plan.id);
-  const createFittingsBulk = useCreateSetoutFittingsBulk(plan.id);
 
   useEffect(() => {
     return () => {
@@ -139,32 +243,115 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     };
   }, [raster]);
 
-  // Uploads the raster to the private setout-plan-uploads bucket and asks
-  // the extract-setout-plan edge function to read the wall outline, an
-  // optional scale suggestion, and any existing electrical symbols off it.
-  // Never blocks the flow on failure — the tradie falls back to calibrating
-  // and tracing manually exactly as before this feature existed.
-  const runAiExtraction = async (source: RasterSource): Promise<AiExtraction | null> => {
-    if (!user) return null;
+  // Release the last tile's blob when this screen goes away.
+  useEffect(() => () => tileCleanupRef.current?.(), []);
+
+  // Re-rasterise the visible region of the PDF at screen resolution whenever
+  // the view settles. `scenePixelsPerMetre` is what converts the canvas's
+  // scene units to the base image's pixels — during calibration the canvas
+  // works directly in image pixels, so it's 1 there.
+  // Must be referentially stable: the canvas holds this in an effect's
+  // dependencies, so a fresh function each render would restart its settle
+  // timer forever and the tile would never land.
+  const renderTileForView = useCallback(
+    async (view: { x: number; y: number; w: number; h: number; screenWidth: number }, scenePixelsPerMetre: number) => {
+      const page = raster?.pdfPage;
+      if (!page || !raster) return;
+      const token = ++tileRequestRef.current;
+      try {
+        // The plan's full extent in the same scene units the canvas uses.
+        const plan = {
+          w: raster.naturalWidth / scenePixelsPerMetre,
+          h: raster.naturalHeight / scenePixelsPerMetre,
+        };
+        const next = await renderPdfTile(page, view, plan, scenePixelsPerMetre);
+        if (!next) return;
+        if (token !== tileRequestRef.current) {
+          // The view moved on while this was rendering — bin it.
+          next.revoke();
+          return;
+        }
+        tileCleanupRef.current?.();
+        tileCleanupRef.current = next.revoke;
+        setTile({ href: next.href, x: next.x, y: next.y, width: next.coveredW, height: next.coveredH });
+      } catch {
+        // A cancelled or failed render just leaves the base image showing.
+      }
+    },
+    [raster]
+  );
+
+  // During calibration the canvas works directly in image pixels, so the
+  // scene-to-image scale is 1; once calibrated it works in metres.
+  const handleCalibrateViewSettled = useCallback(
+    (view: { x: number; y: number; w: number; h: number; screenWidth: number }) => renderTileForView(view, 1),
+    [renderTileForView]
+  );
+  const handleTraceViewSettled = useCallback(
+    (view: { x: number; y: number; w: number; h: number; screenWidth: number }) =>
+      pixelsPerMetre ? renderTileForView(view, pixelsPerMetre) : undefined,
+    [renderTileForView, pixelsPerMetre]
+  );
+
+  // Finds the printed lines on the plan so tracing can snap to them. Can only
+  // run once the scale is known, since the index is built in scene units.
+  // Cached against the raster + scale it was built from: toggling the snap
+  // switch off and back on must not pay for the pass again, but recalibrating
+  // (which changes the scale) has to rebuild it.
+  const edgesBuiltFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!raster || !pixelsPerMetre || !snapEnabled) return;
+    const key = `${raster.href}@${pixelsPerMetre}`;
+    if (edgesBuiltFor.current === key) return;
+    edgesBuiltFor.current = key;
+
+    let cancelled = false;
+    setDetectingEdges(true);
+    detectPlanEdges(raster.href, pixelsPerMetre)
+      .then((edges) => {
+        if (cancelled) return;
+        setPlanEdges(edges);
+        // A plan that's a photo of a photo, or very faint, yields nothing to
+        // snap to — say so rather than leaving the tradie wondering why taps
+        // aren't grabbing anything.
+        if (edges.count === 0) toast.info("No clear lines found on this plan — tracing won't snap.");
+      })
+      .catch((err) => {
+        // Non-fatal: tracing still works, it just won't snap.
+        console.error("[CalibrationImportFlow] Edge detection failed:", err);
+        if (!cancelled) {
+          edgesBuiltFor.current = null;
+          setPlanEdges(null);
+          toast.error("Couldn't read the lines on this plan — trace it by hand.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setDetectingEdges(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [raster, pixelsPerMetre, snapEnabled]);
+
+  // Keeps the plan image as the permanent background reference for the
+  // workspace. Nothing is read off it automatically — the tradie calibrates
+  // and traces by hand, with the detected lines only offered as a snap guide.
+  const uploadPlanImage = async (source: RasterSource) => {
+    if (!user) return;
     try {
       const blob = await (await fetch(source.href)).blob();
       const ext = source.mimeType === "image/jpeg" ? "jpg" : "png";
       const path = `${user.id}/${plan.id}/${crypto.randomUUID()}.${ext}`;
-      const { error: upErr } = await supabase.storage.from("setout-plan-uploads").upload(path, blob, { contentType: source.mimeType, upsert: true });
-      if (upErr) throw upErr;
-      // Captured regardless of whether the AI call below succeeds — the
-      // upload itself is enough to keep this image around as a permanent
-      // reference in the main workspace (see finishTrace).
+      const { error } = await supabase.storage
+        .from("setout-plan-uploads")
+        .upload(path, blob, { contentType: source.mimeType, upsert: true });
+      if (error) throw error;
       setUploadedImagePath(path);
       setUploadedImageContentType(source.mimeType);
-      const { data, error } = await supabase.functions.invoke("extract-setout-plan", {
-        body: { storage_path: path, content_type: source.mimeType, plan_id: plan.id },
-      });
-      if (error || data?.error) throw new Error(data?.error || "AI extraction failed");
-      return data as AiExtraction;
     } catch (err) {
-      console.error("[CalibrationImportFlow] AI extraction failed:", err);
-      return null;
+      // Non-fatal: the tradie can still calibrate and trace, they just won't
+      // get the plan as a backdrop in the workspace afterwards.
+      console.error("[CalibrationImportFlow] Plan upload failed:", err);
     }
   };
 
@@ -175,29 +362,11 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     try {
       const source = file.type === "application/pdf" ? await renderPdfFirstPage(file) : await loadImageFile(file);
       setRaster(source);
-      setStep("extracting");
-      const extraction = await runAiExtraction(source);
-      if (extraction && extraction.corners.length >= 3) {
-        setAiCorners(extraction.corners);
-        setAiMarks(extraction.marks || []);
-        const scale = extraction.suggested_scale;
-        const a = scale ? extraction.corners[scale.corner_a_index] : null;
-        const b = scale ? extraction.corners[scale.corner_b_index] : null;
-        if (scale && a && b) {
-          setCalibPoints([
-            { x: a.x * source.naturalWidth, y: a.y * source.naturalHeight },
-            { x: b.x * source.naturalWidth, y: b.y * source.naturalHeight },
-          ]);
-          setRealDistance(String(scale.real_distance_metres));
-        }
-        toast.success(
-          extraction.marks?.length
-            ? `AI traced the wall outline and found ${extraction.marks.length} hand-marked fixture${extraction.marks.length === 1 ? "" : "s"} — check the suggestion below.`
-            : "AI traced the wall outline — check the suggestion below."
-        );
-      } else {
-        toast.error("Couldn't auto-detect this plan — calibrate and trace it manually instead.");
-      }
+      tileRequestRef.current++;
+      tileCleanupRef.current?.();
+      tileCleanupRef.current = null;
+      setTile(null);
+      await uploadPlanImage(source);
       setStep("calibrate");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not load that file");
@@ -218,15 +387,6 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     const pixelDist = distance(calibPoints[0], calibPoints[1]);
     const ppm = pixelDist / distanceMetres;
     setPixelsPerMetre(ppm);
-    // Seed the perimeter trace from the AI's corners the first time through
-    // — if the tradie goes Back and forward again, don't clobber edits
-    // they've already made to the traced shape. Interior walls/doors/
-    // windows are never AI-seeded (see extract-setout-plan's header
-    // comment) — always added manually with the tools on the next step.
-    if (aiCorners && aiCorners.length >= 3 && sketchPoints.length === 0) {
-      const toMetres = (p: NormalizedPoint) => ({ x: (p.x * raster.naturalWidth) / ppm, y: (p.y * raster.naturalHeight) / ppm });
-      setSketchPoints(aiCorners.map(toMetres));
-    }
     setStep("trace-walls");
   };
 
@@ -254,14 +414,8 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
         openings: wallOpenings,
         ...(uploadedImagePath ? { background_image_path: uploadedImagePath, background_image_content_type: uploadedImageContentType ?? "image/png" } : {}),
       });
-      if (aiMarks.length > 0) {
-        setSavedWalls(walls);
-        setSavedOpenings(wallOpenings);
-        setStep("review-marks");
-      } else {
-        toast.success("Walls saved");
-        onComplete();
-      }
+      toast.success("Walls saved");
+      onComplete();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not save the plan");
     }
@@ -275,10 +429,8 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
         </button>
         <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Upload the builder's plan</h2>
         <p className="text-xs text-muted-foreground mb-5">
-          PDF or photo of the plan. AI will trace the outer wall outline automatically — internal walls, doors and windows are added
-          manually on the next step. If you want AI to also pick up fixture locations, mark them on the plan first with a highlighter or
-          pen — use a different colour per fixture type (any colours you like), and you'll tell the app what each colour means after
-          upload.
+          PDF or photo of the plan. You'll set the scale, then trace the walls yourself — tracing snaps to the lines printed on the
+          plan, so you only need to tap near a corner rather than exactly on it.
         </p>
         <input ref={fileRef} type="file" accept="application/pdf,image/*" className="hidden" onChange={handleFileSelect} />
         <Card
@@ -302,15 +454,6 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     );
   }
 
-  if (step === "extracting") {
-    return (
-      <div className="flex flex-col items-center justify-center h-64 gap-3">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
-        <p className="text-sm text-muted-foreground">AI is reading the plan…</p>
-      </div>
-    );
-  }
-
   if (step === "calibrate" && raster) {
     return (
       <div className="flex flex-col h-full overflow-y-auto px-5 py-6 max-w-6xl mx-auto w-full">
@@ -320,13 +463,15 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
         <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Calibrate scale</h2>
         <p className="text-xs text-muted-foreground mb-4">
           {calibPoints.length === 2
-            ? "AI suggested these two points from a dimension it read on the plan — check them (and the distance below) or clear and pick your own."
+            ? "Both points placed — enter the real distance between them below, or clear them and pick two others."
             : "Zoom in and tap two points on the plan that you know the real distance between — a wall length, a door width, a dimension already marked."}{" "}
           Use the pan tool (bottom right) to move around once zoomed in.
         </p>
         <div className="flex-1 min-h-[480px] mb-4">
           <SetoutCanvas
             backgroundImage={{ href: raster.href, width: raster.naturalWidth, height: raster.naturalHeight }}
+            backgroundTile={tile}
+            onViewSettled={handleCalibrateViewSettled}
             walls={[]}
             mode="calibrate"
             calibratePoints={calibPoints}
@@ -404,9 +549,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
         </h2>
         <p className="text-xs text-muted-foreground mb-4">
           {wallTool === "perimeter"
-            ? aiCorners
-              ? "AI has traced a starting shape from the plan — drag/add/remove corners to fix anything it got wrong, then close the shape. You'll enter the real wall lengths next."
-              : "Tap each corner of the room in order. Tap the first corner again (or the button below) to close the shape — you'll enter the real wall lengths next."
+            ? "Tap each corner of the room in order. Tap the first corner again (or the button below) to close the shape — you'll enter the real wall lengths next."
             : wallTool === "interior"
               ? `Tap point to point along the internal wall run — tap (or click) the same spot twice to finish it.${straightInteriorWalls ? " Each segment squares up to horizontal/vertical automatically." : ""}`
               : wallTool === "erase"
@@ -451,6 +594,21 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
           </div>
         )}
 
+        {(wallTool === "perimeter" || wallTool === "interior") && (
+          <div className="flex items-center gap-2 mb-3">
+            <Switch id="snap-to-plan" checked={snapEnabled} onCheckedChange={setSnapEnabled} />
+            <Label htmlFor="snap-to-plan" className="text-xs font-normal text-muted-foreground">
+              {detectingEdges
+                ? "Reading the lines on the plan…"
+                : snapEnabled
+                  ? planEdges
+                    ? "Snap to the plan's lines — taps pull onto the nearest line"
+                    : "Snap to the plan's lines"
+                  : "Snap off — taps land exactly where you touch"}
+            </Label>
+          </div>
+        )}
+
         {wallTool === "opening" && (
           <div className="flex gap-1.5 mb-3">
             <Button size="sm" variant={openingKind === "door" ? "default" : "outline"} onClick={() => setOpeningKind("door")}>
@@ -474,8 +632,12 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
             mode={canvasMode}
             sketchPoints={sketchPoints}
             onSketchPointAdd={(p) => setSketchPoints((prev) => [...prev, p])}
+            onSketchPointUndo={() => setSketchPoints((prev) => prev.slice(0, -1))}
+            backgroundTile={tile}
+            onViewSettled={handleTraceViewSettled}
             onSketchClose={proceedToLengthAdjustment}
             snapWalls={wallTool === "perimeter"}
+            planEdgeIndex={snapEnabled ? planEdges?.index ?? null : null}
             interiorWallDraftStart={interiorDraftStart}
             onInteriorWallDraftPointAdd={setInteriorDraftStart}
             snapInteriorWalls={straightInteriorWalls}
@@ -665,139 +827,6 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
         <Button className="w-full h-12 font-bold rounded-xl" disabled={!allLengthsValid} onClick={confirmLengths}>
           Confirm lengths
         </Button>
-      </div>
-    );
-  }
-
-  if (step === "review-marks" && raster && pixelsPerMetre && savedWalls) {
-    const marksByColor = new Map<MarkColor, AiMark[]>();
-    for (const m of aiMarks) {
-      if (!marksByColor.has(m.color)) marksByColor.set(m.color, []);
-      marksByColor.get(m.color)!.push(m);
-    }
-    const colors = Array.from(marksByColor.keys());
-
-    const rawPositionFor = (m: AiMark): Point => ({
-      x: (m.x * raster.naturalWidth) / pixelsPerMetre,
-      y: (m.y * raster.naturalHeight) / pixelsPerMetre,
-    });
-
-    // Every colour with a fitting type assigned (not left unset, not
-    // explicitly skipped) becomes that many fittings at their marked
-    // positions — wall-mounted types still snap onto the actual wall line
-    // (and clear of any door/window on it), same treatment a manually
-    // placed fitting gets.
-    const assignedFittings: { type: FittingType; position: Point }[] = [];
-    for (const color of colors) {
-      const assignment = colorAssignments[color];
-      if (!assignment || assignment === "skip") continue;
-      for (const m of marksByColor.get(color)!) {
-        const raw = rawPositionFor(m);
-        const position = isSingleWallFitting(assignment) ? snapToNearestWall(raw, savedWalls, savedOpenings) : raw;
-        assignedFittings.push({ type: assignment, position });
-      }
-    }
-
-    const previewFittings: SetoutFitting[] = assignedFittings.map((f, i) => ({
-      id: String(i),
-      plan_id: plan.id,
-      type: f.type,
-      position: f.position,
-      category: CATEGORY_FOR_TYPE[f.type],
-      specs: {},
-      measurement_lock: null,
-      status: "placed",
-      circuit_id: null,
-      linked_to: [],
-      created_at: "",
-      updated_at: "",
-    }));
-
-    const handleAddFittings = async () => {
-      const walls = savedWalls;
-      const inputs = assignedFittings.map(({ type, position }) => {
-        const defaultHeight = defaultHeightForType(type);
-        const specs: FittingSpecs = {};
-        if (defaultHeight != null) specs.mountingHeight = defaultHeight;
-        if (isSingleWallFitting(type)) specs.rotation = autoRotationForWallMount(position, walls);
-        return {
-          type,
-          position,
-          measurement_lock: computeMeasurementLock(position, walls, type),
-          specs: Object.keys(specs).length > 0 ? specs : undefined,
-        };
-      });
-      try {
-        await createFittingsBulk.mutateAsync(inputs);
-        toast.success(`Added ${inputs.length} fitting${inputs.length === 1 ? "" : "s"} from the plan`);
-        onComplete();
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not add the fittings");
-      }
-    };
-
-    return (
-      <div className="flex flex-col h-full overflow-y-auto px-5 py-6 max-w-6xl mx-auto w-full">
-        <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">What does each colour mean?</h2>
-        <p className="text-xs text-muted-foreground mb-4">
-          AI found {aiMarks.length} hand-marked location{aiMarks.length === 1 ? "" : "s"} across {colors.length} colour
-          {colors.length === 1 ? "" : "s"}. Tell it what each colour represents — skip a colour if it wasn't for a fixture.
-        </p>
-
-        <div className="space-y-2 mb-4">
-          {colors.map((color) => {
-            const count = marksByColor.get(color)!.length;
-            return (
-              <div key={color} className="flex items-center gap-2 rounded-lg border border-border px-3 py-2">
-                <span className={cn("h-4 w-4 rounded-full flex-shrink-0", MARK_COLOR_SWATCH_CLASS[color])} />
-                <span className="text-xs font-medium text-foreground capitalize w-14 flex-shrink-0">{color}</span>
-                <span className="text-xs text-muted-foreground w-16 flex-shrink-0">
-                  {count} mark{count === 1 ? "" : "s"}
-                </span>
-                <Select
-                  value={colorAssignments[color] ?? undefined}
-                  onValueChange={(v) => setColorAssignments((prev) => ({ ...prev, [color]: v as FittingType | "skip" }))}
-                >
-                  <SelectTrigger className="h-8 flex-1 text-xs">
-                    <SelectValue placeholder="What is this?" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="skip">Skip this colour</SelectItem>
-                    {(Object.keys(FITTING_SYMBOLS) as FittingType[]).map((type) => (
-                      <SelectItem key={type} value={type}>
-                        {FITTING_LABELS[type]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="flex-1 min-h-[400px] mb-4">
-          <SetoutCanvas
-            backgroundImage={{ href: raster.href, width: raster.naturalWidth / pixelsPerMetre, height: raster.naturalHeight / pixelsPerMetre }}
-            walls={savedWalls}
-            wallThickness={plan.wall_thickness}
-            openings={savedOpenings}
-            fittings={previewFittings}
-            mode="view"
-          />
-        </div>
-
-        <div className="flex gap-2">
-          <Button variant="outline" className="flex-1" onClick={onComplete}>
-            Skip — place manually
-          </Button>
-          <Button className="flex-1 font-bold" disabled={assignedFittings.length === 0 || createFittingsBulk.isPending} onClick={handleAddFittings}>
-            {createFittingsBulk.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              `Add ${assignedFittings.length} fitting${assignedFittings.length === 1 ? "" : "s"}`
-            )}
-          </Button>
-        </div>
       </div>
     );
   }

@@ -1,6 +1,7 @@
 import { useRef, useState, useCallback, useMemo, useEffect } from "react";
 import { GripHorizontal, Minus, Plus, MousePointer2, Camera } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { WallSnapIndex } from "@/lib/edgeDetection";
 import { FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
 import {
   colorForCircuit,
@@ -49,10 +50,27 @@ interface ViewBox {
 }
 
 const ICON_SCREEN_PX = 28;
-const CORNER_MARKER_METRES = 0.09;
+// Radius of a traced corner dot, in SCREEN pixels. Deliberately not a fixed
+// size in metres: that made the dots grow or shrink with whatever scale the
+// tradie happened to calibrate, and on a large commercial plan they covered
+// the very detail needed to place the next corner. Small enough to sit on a
+// wall junction without burying it.
+const CORNER_MARKER_PX = 5;
 
 interface BackgroundImage {
   href: string;
+  width: number;
+  height: number;
+}
+
+// A crisp re-render of just the part of the plan currently on screen, drawn
+// over the base image. A PDF is vector, so it can be rasterised again at
+// whatever zoom the tradie is on; the base image below it is a fixed
+// resolution and turns to mush when magnified. Positioned in scene units.
+export interface BackgroundTile {
+  href: string;
+  x: number;
+  y: number;
   width: number;
   height: number;
 }
@@ -73,6 +91,11 @@ export type SetoutCanvasMode =
 
 interface SetoutCanvasProps {
   backgroundImage?: BackgroundImage;
+  backgroundTile?: BackgroundTile | null;
+  // Fires once the view stops moving, so the owner can re-render the plan for
+  // the region now on screen. Debounced here rather than by the caller,
+  // because this component is what knows when a pan or zoom has settled.
+  onViewSettled?: (view: { x: number; y: number; w: number; h: number; screenWidth: number }) => void;
   walls: WallSegment[];
   // Real thickness (metres) drawn straight into the wall line's stroke
   // width in scene units — deliberately not vector-effect non-scaling like
@@ -84,6 +107,9 @@ interface SetoutCanvasProps {
   mode: SetoutCanvasMode;
   sketchPoints?: Point[];
   onSketchPointAdd?: (point: Point) => void;
+  // Drops the most recently added sketch point. Used to retract the point a
+  // double-tap-to-zoom placed on its way in — see handleBackgroundPointerDown.
+  onSketchPointUndo?: () => void;
   onSketchClose?: () => void;
   // "calibrate" mode: up to two taps to pick the scale-reference points,
   // rendered as its own marker pair rather than reusing sketchPoints, since
@@ -135,6 +161,13 @@ interface SetoutCanvasProps {
   // this component has the geometry, the parent just persists the result).
   onMeasurementRefPick?: (ref: MeasurementRef) => void;
   snapWalls?: boolean;
+  // Lines detected on the uploaded plan, indexed in scene units. When
+  // present, a tap while tracing pulls onto the nearest one, so the tradie can
+  // follow the printed walls without landing the tap exactly on them. The
+  // lines themselves are never drawn — the plan's own linework is the guide.
+  // Optional: with no plan behind the canvas (the draw-on-site flow) there's
+  // nothing to snap to.
+  planEdgeIndex?: WallSnapIndex | null;
   selectedFittingType?: FittingType | null;
   onPlaceFitting?: (point: Point) => void;
   onFittingDrag?: (fittingId: string, position: Point) => void;
@@ -192,6 +225,8 @@ function initialViewBox(backgroundImage?: BackgroundImage, walls?: WallSegment[]
 
 export default function SetoutCanvas({
   backgroundImage,
+  backgroundTile = null,
+  onViewSettled,
   walls,
   wallThickness = DEFAULT_WALL_THICKNESS,
   openings = [],
@@ -199,6 +234,7 @@ export default function SetoutCanvas({
   mode,
   sketchPoints = [],
   onSketchPointAdd,
+  onSketchPointUndo,
   onSketchClose,
   calibratePoints = [],
   onCalibratePointAdd,
@@ -213,6 +249,7 @@ export default function SetoutCanvas({
   onOpeningDrag,
   onMeasurementRefPick,
   snapWalls = false,
+  planEdgeIndex = null,
   selectedFittingType,
   onPlaceFitting,
   onFittingDrag,
@@ -273,11 +310,16 @@ export default function SetoutCanvas({
     return Math.min(bounds.max, Math.max(bounds.min, v));
   }, []);
 
+  // Scene units per screen pixel. The viewBox is fitted with the default
+  // preserveAspectRatio ("meet"), so the real scale is whichever axis runs out
+  // of room first — assuming width made every screen-pixel measurement in this
+  // component (snap tolerance, marker sizes, tap slop, pan speed) wrong
+  // whenever the canvas was taller in aspect than the view it was showing.
   const px2scene = useCallback(() => {
     const el = svgRef.current;
-    if (!el || el.clientWidth === 0) return viewBox.w / 600;
-    return viewBox.w / el.clientWidth;
-  }, [viewBox.w]);
+    if (!el || el.clientWidth === 0 || el.clientHeight === 0) return viewBox.w / 600;
+    return Math.max(viewBox.w / el.clientWidth, viewBox.h / el.clientHeight);
+  }, [viewBox.w, viewBox.h]);
 
   const zoomAround = useCallback((center: Point, factor: number) => {
     setViewBox((vb) => {
@@ -318,6 +360,17 @@ export default function SetoutCanvas({
   // stop that scroll.
   const touchStateRef = useRef<{ distance: number } | null>(null);
   const lastTapRef = useRef<{ time: number; x: number; y: number } | null>(null);
+  // Matches the double-tap window/tolerance used by the zoom gesture above, so
+  // the two agree on what counts as one gesture.
+  const PERIMETER_DOUBLE_TAP_MS = 400;
+  const PERIMETER_DOUBLE_TAP_PX = 20;
+  const lastPerimeterTapRef = useRef<{ time: number; clientX: number; clientY: number; placed: boolean } | null>(null);
+  // A tap waiting to find out whether it was really a tap. Set on pointer down
+  // in a placement mode, and either committed or discarded on pointer up
+  // depending on how far the pointer travelled in between.
+  const pendingTapRef = useRef<{ clientX: number; clientY: number } | null>(null);
+  // How far a pointer may travel and still count as a tap rather than a drag.
+  const TAP_SLOP_PX = 8;
 
   const handleTouchStart = useCallback(
     (e: TouchEvent) => {
@@ -405,6 +458,26 @@ export default function SetoutCanvas({
     touchStateRef.current = null;
   }, []);
 
+  // Where the next tap would land once pulled onto a wall centre, so the
+  // tradie can see what they're about to snap to before committing.
+  const [edgeSnapPreview, setEdgeSnapPreview] = useState<Point | null>(null);
+
+  // Radius in screen pixels a tap may be off by and still grab a wall. Kept in
+  // screen space rather than metres so it feels the same at every zoom level.
+  const EDGE_SNAP_PX = 20;
+
+  // Centre of the nearest wall on the plan, or null when snapping is off or
+  // there's no wall close enough. Callers treat a hit as taking precedence
+  // over the orthogonal snap: landing on a wall centre is a more specific
+  // intent than keeping the run square.
+  const snapToPlanEdge = useCallback(
+    (scene: Point): Point | null => {
+      if (!planEdgeIndex) return null;
+      return planEdgeIndex.nearestWallCentre(scene.x, scene.y, EDGE_SNAP_PX * px2scene());
+    },
+    [planEdgeIndex, px2scene]
+  );
+
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
@@ -452,14 +525,50 @@ export default function SetoutCanvas({
         (e.target as Element).setPointerCapture(e.pointerId);
         return;
       }
-      const scene = sceneFromClient(e.clientX, e.clientY);
+      // Everything below is a placement mode. Start a pan anyway so that
+      // press-and-drag moves the plan, and hold the intended tap until the
+      // pointer lifts — if it barely moved it was a tap, if it travelled it
+      // was a drag and no point should be dropped.
+      panState.current = { clientX: e.clientX, clientY: e.clientY, vb: viewBox, scale: px2scene() };
+      pendingTapRef.current = { clientX: e.clientX, clientY: e.clientY };
+      (e.target as Element).setPointerCapture(e.pointerId);
+    },
+    [panMode, mode, viewBox, px2scene, selectedFittingType]
+  );
+
+  // The actual placement, run on pointer UP rather than DOWN: pressing and
+  // dragging has to pan the plan, and that can't be told apart from a tap
+  // until the pointer is released.
+  const commitBackgroundTap = useCallback(
+    (clientX: number, clientY: number) => {
+      const scene = sceneFromClient(clientX, clientY);
       if (mode === "sketch-walls") {
+        // Zooming in is how you read a detailed plan, and double-tap is how
+        // you zoom — but pointerdown fires before touchstart, so by the time
+        // the zoom handler recognises the gesture this handler has already
+        // dropped a point for each tap. Recognise it here too: swallow the
+        // second tap and retract the first, leaving a clean zoom.
+        const now = Date.now();
+        const lastTap = lastPerimeterTapRef.current;
+        const isDoubleTap =
+          !!lastTap &&
+          now - lastTap.time < PERIMETER_DOUBLE_TAP_MS &&
+          Math.hypot(clientX - lastTap.clientX, clientY - lastTap.clientY) < PERIMETER_DOUBLE_TAP_PX;
+        if (isDoubleTap) {
+          lastPerimeterTapRef.current = null;
+          if (lastTap.placed) onSketchPointUndo?.();
+          return;
+        }
+
         if (isNearFirstPoint(sketchPoints, scene) && onSketchClose) {
+          lastPerimeterTapRef.current = { time: now, clientX: clientX, clientY: clientY, placed: false };
           onSketchClose();
           return;
         }
+        lastPerimeterTapRef.current = { time: now, clientX: clientX, clientY: clientY, placed: true };
         const last = sketchPoints[sketchPoints.length - 1];
-        const point = snapWalls && last ? snapOrthogonal(last, scene) : scene;
+        const onEdge = snapToPlanEdge(scene);
+        const point = onEdge ?? (snapWalls && last ? snapOrthogonal(last, scene) : scene);
         onSketchPointAdd?.(point);
       } else if (mode === "calibrate") {
         if (calibratePoints.length < 2) onCalibratePointAdd?.(scene);
@@ -475,9 +584,10 @@ export default function SetoutCanvas({
           lastInteriorTapRef.current = null;
           onInteriorWallChainEnd?.();
         } else if (!interiorWallDraftStart) {
-          onInteriorWallDraftPointAdd?.(scene);
+          onInteriorWallDraftPointAdd?.(snapToPlanEdge(scene) ?? scene);
         } else {
-          const end = snapInteriorWalls ? snapOrthogonal(interiorWallDraftStart, scene) : scene;
+          const onEdge = snapToPlanEdge(scene);
+          const end = onEdge ?? (snapInteriorWalls ? snapOrthogonal(interiorWallDraftStart, scene) : scene);
           onInteriorWallSegmentAdd?.(interiorWallDraftStart, end);
         }
       } else if (mode === "place-opening") {
@@ -571,7 +681,9 @@ export default function SetoutCanvas({
       sceneFromClient,
       sketchPoints,
       onSketchClose,
+      onSketchPointUndo,
       snapWalls,
+      snapToPlanEdge,
       onSketchPointAdd,
       calibratePoints,
       onCalibratePointAdd,
@@ -626,9 +738,14 @@ export default function SetoutCanvas({
         const raw = projectPointOntoWall(scene, wall) - width / 2;
         const offset = Math.max(0, Math.min(Math.max(len - width, 0), raw));
         setOpeningDragPreview({ id: openingId, offset });
+      } else if (planEdgeIndex && (mode === "sketch-walls" || mode === "sketch-interior-wall")) {
+        // Show what the next tap would grab. On touch this only fires while a
+        // finger is down (there's no hover), so the drawn overlay stays the
+        // primary cue on a phone and this is a bonus on desktop.
+        setEdgeSnapPreview(snapToPlanEdge(sceneFromClient(e.clientX, e.clientY)));
       }
     },
-    [walls, openings, fittings, sceneFromClient]
+    [walls, openings, fittings, sceneFromClient, planEdgeIndex, mode, snapToPlanEdge]
   );
 
   const endPan = useCallback(() => {
@@ -649,10 +766,21 @@ export default function SetoutCanvas({
     setAlignGuides(null);
   }, [dragPreview, onFittingDrag, openingDragPreview, onOpeningDrag]);
 
-  const handlePointerUp = useCallback(() => {
-    endPan();
-    endDrag();
-  }, [endPan, endDrag]);
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent<SVGSVGElement>) => {
+      const pending = pendingTapRef.current;
+      pendingTapRef.current = null;
+      if (pending) {
+        const travelled = Math.hypot(e.clientX - pending.clientX, e.clientY - pending.clientY);
+        // Barely moved: the tradie meant to place something here. Moved: they
+        // were dragging the plan around, so leave the canvas alone.
+        if (travelled <= TAP_SLOP_PX) commitBackgroundTap(pending.clientX, pending.clientY);
+      }
+      endPan();
+      endDrag();
+    },
+    [endPan, endDrag, commitBackgroundTap]
+  );
 
   const handleFittingPointerDown = useCallback(
     (e: React.PointerEvent<SVGGElement>, fitting: SetoutFitting) => {
@@ -958,6 +1086,37 @@ export default function SetoutCanvas({
     return lines;
   }, [visibleFittings, walls, openings, layerVisibility?.measurements, dragPreview]);
 
+  // Tell the owner which part of the plan is on screen, once the view has
+  // stopped moving. Deliberately trailing-only: re-rendering a PDF mid-pinch
+  // would fight the gesture, and the base image covers the interim.
+  useEffect(() => {
+    if (!onViewSettled) return;
+    const id = window.setTimeout(() => {
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (!rect || rect.width === 0 || rect.height === 0) return;
+      // The viewBox is NOT what's on screen. With the default
+      // preserveAspectRatio ("xMidYMid meet") the viewBox is scaled to fit
+      // inside the element, so whichever axis has room to spare shows MORE
+      // scene than the viewBox asks for — and content out there is still
+      // drawn. Reporting the raw viewBox meant the re-render stopped short of
+      // the edges of what the tradie could actually see.
+      const scale = Math.min(rect.width / viewBox.w, rect.height / viewBox.h);
+      const visibleW = rect.width / scale;
+      const visibleH = rect.height / scale;
+      onViewSettled({
+        x: viewBox.x - (visibleW - viewBox.w) / 2,
+        y: viewBox.y - (visibleH - viewBox.h) / 2,
+        w: visibleW,
+        h: visibleH,
+        screenWidth: rect.width,
+      });
+      // Long enough that a pinch or a flick of the wheel doesn't kick off a
+      // render on every intermediate frame — the re-render only happens once
+      // the tradie has actually settled on a view.
+    }, 260);
+    return () => window.clearTimeout(id);
+  }, [viewBox, onViewSettled]);
+
   const iconScale = (ICON_SCREEN_PX * px2scene()) / 24;
   const cursorClass = panMode || mode === "view" ? "cursor-grab active:cursor-grabbing" : "cursor-crosshair";
 
@@ -975,15 +1134,33 @@ export default function SetoutCanvas({
         {backgroundImage && (
           <image href={backgroundImage.href} x={0} y={0} width={backgroundImage.width} height={backgroundImage.height} />
         )}
+        {backgroundTile && (
+          // Sits directly over the base image at the same scene coordinates,
+          // so the swap is invisible apart from the detail sharpening up.
+          <image
+            href={backgroundTile.href}
+            x={backgroundTile.x}
+            y={backgroundTile.y}
+            width={backgroundTile.width}
+            height={backgroundTile.height}
+            pointerEvents="none"
+          />
+        )}
 
-        <g className="text-border">
-          {gridLines.vLines.map((x) => (
-            <line key={`v${x}`} x1={x} y1={gridLines.startY} x2={x} y2={gridLines.endY} stroke="currentColor" strokeOpacity={0.5} vectorEffect="non-scaling-stroke" />
-          ))}
-          {gridLines.hLines.map((y) => (
-            <line key={`h${y}`} x1={gridLines.startX} y1={y} x2={gridLines.endX} y2={y} stroke="currentColor" strokeOpacity={0.5} vectorEffect="non-scaling-stroke" />
-          ))}
-        </g>
+        {/* No grid over a plan — the drawing has its own linework, and a
+            second set of lines on top just competes with it. On a blank
+            canvas (drawing on site, no plan) it's the only spatial reference
+            there is, so it stays. */}
+        {!backgroundImage && (
+          <g className="text-border">
+            {gridLines.vLines.map((x) => (
+              <line key={`v${x}`} x1={x} y1={gridLines.startY} x2={x} y2={gridLines.endY} stroke="currentColor" strokeOpacity={0.5} vectorEffect="non-scaling-stroke" />
+            ))}
+            {gridLines.hLines.map((y) => (
+              <line key={`h${y}`} x1={gridLines.startX} y1={y} x2={gridLines.endX} y2={y} stroke="currentColor" strokeOpacity={0.5} vectorEffect="non-scaling-stroke" />
+            ))}
+          </g>
+        )}
 
         <g>
           {wallRenderData.map(({ wall, segments }) => {
@@ -1181,8 +1358,33 @@ export default function SetoutCanvas({
               vectorEffect="non-scaling-stroke"
             />
             {sketchPoints.map((p, i) => (
-              <circle key={i} cx={p.x} cy={p.y} r={CORNER_MARKER_METRES} fill="currentColor" />
+              <circle
+                key={i}
+                cx={p.x}
+                cy={p.y}
+                r={CORNER_MARKER_PX * px2scene()}
+                fill="currentColor"
+                stroke="hsl(var(--background))"
+                strokeWidth={1.5}
+                vectorEffect="non-scaling-stroke"
+              />
             ))}
+          </g>
+        )}
+
+        {edgeSnapPreview && (
+          // Ring showing the line the next tap will grab.
+          <g pointerEvents="none">
+            <circle
+              cx={edgeSnapPreview.x}
+              cy={edgeSnapPreview.y}
+              r={10 * px2scene()}
+              fill="rgb(6 182 212 / 0.25)"
+              stroke="rgb(6 182 212)"
+              strokeWidth={2}
+              vectorEffect="non-scaling-stroke"
+            />
+            <circle cx={edgeSnapPreview.x} cy={edgeSnapPreview.y} r={2.5 * px2scene()} fill="rgb(6 182 212)" />
           </g>
         )}
 
