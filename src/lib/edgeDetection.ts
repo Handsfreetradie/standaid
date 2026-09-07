@@ -11,7 +11,7 @@
 // ink, so tinting them just recolours the drawing and buries the detail being
 // read. The plan's own linework is the guide; detection only moves the tap.
 
-import { runEdgePass, type EdgePassRequest, type EdgePassResult } from "./edgeDetection.worker";
+import { runEdgePass, INK_LEVEL, type EdgePassRequest, type EdgePassResult } from "./edgeDetection.worker";
 
 // The Sobel pass is O(pixels), so the full-resolution render of a big sheet
 // would stall even a good phone — but downsampling too far is worse, because
@@ -76,7 +76,7 @@ export interface PlanEdges {
 export class WallSnapIndex {
   private normals: Float32Array;
   private straight: Uint8Array;
-  private ink: Uint8Array;
+  private grey: Uint8Array;
   private grid: Int32Array;
   private width: number;
   private height: number;
@@ -86,7 +86,7 @@ export class WallSnapIndex {
   constructor(pass: EdgePassResult, pxPerMetre: number) {
     this.normals = pass.normals;
     this.straight = pass.straight;
-    this.ink = pass.ink;
+    this.grey = pass.grey;
     this.grid = pass.grid;
     this.width = pass.width;
     this.height = pass.height;
@@ -98,11 +98,50 @@ export class WallSnapIndex {
     return this.grid[y * this.width + x];
   }
 
+  // Greyscale at a fractional position, bilinearly interpolated. Sampling on
+  // whole pixels alone would cost up to half a pixel of accuracy, and half a
+  // pixel here is about 14mm of building.
+  private greyAt(x: number, y: number): number {
+    const x0 = Math.floor(x);
+    const y0 = Math.floor(y);
+    if (x0 < 0 || y0 < 0 || x0 + 1 >= this.width || y0 + 1 >= this.height) return 255;
+    const fx = x - x0;
+    const fy = y - y0;
+    const i = y0 * this.width + x0;
+    const top = this.grey[i] * (1 - fx) + this.grey[i + 1] * fx;
+    const bot = this.grey[i + this.width] * (1 - fx) + this.grey[i + this.width + 1] * fx;
+    return top * (1 - fy) + bot * fy;
+  }
+
   private isInk(x: number, y: number): boolean {
-    const px = Math.round(x);
-    const py = Math.round(y);
-    if (px < 0 || py < 0 || px >= this.width || py >= this.height) return false;
-    return this.ink[py * this.width + px] === 1;
+    return this.greyAt(x, y) < INK_LEVEL;
+  }
+
+  /**
+   * How far the ink extends from a point in one direction, to a fraction of a
+   * pixel.
+   *
+   * Steps out until the grey rises past the ink threshold, then interpolates
+   * between the last two samples for where it actually crossed. That crossing
+   * is the drawn edge of the stroke; taking the last dark sample instead would
+   * quantise every measurement to whole pixels.
+   */
+  private inkReach(sx: number, sy: number, nx: number, ny: number, maxRun: number): number {
+    const STEP = 0.25;
+    let prevT = 0;
+    let prevG = this.greyAt(sx, sy);
+    for (let t = STEP; t <= maxRun; t += STEP) {
+      const g = this.greyAt(sx + nx * t, sy + ny * t);
+      if (g >= INK_LEVEL) {
+        // Crossed. Where between the last two samples did it pass the line?
+        const span = g - prevG;
+        const frac = span > 1e-6 ? (INK_LEVEL - prevG) / span : 0;
+        return prevT + STEP * Math.max(0, Math.min(1, frac));
+      }
+      prevT = t;
+      prevG = g;
+    }
+    return maxRun;
   }
 
   /**
@@ -138,16 +177,8 @@ export class WallSnapIndex {
       }
     }
 
-    let fwd = 0;
-    for (let t = 0.5; t <= maxRun; t += 0.5) {
-      if (!this.isInk(ox + nx * t, oy + ny * t)) break;
-      fwd = t;
-    }
-    let back = 0;
-    for (let t = 0.5; t <= maxRun; t += 0.5) {
-      if (!this.isInk(ox - nx * t, oy - ny * t)) break;
-      back = t;
-    }
+    const fwd = this.inkReach(ox, oy, nx, ny, maxRun);
+    const back = this.inkReach(ox, oy, -nx, -ny, maxRun);
 
     const span = fwd + back;
     // Ran to the limit in either direction: this is a filled region, not a

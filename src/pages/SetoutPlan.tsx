@@ -158,7 +158,7 @@ const SetoutPlan = () => {
   const [showBackgroundReference, setShowBackgroundReference] = useState(true);
 
   useEffect(() => {
-    if (!plan?.background_image_path || !plan.scale_calibration) {
+    if (!plan?.background_image_path) {
       setBackgroundImage(null);
       return;
     }
@@ -169,8 +169,11 @@ const SetoutPlan = () => {
       const img = new Image();
       img.onload = () => {
         if (cancelled) return;
-        const { pointA, pointB, realDistanceMetres } = plan.scale_calibration!;
-        const pixelsPerMetre = distance(pointA, pointB) / realDistanceMetres;
+        // With calibration skipped there is no real-world scale, so the
+        // image is placed at one scene unit per pixel. Nothing may report a
+        // distance in that state — see hasScale below.
+        const cal = plan.scale_calibration;
+        const pixelsPerMetre = cal ? distance(cal.pointA, cal.pointB) / cal.realDistanceMetres : 1;
         setBackgroundImage({ href: signed.signedUrl, width: img.naturalWidth / pixelsPerMetre, height: img.naturalHeight / pixelsPerMetre });
       };
       img.src = signed.signedUrl;

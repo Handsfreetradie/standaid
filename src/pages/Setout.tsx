@@ -114,12 +114,15 @@ const Setout = () => {
         ) : (
           <div className="space-y-2">
             {plans.map((p) => {
-              const hasWalls = p.walls.length > 0;
+              // Tracing walls is optional — a plan can be skipped straight
+              // through to placing things on the image. Having the image is
+              // what makes it usable, so that counts as set up too.
+              const isSetUp = p.walls.length > 0 || !!p.background_image_path;
               return (
                 <Card
                   key={p.id}
                   className="p-3 flex items-center gap-3 cursor-pointer hover:bg-secondary/50 transition-colors"
-                  onClick={() => (hasWalls ? navigate(`/setout/${p.id}`) : setView({ kind: "setup", plan: p }))}
+                  onClick={() => (isSetUp ? navigate(`/setout/${p.id}`) : setView({ kind: "setup", plan: p }))}
                 >
                   <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 flex-shrink-0">
                     <Zap className="h-4 w-4 text-primary" />
@@ -128,7 +131,7 @@ const Setout = () => {
                     <p className="text-sm font-semibold text-foreground truncate">{p.name}</p>
                     <div className="flex items-center gap-1.5">
                       {p.job_reference && <p className="text-xs text-muted-foreground truncate">{p.job_reference}</p>}
-                      {!hasWalls && <Badge variant="outline" className="text-[10px] px-1.5 py-0">Setup incomplete</Badge>}
+                      {!isSetUp && <Badge variant="outline" className="text-[10px] px-1.5 py-0">Setup incomplete</Badge>}
                     </div>
                   </div>
                   <Button

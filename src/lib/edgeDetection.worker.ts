@@ -17,10 +17,12 @@ export interface EdgePassResult {
   // points across the line the pixel sits on, so this is the line's normal —
   // which is what lets the caller pair up the two faces of a wall.
   normals: Float32Array;
-  // 1 where the pixel is ink (dark), 0 where it's paper. width*height. This is
-  // what a wall actually IS on a plan — the drawn mark — so the snap measures
-  // across this run rather than trying to pair up separate lines.
-  ink: Uint8Array;
+  // Greyscale, width*height. Kept rather than a yes/no ink mask because the
+  // edges of a drawn stroke are anti-aliased: the grey ramp across a boundary
+  // says where it falls to a fraction of a pixel, and at this resolution one
+  // pixel is nearly 30mm of building. Thresholding it away would throw that
+  // precision out before the measurement even starts.
+  grey: Uint8Array;
   // 1 where the line through this edge pixel runs straight, 0 where it curves.
   // Precomputed here rather than per query: it's a fixed property of the
   // image, and working it out during a snap cost tens of ms per tap.
@@ -39,7 +41,7 @@ const STRAIGHT_RUN_PX = 4;
 const STRAIGHT_COS = 0.96;
 // Greyscale below this counts as ink. Plans are dark line work on white paper,
 // so the split is wide and this only has to sit somewhere sensible between.
-const INK_LEVEL = 150;
+export const INK_LEVEL = 150;
 
 export function runEdgePass({ data, width, height, threshold }: EdgePassRequest): EdgePassResult {
   // Greyscale once up front rather than re-averaging each pixel nine times
@@ -49,8 +51,8 @@ export function runEdgePass({ data, width, height, threshold }: EdgePassRequest)
     grey[i] = (data[p] + data[p + 1] + data[p + 2]) / 3;
   }
 
-  const ink = new Uint8Array(width * height);
-  for (let i = 0; i < grey.length; i++) if (grey[i] < INK_LEVEL) ink[i] = 1;
+  const greyOut = new Uint8Array(width * height);
+  for (let i = 0; i < grey.length; i++) greyOut[i] = grey[i];
 
   const grid = new Int32Array(width * height).fill(-1);
   const nxs: number[] = [];
@@ -118,7 +120,7 @@ export function runEdgePass({ data, width, height, threshold }: EdgePassRequest)
     }
   }
 
-  return { normals, straight, ink, grid, count, width, height };
+  return { normals, straight, grey: greyOut, grid, count, width, height };
 }
 
 // Worker entry point. Guarded so this module can also be imported directly on
@@ -130,7 +132,7 @@ if (typeof self !== "undefined" && typeof (self as unknown as { document?: unkno
     (self as unknown as Worker).postMessage(result, [
       result.normals.buffer,
       result.straight.buffer,
-      result.ink.buffer,
+      result.grey.buffer,
       result.grid.buffer,
     ]);
   };

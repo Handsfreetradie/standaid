@@ -1,7 +1,6 @@
 import { useRef, useState, useCallback, useMemo, useEffect } from "react";
 import { GripHorizontal, Minus, Plus, MousePointer2, Camera } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { WallSnapIndex } from "@/lib/edgeDetection";
 import { FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
 import {
   colorForCircuit,
@@ -161,13 +160,13 @@ interface SetoutCanvasProps {
   // this component has the geometry, the parent just persists the result).
   onMeasurementRefPick?: (ref: MeasurementRef) => void;
   snapWalls?: boolean;
-  // Lines detected on the uploaded plan, indexed in scene units. When
-  // present, a tap while tracing pulls onto the nearest one, so the tradie can
-  // follow the printed walls without landing the tap exactly on them. The
-  // lines themselves are never drawn — the plan's own linework is the guide.
-  // Optional: with no plan behind the canvas (the draw-on-site flow) there's
-  // nothing to snap to.
-  planEdgeIndex?: WallSnapIndex | null;
+  // Pulls a raw point onto the plan's geometry, or returns null to leave it
+  // where it was. Deliberately a function rather than an index: the owner
+  // decides whether that means the exact vector lines read out of the PDF or
+  // the pixel detector used on scans, and this component doesn't need to know
+  // which. Given the tolerance in scene units, since only the canvas knows the
+  // zoom. Absent for draw-on-site, where there's no plan to snap to.
+  snapToPlan?: ((point: Point, tolerance: number) => Point | null) | null;
   selectedFittingType?: FittingType | null;
   onPlaceFitting?: (point: Point) => void;
   onFittingDrag?: (fittingId: string, position: Point) => void;
@@ -249,7 +248,7 @@ export default function SetoutCanvas({
   onOpeningDrag,
   onMeasurementRefPick,
   snapWalls = false,
-  planEdgeIndex = null,
+  snapToPlan = null,
   selectedFittingType,
   onPlaceFitting,
   onFittingDrag,
@@ -466,16 +465,11 @@ export default function SetoutCanvas({
   // screen space rather than metres so it feels the same at every zoom level.
   const EDGE_SNAP_PX = 20;
 
-  // Centre of the nearest wall on the plan, or null when snapping is off or
-  // there's no wall close enough. Callers treat a hit as taking precedence
-  // over the orthogonal snap: landing on a wall centre is a more specific
-  // intent than keeping the run square.
+  // A hit takes precedence over the orthogonal snap: landing on the plan's own
+  // geometry is a more specific intent than keeping the run square.
   const snapToPlanEdge = useCallback(
-    (scene: Point): Point | null => {
-      if (!planEdgeIndex) return null;
-      return planEdgeIndex.nearestWallCentre(scene.x, scene.y, EDGE_SNAP_PX * px2scene());
-    },
-    [planEdgeIndex, px2scene]
+    (scene: Point): Point | null => (snapToPlan ? snapToPlan(scene, EDGE_SNAP_PX * px2scene()) : null),
+    [snapToPlan, px2scene]
   );
 
   useEffect(() => {
@@ -753,14 +747,14 @@ export default function SetoutCanvas({
         const raw = projectPointOntoWall(scene, wall) - width / 2;
         const offset = Math.max(0, Math.min(Math.max(len - width, 0), raw));
         setOpeningDragPreview({ id: openingId, offset });
-      } else if (planEdgeIndex && (mode === "sketch-walls" || mode === "sketch-interior-wall")) {
+      } else if (snapToPlan && (mode === "sketch-walls" || mode === "sketch-interior-wall")) {
         // Show what the next tap would grab. On touch this only fires while a
         // finger is down (there's no hover), so the drawn overlay stays the
         // primary cue on a phone and this is a bonus on desktop.
         setEdgeSnapPreview(snapToPlanEdge(sceneFromClient(e.clientX, e.clientY)));
       }
     },
-    [walls, openings, fittings, sceneFromClient, planEdgeIndex, mode, snapToPlanEdge, viewBox, px2scene]
+    [walls, openings, fittings, sceneFromClient, snapToPlan, mode, snapToPlanEdge, viewBox, px2scene]
   );
 
   const endPan = useCallback(() => {

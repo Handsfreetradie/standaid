@@ -13,6 +13,7 @@ import { useUpdateSetoutPlanGeometry } from "@/hooks/useSetoutPlans";
 import { distance, type Point, type SetoutPlan, type WallOpening, type WallSegment } from "@/lib/setoutTypes";
 import { applyWallLengths, nextOpeningId, nextWallId, polygonToWalls, wallLength } from "@/lib/setoutGeometry";
 import { detectPlanEdges, type PlanEdges } from "@/lib/edgeDetection";
+import { extractPlanLines, PlanVectorIndex, type PdfPageForVector } from "@/lib/planVector";
 
 // Standard Australian residential door/window widths — used as the default
 // when a door/window is placed, then editable per-opening afterward.
@@ -48,8 +49,8 @@ const TILE_MARGIN = 1.35;
 
 // The slice of pdf.js's page API used here, named so this file doesn't depend
 // on pdfjs-dist's types at module load (it's imported lazily below).
-interface PdfPage {
-  getViewport(options: { scale: number }): { width: number; height: number };
+interface PdfPage extends PdfPageForVector {
+  getViewport(options: { scale: number }): { width: number; height: number } & { convertToViewportPoint(x: number, y: number): number[] };
   render(options: {
     canvasContext: CanvasRenderingContext2D;
     viewport: { width: number; height: number };
@@ -224,12 +225,21 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
   const [openingKind, setOpeningKind] = useState<"door" | "window" | "sliding_door">("door");
   const [uploadedImagePath, setUploadedImagePath] = useState<string | null>(null);
   const [uploadedImageContentType, setUploadedImageContentType] = useState<string | null>(null);
+  // Exact line geometry read straight out of the PDF. Preferred over the pixel
+  // detector whenever the plan actually is vector, because it needs no
+  // estimating at all — see planVector.ts.
+  const [vectorIndex, setVectorIndex] = useState<PlanVectorIndex | null>(null);
   const [planEdges, setPlanEdges] = useState<PlanEdges | null>(null);
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [detectingEdges, setDetectingEdges] = useState(false);
   // The sharp re-render of whatever's on screen. Null until the first one
   // lands, and while a photo (rather than a PDF) is the source.
   const [tile, setTile] = useState<BackgroundTile | null>(null);
+  // Set when the tradie skips calibration. The plan still opens and things can
+  // still be placed on it — there is just no real-world scale, so nothing may
+  // report a distance. Kept separate from pixelsPerMetre, which is forced to 1
+  // (scene units become image pixels) purely so the canvas has a mapping.
+  const [scaleSkipped, setScaleSkipped] = useState(false);
   const tileCleanupRef = useRef<(() => void) | null>(null);
   // Bumped per request so a slow render that finishes after the tradie has
   // moved on gets dropped instead of painting a stale region.
@@ -293,45 +303,74 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     [renderTileForView, pixelsPerMetre]
   );
 
-  // Finds the printed lines on the plan so tracing can snap to them. Can only
-  // run once the scale is known, since the index is built in scene units.
-  // Cached against the raster + scale it was built from: toggling the snap
-  // switch off and back on must not pay for the pass again, but recalibrating
-  // (which changes the scale) has to rebuild it.
-  const edgesBuiltFor = useRef<string | null>(null);
+  // Works out what the tap should snap to. A vector PDF carries its own exact
+  // geometry, so that is read directly; only when the plan turns out to be a
+  // scan or a photograph does this fall back to detecting lines in pixels,
+  // which is an estimate and costs both time and memory.
+  //
+  // Rebuilt when the scale changes, since both forms answer in scene units.
+  const builtFor = useRef<string | null>(null);
   useEffect(() => {
     if (!raster || !pixelsPerMetre || !snapEnabled) return;
     const key = `${raster.href}@${pixelsPerMetre}`;
-    if (edgesBuiltFor.current === key) return;
-    edgesBuiltFor.current = key;
+    if (builtFor.current === key) return;
+    builtFor.current = key;
 
     let cancelled = false;
     setDetectingEdges(true);
-    detectPlanEdges(raster.href, pixelsPerMetre)
-      .then((edges) => {
+
+    (async () => {
+      // A page with real drawn geometry has thousands of lines; a scan wrapped
+      // in a PDF has a handful or none, and is better served by the detector.
+      const MIN_VECTOR_LINES = 20;
+      if (raster.pdfPage) {
+        try {
+          const lines = await extractPlanLines(raster.pdfPage, pixelsPerMetre, BASE_PDF_SCALE);
+          if (cancelled) return;
+          if (lines.length >= MIN_VECTOR_LINES) {
+            setVectorIndex(new PlanVectorIndex(lines));
+            setPlanEdges(null);
+            return;
+          }
+        } catch (err) {
+          // Falls through to the pixel detector below.
+          console.error("[CalibrationImportFlow] Vector read failed:", err);
+        }
+      }
+
+      try {
+        const edges = await detectPlanEdges(raster.href, pixelsPerMetre);
         if (cancelled) return;
+        setVectorIndex(null);
         setPlanEdges(edges);
-        // A plan that's a photo of a photo, or very faint, yields nothing to
-        // snap to — say so rather than leaving the tradie wondering why taps
-        // aren't grabbing anything.
         if (edges.count === 0) toast.info("No clear lines found on this plan — tracing won't snap.");
-      })
-      .catch((err) => {
-        // Non-fatal: tracing still works, it just won't snap.
+      } catch (err) {
         console.error("[CalibrationImportFlow] Edge detection failed:", err);
         if (!cancelled) {
-          edgesBuiltFor.current = null;
+          builtFor.current = null;
           setPlanEdges(null);
           toast.error("Couldn't read the lines on this plan — trace it by hand.");
         }
-      })
-      .finally(() => {
-        if (!cancelled) setDetectingEdges(false);
-      });
+      }
+    })().finally(() => {
+      if (!cancelled) setDetectingEdges(false);
+    });
+
     return () => {
       cancelled = true;
     };
   }, [raster, pixelsPerMetre, snapEnabled]);
+
+  // Tracing follows the middle of a drawn line. Placing fittings will measure
+  // off the faces instead, which is why the vector index exposes both.
+  const snapToPlan = useCallback(
+    (point: Point, tolerance: number): Point | null => {
+      if (!snapEnabled) return null;
+      if (vectorIndex) return vectorIndex.nearestCentre(point.x, point.y, tolerance)?.point ?? null;
+      return planEdges?.index.nearestWallCentre(point.x, point.y, tolerance) ?? null;
+    },
+    [snapEnabled, vectorIndex, planEdges]
+  );
 
   // Keeps the plan image as the permanent background reference for the
   // workspace. Nothing is read off it automatically — the tradie calibrates
@@ -382,11 +421,18 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
   const distanceMetres = Number(realDistance);
   const canConfirmCalibration = calibPoints.length === 2 && distanceMetres > 0;
 
+  const skipCalibration = () => {
+    setScaleSkipped(true);
+    setPixelsPerMetre(1);
+    setStep("trace-walls");
+  };
+
   const confirmCalibration = () => {
     if (!canConfirmCalibration || !raster) return;
     const pixelDist = distance(calibPoints[0], calibPoints[1]);
     const ppm = pixelDist / distanceMetres;
     setPixelsPerMetre(ppm);
+    setScaleSkipped(false);
     setStep("trace-walls");
   };
 
@@ -404,17 +450,22 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
   // off the closure, since the adjust-lengths confirm handler needs to save
   // the newly-corrected points immediately rather than waiting on a state
   // update to land first.
-  const finishTrace = async (finalPoints: Point[] = sketchPoints) => {
-    if (finalPoints.length < 3 || !pixelsPerMetre) return;
-    const walls = [...polygonToWalls(finalPoints), ...interiorWalls];
+  const finishTrace = async (finalPoints: Point[] = sketchPoints, skipWalls = false) => {
+    if (!pixelsPerMetre) return;
+    if (!skipWalls && finalPoints.length < 3) return;
+    const walls = skipWalls ? [] : [...polygonToWalls(finalPoints), ...interiorWalls];
     try {
       await saveGeometry.mutateAsync({
         walls,
-        scale_calibration: { pointA: calibPoints[0], pointB: calibPoints[1], realDistanceMetres: distanceMetres },
+        // Null when calibration was skipped — the workspace uses its absence
+        // to know it must not report any distance.
+        scale_calibration: scaleSkipped
+          ? null
+          : { pointA: calibPoints[0], pointB: calibPoints[1], realDistanceMetres: distanceMetres },
         openings: wallOpenings,
         ...(uploadedImagePath ? { background_image_path: uploadedImagePath, background_image_content_type: uploadedImageContentType ?? "image/png" } : {}),
       });
-      toast.success("Walls saved");
+      toast.success(skipWalls ? "Plan saved" : "Walls saved");
       onComplete();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not save the plan");
@@ -496,6 +547,9 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
             placeholder="e.g. 3.6"
           />
         </div>
+        <Button variant="ghost" className="w-full h-11 text-muted-foreground" onClick={skipCalibration}>
+          Skip — I don't need measurements
+        </Button>
         <Button className="w-full h-12 font-bold rounded-xl" disabled={!canConfirmCalibration} onClick={confirmCalibration}>
           Continue to wall tracing
         </Button>
@@ -601,9 +655,11 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
               {detectingEdges
                 ? "Reading the lines on the plan…"
                 : snapEnabled
-                  ? planEdges
-                    ? "Snap to the plan's lines — taps pull onto the nearest line"
-                    : "Snap to the plan's lines"
+                  ? vectorIndex
+                    ? `Snap to the plan's lines — exact, read from the PDF (${vectorIndex.size} lines)`
+                    : planEdges
+                      ? "Snap to the plan's lines — detected from the image"
+                      : "Snap to the plan's lines"
                   : "Snap off — taps land exactly where you touch"}
             </Label>
           </div>
@@ -637,7 +693,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
             onViewSettled={handleTraceViewSettled}
             onSketchClose={proceedToLengthAdjustment}
             snapWalls={wallTool === "perimeter"}
-            planEdgeIndex={snapEnabled ? planEdges?.index ?? null : null}
+            snapToPlan={snapToPlan}
             interiorWallDraftStart={interiorDraftStart}
             onInteriorWallDraftPointAdd={setInteriorDraftStart}
             snapInteriorWalls={straightInteriorWalls}
@@ -725,6 +781,17 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
               </div>
             ))}
           </div>
+        )}
+
+        {wallTool === "perimeter" && sketchPoints.length === 0 && (
+          <Button
+            variant="ghost"
+            className="w-full h-11 mb-2 text-muted-foreground"
+            disabled={saveGeometry.isPending}
+            onClick={() => finishTrace([], true)}
+          >
+            Skip — just place things on the plan
+          </Button>
         )}
 
         <div className="flex gap-2">
