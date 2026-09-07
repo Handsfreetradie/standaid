@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download, Undo2, PencilRuler, Ruler, Image as ImageIcon, EyeOff, Camera, Plus, Minus, Trash2, Network, GripHorizontal } from "lucide-react";
 import { toast } from "sonner";
@@ -25,6 +25,9 @@ import type { FittingType } from "@/components/setout/symbols";
 import { DEFAULT_LAYER_VISIBILITY, distance, gangsFor, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type MeasurementRef, type Point, type SetoutFitting } from "@/lib/setoutTypes";
 import { autoRotationForWallMount, computeMeasurementLock, defaultHeightForType } from "@/lib/setoutGeometry";
 import { generateSetoutReportPdf } from "@/lib/setoutReport";
+import { BASE_PDF_SCALE, renderPdfTile, type PdfPage } from "@/lib/planRender";
+import { extractPlanLines, PlanVectorIndex } from "@/lib/planVector";
+import type { BackgroundTile } from "@/components/setout/SetoutCanvas";
 import CircuitsPanel from "@/components/setout/CircuitsPanel";
 import EditWallsFlow from "@/components/setout/EditWallsFlow";
 import MeasurementListPanel from "@/components/setout/MeasurementListPanel";
@@ -156,6 +159,90 @@ const SetoutPlan = () => {
   // scale_calibration — same formula used when this image was first traced.
   const [backgroundImage, setBackgroundImage] = useState<{ href: string; width: number; height: number } | null>(null);
   const [showBackgroundReference, setShowBackgroundReference] = useState(true);
+  // The plan as it was uploaded. Only present for plans imported since the
+  // source file started being kept, and only useful when it's a PDF — that's
+  // what carries the exact line geometry and can be rasterised again at
+  // whatever zoom the tradie is on.
+  const [pdfPage, setPdfPage] = useState<PdfPage | null>(null);
+  const [vectorIndex, setVectorIndex] = useState<PlanVectorIndex | null>(null);
+  const [tile, setTile] = useState<BackgroundTile | null>(null);
+  const tileCleanupRef = useRef<(() => void) | null>(null);
+  const tileRequestRef = useRef(0);
+  useEffect(() => () => tileCleanupRef.current?.(), []);
+
+  // Scene units per metre for this plan. One when calibration was skipped, in
+  // which case scene units are image pixels and no distance means anything.
+  const planPixelsPerMetre = useMemo(() => {
+    const cal = plan?.scale_calibration;
+    return cal ? distance(cal.pointA, cal.pointB) / cal.realDistanceMetres : 1;
+  }, [plan?.scale_calibration]);
+
+  // Read the uploaded PDF, for exact snapping and for sharp re-rendering.
+  useEffect(() => {
+    const path = plan?.source_file_path;
+    const type = plan?.source_file_content_type;
+    if (!path || (type && !type.includes("pdf"))) {
+      setPdfPage(null);
+      setVectorIndex(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: signed } = await supabase.storage.from("setout-plan-uploads").createSignedUrl(path, 3600);
+        if (!signed?.signedUrl || cancelled) return;
+        const pdfjsLib = await import("pdfjs-dist");
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+        const buffer = await (await fetch(signed.signedUrl)).arrayBuffer();
+        if (cancelled) return;
+        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+        const page = (await pdf.getPage(1)) as unknown as PdfPage;
+        if (cancelled) return;
+        setPdfPage(page);
+        const lines = await extractPlanLines(page, planPixelsPerMetre, BASE_PDF_SCALE);
+        if (!cancelled && lines.length >= 20) setVectorIndex(new PlanVectorIndex(lines));
+      } catch (err) {
+        // Not fatal: the plan still shows as a flat image, it just can't be
+        // snapped to exactly or re-rendered sharply.
+        console.error("[SetoutPlan] Could not read the plan's source PDF:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [plan?.source_file_path, plan?.source_file_content_type, planPixelsPerMetre]);
+
+  // Re-rasterise the visible region whenever the view settles, so zooming in
+  // shows the plan's real detail rather than magnified pixels.
+  const handleViewSettled = useCallback(
+    async (view: { x: number; y: number; w: number; h: number; screenWidth: number }) => {
+      if (!pdfPage || !backgroundImage) return;
+      const token = ++tileRequestRef.current;
+      try {
+        const planExtent = { w: backgroundImage.width, h: backgroundImage.height };
+        const next = await renderPdfTile(pdfPage, view, planExtent, planPixelsPerMetre);
+        if (!next) return;
+        if (token !== tileRequestRef.current) {
+          next.revoke();
+          return;
+        }
+        tileCleanupRef.current?.();
+        tileCleanupRef.current = next.revoke;
+        setTile({ href: next.href, x: next.x, y: next.y, width: next.coveredW, height: next.coveredH });
+      } catch {
+        // Leaves the flat image showing.
+      }
+    },
+    [pdfPage, backgroundImage, planPixelsPerMetre]
+  );
+
+  // Fittings are set out from the FACE of a wall — what a tape measures to —
+  // not its centreline, which is what tracing follows.
+  const snapToPlan = useCallback(
+    (point: Point, tolerance: number): Point | null =>
+      vectorIndex?.nearestEdge(point.x, point.y, tolerance)?.point ?? null,
+    [vectorIndex]
+  );
 
   useEffect(() => {
     if (!plan?.background_image_path) {
@@ -172,9 +259,11 @@ const SetoutPlan = () => {
         // With calibration skipped there is no real-world scale, so the
         // image is placed at one scene unit per pixel. Nothing may report a
         // distance in that state — see hasScale below.
-        const cal = plan.scale_calibration;
-        const pixelsPerMetre = cal ? distance(cal.pointA, cal.pointB) / cal.realDistanceMetres : 1;
-        setBackgroundImage({ href: signed.signedUrl, width: img.naturalWidth / pixelsPerMetre, height: img.naturalHeight / pixelsPerMetre });
+        setBackgroundImage({
+          href: signed.signedUrl,
+          width: img.naturalWidth / planPixelsPerMetre,
+          height: img.naturalHeight / planPixelsPerMetre,
+        });
       };
       img.src = signed.signedUrl;
     })();
@@ -801,6 +890,9 @@ const SetoutPlan = () => {
             <div className="h-[65vh] md:h-[85vh] mb-4 md:mb-0 md:mb-0" style={{ marginBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
               <SetoutCanvas
                 backgroundImage={showBackgroundReference ? (backgroundImage ?? undefined) : undefined}
+                backgroundTile={showBackgroundReference ? tile : null}
+                onViewSettled={pdfPage ? handleViewSettled : undefined}
+                snapToPlan={snapToPlan}
                 walls={plan.walls}
                 wallThickness={{ exterior: wallThicknessMm.exterior / 1000, interior: wallThicknessMm.interior / 1000 }}
                 openings={plan.openings}
