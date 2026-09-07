@@ -710,6 +710,21 @@ export default function SetoutCanvas({
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
       if (panState.current) {
+        const pending = pendingTapRef.current;
+        if (pending) {
+          // A tap is still in the running. Hold the plan completely still
+          // until the pointer has travelled far enough to be a drag —
+          // otherwise the shake in an ordinary click pans the plan under the
+          // very point being placed.
+          const travelled = Math.hypot(e.clientX - pending.clientX, e.clientY - pending.clientY);
+          if (travelled <= TAP_SLOP_PX) return;
+          // It's a drag. Give up on the tap and rebase the pan to here, so the
+          // plan starts moving from where the finger is now instead of jumping
+          // by the slop distance the moment the threshold is crossed.
+          pendingTapRef.current = null;
+          panState.current = { clientX: e.clientX, clientY: e.clientY, vb: viewBox, scale: px2scene() };
+          return;
+        }
         const { clientX, clientY, vb, scale } = panState.current;
         const dx = (e.clientX - clientX) * scale;
         const dy = (e.clientY - clientY) * scale;
@@ -745,7 +760,7 @@ export default function SetoutCanvas({
         setEdgeSnapPreview(snapToPlanEdge(sceneFromClient(e.clientX, e.clientY)));
       }
     },
-    [walls, openings, fittings, sceneFromClient, planEdgeIndex, mode, snapToPlanEdge]
+    [walls, openings, fittings, sceneFromClient, planEdgeIndex, mode, snapToPlanEdge, viewBox, px2scene]
   );
 
   const endPan = useCallback(() => {

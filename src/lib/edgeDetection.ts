@@ -106,29 +106,55 @@ export class WallSnapIndex {
   }
 
   /**
-   * Measures across the drawn mark at a boundary and returns how far its ink
-   * runs, and which way.
+   * Measures the full width of the drawn mark under a point and returns how
+   * far its centre lies from that point, along the normal.
    *
-   * `nx`/`ny` is the boundary's normal, so stepping along it crosses the mark.
-   * Returns the signed distance to the far side, or 0 if there's no ink beside
-   * this boundary or the run is too wide to be a wall.
+   * Walks BOTH ways rather than assuming the start sits on a boundary. On a
+   * real plan a wall stroke is often only two or three pixels wide at the
+   * resolution this works at, and the gradient fires across the whole of it —
+   * so the starting pixel is usually somewhere INSIDE the ink, not on its
+   * edge. Measuring one way from there spans half the stroke and puts the
+   * "centre" on a face, which is exactly the error this replaced.
+   *
+   * Returns 0 when there's no ink here, or when the run is too wide to be a
+   * wall (hatching, a filled symbol, a title block).
    */
-  private inkRunAcross(ex: number, ey: number, nx: number, ny: number): number {
+  private inkCentreOffset(sx: number, sy: number, nx: number, ny: number): number | null {
     const maxRun = MAX_WALL_THICKNESS_M * this.pxPerMetre;
-    // The gradient points across the mark but not reliably INTO it, so find
-    // which side the ink is actually on.
-    const dir = this.isInk(ex + nx, ey + ny) ? 1 : this.isInk(ex - nx, ey - ny) ? -1 : 0;
-    if (dir === 0) return 0;
 
-    let far = 0;
-    for (let t = 1; t <= maxRun; t += 0.5) {
-      if (!this.isInk(ex + nx * dir * t, ey + ny * dir * t)) break;
-      far = t;
+    // Start from ink. The gradient fires either side of a boundary, so if this
+    // pixel is paper, step across to the side that isn't.
+    let ox = sx;
+    let oy = sy;
+    if (!this.isInk(ox, oy)) {
+      if (this.isInk(sx + nx, sy + ny)) {
+        ox = sx + nx;
+        oy = sy + ny;
+      } else if (this.isInk(sx - nx, sy - ny)) {
+        ox = sx - nx;
+        oy = sy - ny;
+      } else {
+        return null;
+      }
     }
-    // Ran off the end of what a wall could be — this is a filled region
-    // (hatching, a title block, a solid symbol), not a wall to set out to.
-    if (far <= 0 || far >= maxRun) return 0;
-    return dir * far;
+
+    let fwd = 0;
+    for (let t = 0.5; t <= maxRun; t += 0.5) {
+      if (!this.isInk(ox + nx * t, oy + ny * t)) break;
+      fwd = t;
+    }
+    let back = 0;
+    for (let t = 0.5; t <= maxRun; t += 0.5) {
+      if (!this.isInk(ox - nx * t, oy - ny * t)) break;
+      back = t;
+    }
+
+    const span = fwd + back;
+    // Ran to the limit in either direction: this is a filled region, not a
+    // wall to set out to.
+    if (span <= 0 || fwd >= maxRun || back >= maxRun) return null;
+    // Offset from the ORIGINAL point, not the stepped-to-ink one.
+    return (fwd - back) / 2 + (nx * (ox - sx) + ny * (oy - sy));
   }
 
   /**
@@ -178,11 +204,13 @@ export class WallSnapIndex {
 
         const nx = this.normals[k * 2];
         const ny = this.normals[k * 2 + 1];
-        const across = this.inkRunAcross(px, py, nx, ny);
-        if (across === 0) continue;
+        const across = this.inkCentreOffset(px, py, nx, ny);
+        if (across === null) continue;
 
-        const midX = px + (nx * across) / 2;
-        const midY = py + (ny * across) / 2;
+        // `across` is already the distance to the centre, not to the far
+        // face — halving it here is what put every reading back on the edge.
+        const midX = px + nx * across;
+        const midY = py + ny * across;
         const distSq = (midX - cx) ** 2 + (midY - cy) ** 2;
         if (distSq < bestDistSq) {
           bestDistSq = distSq;
