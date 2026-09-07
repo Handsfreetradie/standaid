@@ -14,6 +14,7 @@ import { distance, type Point, type SetoutPlan, type WallOpening, type WallSegme
 import { applyWallLengths, nextOpeningId, nextWallId, polygonToWalls, wallLength } from "@/lib/setoutGeometry";
 import { detectPlanEdges, type PlanEdges } from "@/lib/edgeDetection";
 import { extractPlanLines, PlanVectorIndex, type PdfPageForVector } from "@/lib/planVector";
+import { fromMm, mmValue } from "@/lib/units";
 
 // Standard Australian residential door/window widths — used as the default
 // when a door/window is placed, then editable per-opening afterward.
@@ -418,7 +419,8 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     setCalibPoints((prev) => [...prev, point]);
   };
 
-  const distanceMetres = Number(realDistance);
+  // Typed in millimetres; the geometry below works in metres.
+  const distanceMetres = fromMm(Number(realDistance));
   const canConfirmCalibration = calibPoints.length === 2 && distanceMetres > 0;
 
   const skipCalibration = () => {
@@ -442,7 +444,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
   const proceedToLengthAdjustment = () => {
     if (sketchPoints.length < 3) return;
     const walls = polygonToWalls(sketchPoints);
-    setLengths(walls.map((w) => wallLength(w).toFixed(2)));
+    setLengths(walls.map((w) => mmValue(wallLength(w))));
     setStep("adjust-lengths");
   };
 
@@ -535,16 +537,16 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
           </Button>
         )}
         <div className="space-y-2 mb-6">
-          <Label htmlFor="real-distance">Real distance between those points (metres)</Label>
+          <Label htmlFor="real-distance">Real distance between those points (mm)</Label>
           <Input
             id="real-distance"
             type="number"
             inputMode="decimal"
             min="0"
-            step="0.01"
+            step="1"
             value={realDistance}
             onChange={(e) => setRealDistance(e.target.value)}
-            placeholder="e.g. 3.6"
+            placeholder="e.g. 3600"
           />
         </div>
         <Button variant="ghost" className="w-full h-11 text-muted-foreground" onClick={skipCalibration}>
@@ -842,14 +844,14 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
       width: raster.naturalWidth / pixelsPerMetre,
       height: raster.naturalHeight / pixelsPerMetre,
     };
-    const parsedLengths = lengths.map((l) => Number(l) || 0);
+    const parsedLengths = lengths.map((l) => fromMm(Number(l)) || 0);
     const previewPoints = parsedLengths.some((l) => l <= 0) ? sketchPoints : applyWallLengths(sketchPoints, parsedLengths);
     const previewWalls = polygonToWalls(previewPoints);
     const allLengthsValid = lengths.length > 0 && lengths.every((l) => Number(l) > 0);
 
     const confirmLengths = () => {
       if (!allLengthsValid) return;
-      const finalPoints = applyWallLengths(sketchPoints, lengths.map(Number));
+      const finalPoints = applyWallLengths(sketchPoints, lengths.map((l) => fromMm(Number(l))));
       setSketchPoints(finalPoints);
       setPerimeterFinalized(true);
       setWallTool("interior");
@@ -866,8 +868,8 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
         </button>
         <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Enter the real wall lengths</h2>
         <p className="text-xs text-muted-foreground mb-4">
-          Read each wall's length straight off the plan (or measure it on site) and type it in metres — this is what makes the shape
-          exact, not the tapping. The preview redraws true to scale as you type.
+          Read each wall's length straight off the plan (or measure it on site) and type it in millimetres — this is what makes the
+          shape exact, not the tapping. The preview redraws true to scale as you type.
         </p>
 
         <div className="flex-1 min-h-[420px] mb-4">
@@ -881,9 +883,9 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
               <Input
                 id={`wall-${i}`}
                 type="number"
-                inputMode="decimal"
+                inputMode="numeric"
                 min="0"
-                step="0.01"
+                step="1"
                 value={len}
                 onChange={(e) => setLengths((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))}
               />

@@ -1,6 +1,7 @@
 import { useRef, useState, useCallback, useMemo, useEffect } from "react";
 import { GripHorizontal, Minus, Plus, MousePointer2, Camera } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatMm } from "@/lib/units";
 import { FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
 import {
   colorForCircuit,
@@ -1087,7 +1088,7 @@ export default function SetoutCanvas({
           if (!other) continue;
           to = dragPreview?.id === other.id ? dragPreview.position : other.position;
         }
-        const label = `${ref.distance.toFixed(2)}m`;
+        const label = formatMm(ref.distance);
         const refKey = ref.kind === "wall" ? ref.wallId : ref.kind === "opening" ? ref.openingId : ref.fittingId;
         lines.push({ key: `${f.id}-${ref.kind}-${refKey}`, from: pos, to, label, note: f.measurement_lock.note });
       }

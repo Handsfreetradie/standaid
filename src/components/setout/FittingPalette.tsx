@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { cn } from "@/lib/utils";
 import { FITTING_LABELS, FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
 import { BEAM_ANGLE_OPTIONS, DEFAULT_BEAM_ANGLE, DEFAULT_MOUNTING_HEIGHT, defaultHeightForType } from "@/lib/setoutGeometry";
+import { fromMm, toMm } from "@/lib/units";
 import {
   CATEGORY_FOR_TYPE,
   FITTING_CATEGORY_ORDER,
@@ -212,16 +213,16 @@ const FittingPalette = ({
                 </div>
               </div>
               <div>
-                <p className="text-[11px] font-medium text-muted-foreground mb-1">Mounting height (m)</p>
+                <p className="text-[11px] font-medium text-muted-foreground mb-1">Mounting height (mm)</p>
                 <DraftNumberInput
                   key={`dl-height-${selectedFitting.id}-${selectedFitting.specs.mountingHeight ?? DEFAULT_MOUNTING_HEIGHT}`}
                   type="number"
                   inputMode="decimal"
-                  min="1.8"
-                  step="0.1"
+                  min="1800"
+                  step="10"
                   className="h-8 text-xs"
-                  initialValue={selectedFitting.specs.mountingHeight ?? DEFAULT_MOUNTING_HEIGHT}
-                  onCommit={(value) => onUpdateSpecs({ ...selectedFitting.specs, mountingHeight: value || DEFAULT_MOUNTING_HEIGHT })}
+                  initialValue={toMm(selectedFitting.specs.mountingHeight ?? DEFAULT_MOUNTING_HEIGHT)}
+                  onCommit={(value) => onUpdateSpecs({ ...selectedFitting.specs, mountingHeight: value ? fromMm(value) : DEFAULT_MOUNTING_HEIGHT })}
                 />
               </div>
             </div>
@@ -277,7 +278,7 @@ const FittingPalette = ({
 
           {selectedFitting && isSingleWallFitting(selectedFitting.type) && onUpdateSpecs && (
             <div className="border-t border-destructive/10 pt-2">
-              <p className="text-[11px] font-medium text-muted-foreground mb-1">Mounting height (m)</p>
+              <p className="text-[11px] font-medium text-muted-foreground mb-1">Mounting height (mm)</p>
               <DraftNumberInput
                 key={`sw-height-${selectedFitting.id}-${selectedFitting.specs.mountingHeight ?? defaultHeightForType(selectedFitting.type) ?? 0}`}
                 type="number"
@@ -285,8 +286,8 @@ const FittingPalette = ({
                 min="0"
                 step="0.05"
                 className="h-8 text-xs"
-                initialValue={selectedFitting.specs.mountingHeight ?? defaultHeightForType(selectedFitting.type) ?? 0}
-                onCommit={(value) => onUpdateSpecs({ ...selectedFitting.specs, mountingHeight: value || 0 })}
+                initialValue={toMm(selectedFitting.specs.mountingHeight ?? defaultHeightForType(selectedFitting.type) ?? 0)}
+                onCommit={(value) => onUpdateSpecs({ ...selectedFitting.specs, mountingHeight: value ? fromMm(value) : 0 })}
               />
             </div>
           )}

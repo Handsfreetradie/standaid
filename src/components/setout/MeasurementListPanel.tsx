@@ -2,6 +2,7 @@ import { Ruler } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { FITTING_LABELS, FITTING_SYMBOLS } from "@/components/setout/symbols";
 import type { MeasurementRef, SetoutFitting, WallSegment } from "@/lib/setoutTypes";
+import { formatMm } from "@/lib/units";
 
 interface MeasurementListPanelProps {
   fittings: SetoutFitting[];
@@ -39,9 +40,9 @@ export default function MeasurementListPanel({ fittings, walls }: MeasurementLis
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-foreground">{FITTING_LABELS[f.type]}</p>
               <p className="text-xs text-muted-foreground">
-                {refLabel(lock.refA)}: {lock.refA.distance.toFixed(2)}m
-                {lock.refB && ` · ${refLabel(lock.refB)}: ${lock.refB.distance.toFixed(2)}m`}
-                {!lock.refB && f.specs.mountingHeight != null && ` · Height: ${f.specs.mountingHeight.toFixed(2)}m`}
+                {refLabel(lock.refA)}: {formatMm(lock.refA.distance)}
+                {lock.refB && ` · ${refLabel(lock.refB)}: ${formatMm(lock.refB.distance)}`}
+                {!lock.refB && f.specs.mountingHeight != null && ` · Height: ${formatMm(f.specs.mountingHeight)}`}
               </p>
             </div>
             {f.status === "confirmed" && (

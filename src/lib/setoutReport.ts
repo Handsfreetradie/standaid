@@ -21,6 +21,7 @@ import {
   type SetoutPlan,
 } from "@/lib/setoutTypes";
 import { wallLength, pointAtOffset, wallsCentroid, roomFacingNormal } from "@/lib/setoutGeometry";
+import { formatMm } from "@/lib/units";
 
 const PAGE_W = 210; // A4 mm
 const PAGE_H = 297;
@@ -308,8 +309,8 @@ async function drawPlanPage(
         doc.setTextColor(100);
         const { refA, refB } = f.measurement_lock;
         const label = refB
-          ? `${refA.distance.toFixed(1)}m / ${refB.distance.toFixed(1)}m`
-          : `${refA.distance.toFixed(1)}m${f.specs.mountingHeight != null ? ` @ ${f.specs.mountingHeight.toFixed(1)}m` : ""}`;
+          ? `${formatMm(refA.distance)} / ${formatMm(refB.distance)}`
+          : `${formatMm(refA.distance)}${f.specs.mountingHeight != null ? ` @ ${formatMm(f.specs.mountingHeight)}` : ""}`;
         doc.text(label, p.x + 2, p.y + 2.2);
       }
     }
@@ -387,8 +388,8 @@ function drawMeasurementPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitti
   for (const f of locked) {
     const lock = f.measurement_lock!;
     const measureText = lock.refB
-      ? `${refLabel(lock.refA)}: ${lock.refA.distance.toFixed(2)}m, ${refLabel(lock.refB)}: ${lock.refB.distance.toFixed(2)}m`
-      : `${refLabel(lock.refA)}: ${lock.refA.distance.toFixed(2)}m${f.specs.mountingHeight != null ? `, Height: ${f.specs.mountingHeight.toFixed(2)}m` : ""}`;
+      ? `${refLabel(lock.refA)}: ${formatMm(lock.refA.distance)}, ${refLabel(lock.refB)}: ${formatMm(lock.refB.distance)}`
+      : `${refLabel(lock.refA)}: ${formatMm(lock.refA.distance)}${f.specs.mountingHeight != null ? `, Height: ${formatMm(f.specs.mountingHeight)}` : ""}`;
     const lines = doc.splitTextToSize(measureText, CONTENT_W - 70);
     ensureSpace(Math.max(5, lines.length * 4));
 

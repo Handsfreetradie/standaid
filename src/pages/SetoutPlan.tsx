@@ -664,7 +664,10 @@ const SetoutPlan = () => {
     );
   }
 
-  if (!plan.walls || plan.walls.length === 0) {
+  // No walls is a valid state: tracing them is optional, and a plan image is
+  // enough to place things on and measure from. Only a plan with neither is
+  // genuinely unusable.
+  if ((!plan.walls || plan.walls.length === 0) && !plan.background_image_path) {
     return (
       <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-8">
         <div className="max-w-2xl mx-auto">
@@ -676,7 +679,7 @@ const SetoutPlan = () => {
           </button>
           <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">{plan.name}</h2>
           <p className="text-xs text-muted-foreground mb-5">
-            This plan doesn't have any walls set up yet. Set out the walls first, then come back here to place fittings.
+            This plan has nothing to work from yet — trace the walls, or import a plan to place fittings on.
           </p>
           <Button className="w-full h-12 font-bold rounded-xl text-base" onClick={() => navigate("/setout")}>
             Set up walls
@@ -690,9 +693,23 @@ const SetoutPlan = () => {
     return <EditWallsFlow plan={plan} onClose={() => setEditingWalls(false)} />;
   }
 
+  // Calibration was skipped, so scene units are image pixels and any distance
+  // shown would be a number with no relation to the building. Things can still
+  // be placed — the tradie just has to know not to read dimensions off it.
+  const hasScale = !!plan.scale_calibration;
+
   return (
     <div className="h-full overflow-y-auto">
       <div className="px-5 py-6 pb-24 md:pb-8 max-w-7xl mx-auto">
+        {!hasScale && (
+          <div className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+            <p className="text-xs font-semibold text-foreground">No scale set on this plan</p>
+            <p className="text-[11px] text-muted-foreground">
+              You can place fittings, but any measurement shown is not a real distance — set the scale before working off
+              these dimensions or exporting them.
+            </p>
+          </div>
+        )}
         <div className="flex items-center justify-between mb-3">
           <button
             onClick={() => navigate("/setout")}
