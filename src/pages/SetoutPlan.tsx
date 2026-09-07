@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download, Undo2, PencilRuler, Ruler, Image as ImageIcon, EyeOff, Camera, Plus, Minus, Trash2, Network } from "lucide-react";
+import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download, Undo2, PencilRuler, Ruler, Image as ImageIcon, EyeOff, Camera, Plus, Minus, Trash2, Network, GripHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -590,7 +590,7 @@ const SetoutPlan = () => {
         className="flex flex-col items-center justify-center h-14 w-14 rounded-lg border border-border text-muted-foreground transition-colors flex-shrink-0 hover:bg-muted"
         title="Pan map (drag to move)"
       >
-        <Hand className="h-5 w-5" />
+        <GripHorizontal className="h-5 w-5" />
       </button>
       <button
         onClick={() => { handleWorkspaceModeChange("place-fittings"); setMobileDrawerOpen(true); }}

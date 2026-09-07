@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback, useMemo, useEffect } from "react";
-import { Hand, Minus, Plus, MousePointer2, Camera } from "lucide-react";
+import { GripHorizontal, Minus, Plus, MousePointer2, Camera } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
 import {
@@ -1520,7 +1520,7 @@ export default function SetoutCanvas({
           )}
           aria-label={panMode ? "Switch to draw/select mode" : "Switch to pan mode"}
         >
-          {panMode ? <Hand className="h-4 w-4" /> : <MousePointer2 className="h-4 w-4" />}
+          {panMode ? <GripHorizontal className="h-4 w-4" /> : <MousePointer2 className="h-4 w-4" />}
         </button>
         <button
           type="button"
