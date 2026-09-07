@@ -1660,7 +1660,10 @@ export default function SetoutCanvas({
               />
               <Icon
                 size={24}
-                className={selected || isActiveSwitch || isInSelectionGroup || circuitColor ? "text-primary" : "text-foreground"}
+                // Fittings are drawn in the app's red so they stand out against the
+                // black line work of a plan underneath. A circuit colour, when one
+                // is assigned, still wins.
+                className="text-primary"
                 style={circuitColor && !selected && !isActiveSwitch && !isInSelectionGroup ? { color: circuitColor } : undefined}
                 strokeWidth={selected || isActiveSwitch || isInSelectionGroup ? 2 : 1.5}
                 {...symbolExtraProps}

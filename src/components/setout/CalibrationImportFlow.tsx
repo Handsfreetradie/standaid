@@ -309,7 +309,18 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
 
   // Typed in millimetres; the geometry below works in metres.
   const distanceMetres = fromMm(Number(realDistance));
-  const canConfirmCalibration = calibPoints.length === 2 && distanceMetres > 0;
+  // Two points tapped on a building plan are not 5mm apart, and not 200m
+  // apart. A value outside that says the number was typed in the wrong unit —
+  // which is easy to do, because this field asked for metres until recently
+  // and "0.82" is both a believable door width in metres and nonsense in
+  // millimetres. Getting it wrong scales the entire plan by a factor of a
+  // thousand, and everything still LOOKS right because the drawing is sized by
+  // the same number, so it has to be caught here.
+  const MIN_SENSIBLE_M = 0.005;
+  const MAX_SENSIBLE_M = 200;
+  const distanceLooksWrong =
+    realDistance.trim() !== "" && distanceMetres > 0 && (distanceMetres < MIN_SENSIBLE_M || distanceMetres > MAX_SENSIBLE_M);
+  const canConfirmCalibration = calibPoints.length === 2 && distanceMetres > 0 && !distanceLooksWrong;
 
   const skipCalibration = () => {
     setScaleSkipped(true);
@@ -437,6 +448,13 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
             onChange={(e) => setRealDistance(e.target.value)}
             placeholder="e.g. 3600"
           />
+          {distanceLooksWrong && (
+            <p className="text-xs font-medium text-destructive">
+              {distanceMetres < MIN_SENSIBLE_M
+                ? `That's ${mmValue(distanceMetres)}mm — did you mean millimetres? A door is about 820, a room wall 3000–6000.`
+                : `That's ${(distanceMetres).toFixed(0)}m — this field is in millimetres now, so 3.6m is 3600.`}
+            </p>
+          )}
         </div>
         <Button variant="ghost" className="w-full h-11 text-muted-foreground" onClick={skipCalibration}>
           Skip — I don't need measurements
