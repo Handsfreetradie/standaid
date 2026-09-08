@@ -667,8 +667,13 @@ export default function SetoutCanvas({
         // just downlights) — a smoke alarm or exhaust fan lining up with
         // existing downlights (or each other) is just as useful as
         // downlight-to-downlight rows/columns.
+        // A wall-mounted fitting goes on a wall. With walls traced that's the
+        // traced geometry; with tracing skipped the plan's own line work is
+        // all there is, and its FACE is what a tape measures to.
         const point = isSingleWallFitting(selectedFittingType)
-          ? snapToNearestWall(scene, walls, openings)
+          ? walls.length > 0
+            ? snapToNearestWall(scene, walls, openings)
+            : (snapToPlanEdge(scene) ?? scene)
           : alignToExistingPoints(
               scene,
               fittings.filter((f) => !isSingleWallFitting(f.type)).map((f) => f.position)

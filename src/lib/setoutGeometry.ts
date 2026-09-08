@@ -395,6 +395,21 @@ export function alignToExistingPoints(
       bestY = other.y;
     }
   }
+  // Aligning on both axes at once can land the new fitting exactly on top of
+  // an existing one, which looks like the placement simply not working. It
+  // happens whenever the threshold is large relative to the spacing on the
+  // plan — including when a mis-typed scale makes the whole drawing smaller
+  // than the threshold itself. Keep the nearer axis and let the other be,
+  // rather than silently stacking.
+  if (bestX !== undefined && bestY !== undefined) {
+    const landsOnExisting = others.some(
+      (o) => Math.abs(o.x - bestX!) < 1e-9 && Math.abs(o.y - bestY!) < 1e-9
+    );
+    if (landsOnExisting) {
+      if (bestXDist <= bestYDist) return { position: { x: bestX, y: point.y }, guideX: bestX };
+      return { position: { x: point.x, y: bestY }, guideY: bestY };
+    }
+  }
   return { position: { x: bestX ?? point.x, y: bestY ?? point.y }, guideX: bestX, guideY: bestY };
 }
 
