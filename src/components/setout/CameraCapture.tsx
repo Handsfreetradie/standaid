@@ -13,13 +13,23 @@ interface CameraCaptureProps {
 export default function CameraCapture({ open, onClose, onCapture, capturing }: CameraCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  // Held in a ref, not state: the cleanup below has to stop the tracks it is
+  // actually holding. A state value would be the one captured when the effect
+  // ran, so the camera would stay live after the dialog closed.
+  const streamRef = useRef<MediaStream | null>(null);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
 
   useEffect(() => {
     if (!open) return;
+
+    let cancelled = false;
+
+    const stopCamera = () => {
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    };
 
     const startCamera = async () => {
       try {
@@ -28,7 +38,13 @@ export default function CameraCapture({ open, onClose, onCapture, capturing }: C
           video: { facingMode },
           audio: false,
         });
-        setStream(mediaStream);
+        // The dialog can close while getUserMedia is still resolving — without
+        // this the stream arrives after cleanup has run and never gets stopped.
+        if (cancelled) {
+          mediaStream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        streamRef.current = mediaStream;
         if (videoRef.current) {
           videoRef.current.srcObject = mediaStream;
         }
@@ -42,11 +58,15 @@ export default function CameraCapture({ open, onClose, onCapture, capturing }: C
     startCamera();
 
     return () => {
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
-      }
+      cancelled = true;
+      stopCamera();
     };
   }, [open, facingMode]);
+
+  // Start on the live view again next time it opens, not on the last shot.
+  useEffect(() => {
+    if (!open) setCapturedImage(null);
+  }, [open]);
 
   const handleCapture = () => {
     if (!videoRef.current || !canvasRef.current) return;
@@ -58,13 +78,7 @@ export default function CameraCapture({ open, onClose, onCapture, capturing }: C
     canvasRef.current.height = video.videoHeight;
     ctx.drawImage(video, 0, 0);
 
-    canvasRef.current.toBlob((blob) => {
-      if (blob) {
-        canvasRef.current?.toDataURL("image/jpeg", (url) => {
-          setCapturedImage(url);
-        });
-      }
-    }, "image/jpeg", 0.9);
+    setCapturedImage(canvasRef.current.toDataURL("image/jpeg", 0.9));
   };
 
   const handleRetake = () => {
@@ -78,7 +92,6 @@ export default function CameraCapture({ open, onClose, onCapture, capturing }: C
         if (blob) {
           onCapture(blob);
           setCapturedImage(null);
-          setStream(null);
           onClose();
         }
       },
