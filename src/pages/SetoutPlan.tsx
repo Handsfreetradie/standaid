@@ -498,11 +498,29 @@ const SetoutPlan = () => {
     if (!vectorIndex) return null;
     const { alongX, alongY } = measureToFaces(vectorIndex, point.x, point.y);
     // alongX was measured to a line running vertically, and vice versa.
-    const refs: MeasurementRef[] = [];
-    if (alongX) refs.push({ kind: "stroke", point: alongX.point, dirX: 0, dirY: 1, distance: alongX.distance });
-    if (alongY) refs.push({ kind: "stroke", point: alongY.point, dirX: 1, dirY: 0, distance: alongY.distance });
-    if (refs.length === 0) return null;
-    return refs.length > 1 ? { refA: refs[0], refB: refs[1] } : { refA: refs[0] };
+    const across: MeasurementRef | null = alongX
+      ? { kind: "stroke", point: alongX.point, dirX: 0, dirY: 1, distance: alongX.distance }
+      : null;
+    const down: MeasurementRef | null = alongY
+      ? { kind: "stroke", point: alongY.point, dirX: 1, dirY: 0, distance: alongY.distance }
+      : null;
+
+    if (type && isSingleWallFitting(type)) {
+      // A switch or GPO is already fixed to its wall, so its distance off that
+      // wall is not a measurement anyone takes — the one reading that places it
+      // is how far ALONG the wall it sits. Measuring along the wall also means
+      // measuring to something square to it, so the mounting wall can't be
+      // picked as its own reference.
+      const mount = vectorIndex.nearestEdge(point.x, point.y, MAX_PLACE_SNAP_M);
+      if (!mount) return null;
+      const runsHorizontal = Math.abs(mount.line.x2 - mount.line.x1) >= Math.abs(mount.line.y2 - mount.line.y1);
+      const alongWall = runsHorizontal ? across : down;
+      return alongWall ? { refA: alongWall } : null;
+    }
+
+    if (across && down) return { refA: across, refB: down };
+    const only = across ?? down;
+    return only ? { refA: only } : null;
   };
 
   /**
@@ -516,6 +534,24 @@ const SetoutPlan = () => {
   // memo that lays out measurement labels, and that does a collision pass over
   // every label — recreating this each render would redo all of it on any
   // unrelated state change.
+  /**
+   * Which way a wall-mounted fitting faces.
+   *
+   * With walls traced, that comes from the traced geometry. Without them it is
+   * read off the plan's own line work: the side the tap came from is the room
+   * the tradie is standing in, so the fitting faces that way. That is actually
+   * the sounder of the two — working it out from the shape of the building
+   * assumes the inside is in one direction, which is untrue of any L-shaped
+   * plan, where a switch in a wing can end up facing the wrong way.
+   */
+  const wallMountRotation = (point: Point, rawPoint: Point): number | null => {
+    if (plan && plan.walls.length > 0) return autoRotationForWallMount(point, plan.walls);
+    const hit = vectorIndex?.nearestEdge(rawPoint.x, rawPoint.y, MAX_PLACE_SNAP_M);
+    if (!hit) return null;
+    // Same convention as rotationFacingRoom in setoutGeometry.
+    return Math.round(((Math.atan2(hit.normal.x, -hit.normal.y) * 180) / Math.PI + 360) % 360);
+  };
+
   const lockForFittingAt = useCallback((fitting: SetoutFitting, position: Point): MeasurementLock | null => {
     if (!plan) return null;
     const existing = fitting.measurement_lock;
@@ -530,7 +566,7 @@ const SetoutPlan = () => {
     // measurementLockFor reads plan and vectorIndex, both listed here.
   }, [plan, fittings, vectorIndex]);
 
-  const handlePlaceFitting = (point: Point) => {
+  const handlePlaceFitting = (point: Point, rawPoint: Point) => {
     if (!selectedType || !plan) return;
     // A downlight is in the ceiling — there is no height to set it out to, so
     // it carries none. The coverage overlay still assumes a ceiling height for
@@ -539,7 +575,10 @@ const SetoutPlan = () => {
     const isWallMounted = isSingleWallFitting(selectedType);
     const specs: FittingSpecs = {};
     if (defaultHeight != null) specs.mountingHeight = defaultHeight;
-    if (isWallMounted) specs.rotation = autoRotationForWallMount(point, plan.walls);
+    if (isWallMounted) {
+      const rotation = wallMountRotation(point, rawPoint);
+      if (rotation != null) specs.rotation = rotation;
+    }
     createFitting.mutate(
       {
         type: selectedType,
@@ -623,6 +662,17 @@ const SetoutPlan = () => {
 
   const handleSwitchDoubleTap = (switchFitting: SetoutFitting, clientPos: { x: number; y: number }) => {
     setSwitchMenu({ switchId: switchFitting.id, x: clientPos.x, y: clientPos.y });
+  };
+
+  // Double-tapping a switch and picking a gang starts linking from that gang
+  // straight away, rather than switching to link mode, tapping the switch, and
+  // then choosing the gang in the side panel.
+  const handleLinkFromGang = (switchFitting: SetoutFitting, gangIndex: number) => {
+    setWorkspaceMode("link-switches");
+    setActiveSwitchId(switchFitting.id);
+    setActiveGangIndex(gangIndex);
+    setSwitchMenu(null);
+    toast.info(`Linking gang ${gangIndex + 1} — tap the lights it switches`);
   };
 
   const handleRemoveLastGangFromMenu = () => {
@@ -1245,6 +1295,17 @@ const SetoutPlan = () => {
           <div style={{ position: "fixed", left: switchMenu?.x ?? 0, top: switchMenu?.y ?? 0, width: 1, height: 1 }} />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start">
+          {switchMenuFitting &&
+            gangsFor(switchMenuFitting).map((gang, i) => (
+              <DropdownMenuItem key={i} onClick={() => handleLinkFromGang(switchMenuFitting, i)}>
+                <Cable className="h-3.5 w-3.5 mr-1.5" />
+                Link gang {i + 1}
+                <span className="ml-1.5 text-muted-foreground">
+                  {gang.length === 0 ? "— nothing yet" : `— ${gang.length} light${gang.length === 1 ? "" : "s"}`}
+                </span>
+              </DropdownMenuItem>
+            ))}
+          <DropdownMenuSeparator />
           <DropdownMenuItem
             onClick={() => {
               if (switchMenuFitting) handleAddGang(switchMenuFitting);

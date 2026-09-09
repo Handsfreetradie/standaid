@@ -57,6 +57,15 @@ export interface VectorSnap {
   point: Point;
   /** The line that was snapped to, so callers can measure against it later. */
   line: PlanLine;
+  /**
+   * Unit vector pointing off the wall on the side the query came from.
+   *
+   * This is which way a switch or a GPO faces. It's decided by the side the
+   * tradie tapped from, which is the room they're standing in — and that is
+   * more reliable than working it out from the shape of the building, since
+   * the "inside" of an L-shaped plan isn't a single direction.
+   */
+  normal: Point;
 }
 
 // Minimal slice of pdf.js used here, so this module doesn't pull in its types.
@@ -295,7 +304,23 @@ export class PlanVectorIndex {
   nearestCentre(x: number, y: number, tolerance: number): VectorSnap | null {
     const hit = this.nearest(x, y, tolerance);
     if (!hit) return null;
-    return { point: { x: hit.fx, y: hit.fy }, line: hit.line };
+    return { point: { x: hit.fx, y: hit.fy }, line: hit.line, normal: this.sideNormal(hit.line, hit.fx, hit.fy, x, y) };
+  }
+
+  // Which way is "off the wall", from the side the query came from. Falls back
+  // to the line's own normal when the query sits exactly on the centreline and
+  // implies no side.
+  private sideNormal(line: PlanLine, fx: number, fy: number, x: number, y: number): Point {
+    let ox = x - fx;
+    let oy = y - fy;
+    const len = Math.hypot(ox, oy);
+    if (len < 1e-9) {
+      const dx = line.x2 - line.x1;
+      const dy = line.y2 - line.y1;
+      const dlen = Math.hypot(dx, dy) || 1;
+      return { x: -dy / dlen, y: dx / dlen };
+    }
+    return { x: ox / len, y: oy / len };
   }
 
   /**
@@ -306,23 +331,14 @@ export class PlanVectorIndex {
     const hit = this.nearest(x, y, tolerance);
     if (!hit) return null;
     const { line, fx, fy } = hit;
-    if (line.halfWidth <= 0) return { point: { x: fx, y: fy }, line };
+    const normal = this.sideNormal(line, fx, fy, x, y);
+    if (line.halfWidth <= 0) return { point: { x: fx, y: fy }, line, normal };
     // Offset from the centreline toward the point, by exactly half the width.
-    let ox = x - fx;
-    let oy = y - fy;
-    const len = Math.hypot(ox, oy);
-    if (len < 1e-9) {
-      // Dead on the centreline: no side implied, so take the normal.
-      const dx = line.x2 - line.x1;
-      const dy = line.y2 - line.y1;
-      const dlen = Math.hypot(dx, dy) || 1;
-      ox = -dy / dlen;
-      oy = dx / dlen;
-    } else {
-      ox /= len;
-      oy /= len;
-    }
-    return { point: { x: fx + ox * line.halfWidth, y: fy + oy * line.halfWidth }, line };
+    return {
+      point: { x: fx + normal.x * line.halfWidth, y: fy + normal.y * line.halfWidth },
+      line,
+      normal,
+    };
   }
 }
 

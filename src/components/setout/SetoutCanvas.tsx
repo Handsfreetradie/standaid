@@ -188,7 +188,11 @@ interface SetoutCanvasProps {
   // exactly what they're trying to change.
   measurementPreviewFor?: (fitting: SetoutFitting, position: Point) => MeasurementLock | null;
   selectedFittingType?: FittingType | null;
-  onPlaceFitting?: (point: Point) => void;
+  // The snapped position, plus where the tap actually landed. The raw point
+  // is what says which side of a wall the tradie was standing on, and so which
+  // way a switch or GPO should face — information the snapped point, sitting
+  // exactly on the wall's face, no longer carries.
+  onPlaceFitting?: (point: Point, rawPoint: Point) => void;
   onFittingDrag?: (fittingId: string, position: Point) => void;
   onFittingRotate?: (fittingId: string) => void;
   selectedFittingId?: string | null;
@@ -736,7 +740,7 @@ export default function SetoutCanvas({
           const mid = findMidpointSnap(scene, ceilingPoints, midpointTolerance());
           point = mid ? mid.position : alignToExistingPoints(scene, ceilingPoints).position;
         }
-        onPlaceFitting?.(point);
+        onPlaceFitting?.(point, scene);
         setMidpointGuide(null);
       } else if (mode === "place-fittings") {
         onFittingSelect?.(null);
