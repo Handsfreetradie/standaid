@@ -438,9 +438,9 @@ const SetoutPlan = () => {
   // the only reference there is, so the two nearest faces at right angles are
   // measured to directly, which is how a fitting is dimensioned on site
   // anyway: so much off one wall, so much off the one square to it.
-  const measurementLockFor = (point: Point): MeasurementLock | null => {
+  const measurementLockFor = (point: Point, type?: FittingType): MeasurementLock | null => {
     if (!plan) return null;
-    if (plan.walls.length > 0) return computeMeasurementLock(point, plan.walls, selectedType ?? undefined);
+    if (plan.walls.length > 0) return computeMeasurementLock(point, plan.walls, type);
     if (!vectorIndex) return null;
     const { alongX, alongY } = measureToFaces(vectorIndex, point.x, point.y);
     const refs = [alongX, alongY]
@@ -452,7 +452,10 @@ const SetoutPlan = () => {
 
   const handlePlaceFitting = (point: Point) => {
     if (!selectedType || !plan) return;
-    const defaultHeight = defaultHeightForType(selectedType);
+    // A downlight is in the ceiling — there is no height to set it out to, so
+    // it carries none. The coverage overlay still assumes a ceiling height for
+    // its beam maths (see lightPoolRadius).
+    const defaultHeight = selectedType === "downlight" ? null : defaultHeightForType(selectedType);
     const isWallMounted = isSingleWallFitting(selectedType);
     const specs: FittingSpecs = {};
     if (defaultHeight != null) specs.mountingHeight = defaultHeight;
@@ -461,7 +464,7 @@ const SetoutPlan = () => {
       {
         type: selectedType,
         position: point,
-        measurement_lock: measurementLockFor(point),
+        measurement_lock: measurementLockFor(point, selectedType),
         specs: Object.keys(specs).length > 0 ? specs : undefined,
       },
       { onSuccess: (created) => pushUndo({ type: "create", fittingId: created.id }) }
@@ -487,7 +490,10 @@ const SetoutPlan = () => {
         ? { ...fitting.specs, rotation: autoRotationForWallMount(position, plan.walls) }
         : undefined;
     pushUndo({ type: "move", fittingId, prevPosition: fitting.position, prevMeasurementLock: fitting.measurement_lock, prevSpecs: fitting.specs });
-    updateFittingPosition.mutate({ fittingId, position, measurement_lock: computeMeasurementLock(position, plan.walls, fitting.type), specs });
+    // Re-measure the way it was measured when placed. Going straight to the
+    // wall-based version wiped the measurement of anything dimensioned off the
+    // plan's own lines the moment it was nudged.
+    updateFittingPosition.mutate({ fittingId, position, measurement_lock: measurementLockFor(position, fitting.type), specs });
   };
 
   const handleDeleteSelected = () => {

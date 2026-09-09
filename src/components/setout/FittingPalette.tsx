@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { FITTING_LABELS, FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
-import { BEAM_ANGLE_OPTIONS, DEFAULT_BEAM_ANGLE, DEFAULT_MOUNTING_HEIGHT, defaultHeightForType } from "@/lib/setoutGeometry";
+import { BEAM_ANGLE_OPTIONS, DEFAULT_BEAM_ANGLE, defaultHeightForType } from "@/lib/setoutGeometry";
 import { fromMm, toMm } from "@/lib/units";
 import {
   CATEGORY_FOR_TYPE,
@@ -212,19 +212,8 @@ const FittingPalette = ({
                   })}
                 </div>
               </div>
-              <div>
-                <p className="text-[11px] font-medium text-muted-foreground mb-1">Mounting height (mm)</p>
-                <DraftNumberInput
-                  key={`dl-height-${selectedFitting.id}-${selectedFitting.specs.mountingHeight ?? DEFAULT_MOUNTING_HEIGHT}`}
-                  type="number"
-                  inputMode="decimal"
-                  min="1800"
-                  step="10"
-                  className="h-8 text-xs"
-                  initialValue={toMm(selectedFitting.specs.mountingHeight ?? DEFAULT_MOUNTING_HEIGHT)}
-                  onCommit={(value) => onUpdateSpecs({ ...selectedFitting.specs, mountingHeight: value ? fromMm(value) : DEFAULT_MOUNTING_HEIGHT })}
-                />
-              </div>
+              {/* No mounting height for a downlight: it sits in the ceiling, so there
+                  is no height to set it out to. */}
             </div>
           )}
 
