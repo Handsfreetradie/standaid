@@ -266,11 +266,25 @@ const SetoutPlan = () => {
 
   // Fittings are set out from the FACE of a wall — what a tape measures to —
   // not its centreline, which is what tracing follows.
-  const snapToPlan = useCallback(
-    (point: Point, tolerance: number): Point | null =>
-      vectorIndex?.nearestEdge(point.x, point.y, tolerance)?.point ?? null,
-    [vectorIndex]
-  );
+  //
+  // The tolerance arrives in screen pixels, which is right for tracing — you
+  // are following a line, and it should feel the same at any zoom — but wrong
+  // for placing, at both ends of the range.
+  //
+  // Zoomed out to a whole sheet, twenty screen pixels is the better part of a
+  // metre of building, and a fitting jumps onto a wall it was nowhere near.
+  // Zoomed right in it is the opposite problem: twenty pixels becomes a few
+  // millimetres, so the snap stops helping exactly when the tradie has zoomed
+  // in to place something precisely.
+  //
+  // So placing is bounded in real terms at both ends: never grab from further
+  // than a hand's width, never demand better than a few millimetres.
+  const MIN_PLACE_SNAP_M = 0.025;
+  const MAX_PLACE_SNAP_M = 0.15;
+  const snapToPlan = useCallback((point: Point, tolerance: number): Point | null => {
+    const bounded = Math.min(Math.max(tolerance, MIN_PLACE_SNAP_M), MAX_PLACE_SNAP_M);
+    return vectorIndex?.nearestEdge(point.x, point.y, bounded)?.point ?? null;
+  }, [vectorIndex]);
 
   useEffect(() => {
     if (!plan?.background_image_path) {

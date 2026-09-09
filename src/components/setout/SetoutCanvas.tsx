@@ -502,9 +502,19 @@ export default function SetoutCanvas({
   const [edgeSnapPreview, setEdgeSnapPreview] = useState<Point | null>(null);
 
   // How near the halfway point between two fittings a tap has to be to take
-  // it. Generous, because it's a point in open space with nothing drawn
-  // through it — unlike a wall, there's no line to aim along.
+  // it. Generous in screen terms, because it's a point in open space with
+  // nothing drawn through it — unlike a wall, there's no line to aim along.
   const MIDPOINT_SNAP_PX = 26;
+  // ...but bounded in real terms at both ends. Zoomed out, those screen pixels
+  // cover most of a metre and a fitting lands on a centre it was never aimed
+  // at; zoomed in they shrink to nothing, and the snap stops helping just when
+  // the tradie has zoomed in to be exact.
+  const MIDPOINT_SNAP_MIN_M = 0.04;
+  const MIDPOINT_SNAP_MAX_M = 0.25;
+  const midpointTolerance = useCallback(
+    () => Math.min(Math.max(MIDPOINT_SNAP_PX * px2scene(), MIDPOINT_SNAP_MIN_M), MIDPOINT_SNAP_MAX_M),
+    [px2scene]
+  );
 
   // Radius in screen pixels a tap may be off by and still grab a wall. Kept in
   // screen space rather than metres so it feels the same at every zoom level.
@@ -717,7 +727,7 @@ export default function SetoutCanvas({
           // Halfway between two fittings beats lining up with one of them: it's
           // a more specific thing to be aiming at, and it's the whole reason
           // for aiming there.
-          const mid = findMidpointSnap(scene, ceilingPoints, MIDPOINT_SNAP_PX * px2scene());
+          const mid = findMidpointSnap(scene, ceilingPoints, midpointTolerance());
           point = mid ? mid.position : alignToExistingPoints(scene, ceilingPoints).position;
         }
         onPlaceFitting?.(point);
@@ -743,6 +753,7 @@ export default function SetoutCanvas({
       onSketchPointUndo,
       snapWalls,
       snapToPlanEdge,
+      midpointTolerance,
       onSketchPointAdd,
       calibratePoints,
       onCalibratePointAdd,
@@ -819,7 +830,7 @@ export default function SetoutCanvas({
         // between, before anything is committed.
         const scene = sceneFromClient(e.clientX, e.clientY);
         const ceilingPoints = fittings.filter((f) => !isSingleWallFitting(f.type)).map((f) => f.position);
-        const mid = findMidpointSnap(scene, ceilingPoints, MIDPOINT_SNAP_PX * px2scene());
+        const mid = findMidpointSnap(scene, ceilingPoints, midpointTolerance());
         setMidpointGuide(mid ? { a: mid.a, b: mid.b, at: mid.position } : null);
       } else if (snapToPlan && (mode === "sketch-walls" || mode === "sketch-interior-wall")) {
         // Show what the next tap would grab. On touch this only fires while a
@@ -828,7 +839,7 @@ export default function SetoutCanvas({
         setEdgeSnapPreview(snapToPlanEdge(sceneFromClient(e.clientX, e.clientY)));
       }
     },
-    [walls, openings, fittings, sceneFromClient, snapToPlan, mode, snapToPlanEdge, viewBox, px2scene, selectedFittingType]
+    [walls, openings, fittings, sceneFromClient, snapToPlan, mode, snapToPlanEdge, viewBox, px2scene, selectedFittingType, midpointTolerance]
   );
 
   const endPan = useCallback(() => {
