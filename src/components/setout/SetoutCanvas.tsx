@@ -32,6 +32,7 @@ import {
   closestPointOnWall,
   snapToNearestWall,
   alignToExistingPoints,
+  findMidpointSnap,
   wallLength,
   pointAtOffset,
   wallsCentroid,
@@ -324,6 +325,9 @@ export default function SetoutCanvas({
   const dragState = useRef<{ fittingId: string; type: FittingType; clientX: number; clientY: number; scale: number; origin: Point } | null>(null);
   const [dragPreview, setDragPreview] = useState<{ id: string; position: Point } | null>(null);
   const [alignGuides, setAlignGuides] = useState<{ x?: number; y?: number } | null>(null);
+  // Shown while aiming near the halfway point between two fittings, so it's
+  // clear WHICH two the centre is being taken from before committing to it.
+  const [midpointGuide, setMidpointGuide] = useState<{ a: Point; b: Point; at: Point } | null>(null);
   const openingDragState = useRef<{ openingId: string; wall: WallSegment; width: number } | null>(null);
   const [openingDragPreview, setOpeningDragPreview] = useState<{ id: string; offset: number } | null>(null);
   // Tracks the previous interior-wall tap so a second one landing close in
@@ -496,6 +500,11 @@ export default function SetoutCanvas({
   // Where the next tap would land once pulled onto a wall centre, so the
   // tradie can see what they're about to snap to before committing.
   const [edgeSnapPreview, setEdgeSnapPreview] = useState<Point | null>(null);
+
+  // How near the halfway point between two fittings a tap has to be to take
+  // it. Generous, because it's a point in open space with nothing drawn
+  // through it — unlike a wall, there's no line to aim along.
+  const MIDPOINT_SNAP_PX = 26;
 
   // Radius in screen pixels a tap may be off by and still grab a wall. Kept in
   // screen space rather than metres so it feels the same at every zoom level.
@@ -700,15 +709,19 @@ export default function SetoutCanvas({
         // A wall-mounted fitting goes on a wall. With walls traced that's the
         // traced geometry; with tracing skipped the plan's own line work is
         // all there is, and its FACE is what a tape measures to.
-        const point = isSingleWallFitting(selectedFittingType)
-          ? walls.length > 0
-            ? snapToNearestWall(scene, walls, openings)
-            : (snapToPlanEdge(scene) ?? scene)
-          : alignToExistingPoints(
-              scene,
-              fittings.filter((f) => !isSingleWallFitting(f.type)).map((f) => f.position)
-            ).position;
+        let point: Point;
+        if (isSingleWallFitting(selectedFittingType)) {
+          point = walls.length > 0 ? snapToNearestWall(scene, walls, openings) : (snapToPlanEdge(scene) ?? scene);
+        } else {
+          const ceilingPoints = fittings.filter((f) => !isSingleWallFitting(f.type)).map((f) => f.position);
+          // Halfway between two fittings beats lining up with one of them: it's
+          // a more specific thing to be aiming at, and it's the whole reason
+          // for aiming there.
+          const mid = findMidpointSnap(scene, ceilingPoints, MIDPOINT_SNAP_PX * px2scene());
+          point = mid ? mid.position : alignToExistingPoints(scene, ceilingPoints).position;
+        }
         onPlaceFitting?.(point);
+        setMidpointGuide(null);
       } else if (mode === "place-fittings") {
         onFittingSelect?.(null);
       } else if (mode === "link-switches") {
@@ -801,6 +814,13 @@ export default function SetoutCanvas({
         const raw = projectPointOntoWall(scene, wall) - width / 2;
         const offset = Math.max(0, Math.min(Math.max(len - width, 0), raw));
         setOpeningDragPreview({ id: openingId, offset });
+      } else if (mode === "place-fittings" && selectedFittingType && !isSingleWallFitting(selectedFittingType)) {
+        // Show the halfway point being aimed at, and the two fittings it sits
+        // between, before anything is committed.
+        const scene = sceneFromClient(e.clientX, e.clientY);
+        const ceilingPoints = fittings.filter((f) => !isSingleWallFitting(f.type)).map((f) => f.position);
+        const mid = findMidpointSnap(scene, ceilingPoints, MIDPOINT_SNAP_PX * px2scene());
+        setMidpointGuide(mid ? { a: mid.a, b: mid.b, at: mid.position } : null);
       } else if (snapToPlan && (mode === "sketch-walls" || mode === "sketch-interior-wall")) {
         // Show what the next tap would grab. On touch this only fires while a
         // finger is down (there's no hover), so the drawn overlay stays the
@@ -808,7 +828,7 @@ export default function SetoutCanvas({
         setEdgeSnapPreview(snapToPlanEdge(sceneFromClient(e.clientX, e.clientY)));
       }
     },
-    [walls, openings, fittings, sceneFromClient, snapToPlan, mode, snapToPlanEdge, viewBox, px2scene]
+    [walls, openings, fittings, sceneFromClient, snapToPlan, mode, snapToPlanEdge, viewBox, px2scene, selectedFittingType]
   );
 
   const endPan = useCallback(() => {
@@ -1508,6 +1528,36 @@ export default function SetoutCanvas({
                 vectorEffect="non-scaling-stroke"
               />
             ))}
+          </g>
+        )}
+
+        {midpointGuide && (
+          // The pair it's centred between, and the centre itself.
+          <g pointerEvents="none" className="text-primary">
+            <line
+              x1={midpointGuide.a.x}
+              y1={midpointGuide.a.y}
+              x2={midpointGuide.b.x}
+              y2={midpointGuide.b.y}
+              stroke="currentColor"
+              strokeOpacity={0.5}
+              strokeWidth={1}
+              strokeDasharray="0.05 0.05"
+              vectorEffect="non-scaling-stroke"
+            />
+            {[midpointGuide.a, midpointGuide.b].map((p, i) => (
+              <circle key={i} cx={p.x} cy={p.y} r={3 * px2scene()} fill="currentColor" fillOpacity={0.5} />
+            ))}
+            <circle
+              cx={midpointGuide.at.x}
+              cy={midpointGuide.at.y}
+              r={7 * px2scene()}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              vectorEffect="non-scaling-stroke"
+            />
+            <circle cx={midpointGuide.at.x} cy={midpointGuide.at.y} r={1.5 * px2scene()} fill="currentColor" />
           </g>
         )}
 

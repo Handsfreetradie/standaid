@@ -515,3 +515,46 @@ export function remeasureLock(
 
   return { ...lock, refA: again(lock.refA), refB: lock.refB ? again(lock.refB) : undefined };
 }
+
+/** A midpoint offered as a placement target, and the two fittings it sits between. */
+export interface MidpointSnap {
+  position: Point;
+  a: Point;
+  b: Point;
+}
+
+/**
+ * Finds the halfway point between two existing fittings, when the tradie is
+ * aiming near one.
+ *
+ * Covers both of the cases that actually come up: dead centre between a pair
+ * of downlights, and dead centre of four in a rectangle — the midpoint of
+ * either diagonal of a rectangle IS its centre, so the same rule gives you a
+ * fan in the middle of a four-light room without needing to know the four
+ * lights form a group.
+ *
+ * Pairs are formed only from fittings near the point, so this stays cheap on a
+ * plan carrying a few hundred of them.
+ */
+export function findMidpointSnap(
+  point: Point,
+  others: Point[],
+  tolerance: number,
+  searchRadius = 8
+): MidpointSnap | null {
+  const near = others.filter((o) => distance(o, point) <= searchRadius);
+  let best: MidpointSnap | null = null;
+  let bestDist = tolerance;
+
+  for (let i = 0; i < near.length; i++) {
+    for (let j = i + 1; j < near.length; j++) {
+      const mid = { x: (near[i].x + near[j].x) / 2, y: (near[i].y + near[j].y) / 2 };
+      const d = distance(mid, point);
+      if (d < bestDist) {
+        bestDist = d;
+        best = { position: mid, a: near[i], b: near[j] };
+      }
+    }
+  }
+  return best;
+}
