@@ -30,6 +30,13 @@ const CONTENT_W = PAGE_W - MARGIN * 2;
 const SYMBOL_SIZE_MM = 5;
 const UNASSIGNED_SYMBOL_COLOR = "#1a1a1a";
 
+/** The imported plan, positioned in scene units from the origin. */
+export interface PlanImage {
+  dataUrl: string;
+  width: number;
+  height: number;
+}
+
 function hexToRgb(hex: string): [number, number, number] {
   const clean = hex.replace("#", "");
   const num = parseInt(clean, 16);
@@ -182,6 +189,7 @@ async function drawPlanPage(
   codes: Map<string, string>,
   svg2pdf: Svg2Pdf,
   renderToStaticMarkup: RenderToStaticMarkup,
+  planImage?: PlanImage,
 ): Promise<void> {
   let y = drawPageHeader(doc, plan, "Marked-up plan");
 
@@ -205,13 +213,27 @@ async function drawPlanPage(
   const planAreaH = Math.max(planBottom - planTop, 20);
   const planAreaW = CONTENT_W;
 
-  if (plan.walls.length === 0) {
+  // What the page has to cover. Walls are no longer the only possibility:
+  // tracing them is optional, so a plan can be nothing but the imported
+  // drawing with fittings marked on it — which is exactly what a marked-up
+  // plan is. Sizing from the walls alone meant such a plan exported as a
+  // single line of text and nothing else.
+  const xs = [
+    ...plan.walls.flatMap((w) => [w.start.x, w.end.x]),
+    ...fittings.map((f) => f.position.x),
+    ...(planImage ? [0, planImage.width] : []),
+  ];
+  const ys = [
+    ...plan.walls.flatMap((w) => [w.start.y, w.end.y]),
+    ...fittings.map((f) => f.position.y),
+    ...(planImage ? [0, planImage.height] : []),
+  ];
+
+  if (xs.length === 0) {
     doc.setFontSize(10);
     doc.setTextColor(120);
-    doc.text("No walls drawn for this plan yet.", MARGIN, planTop + 10);
+    doc.text("Nothing on this plan yet — trace the walls or place some fittings.", MARGIN, planTop + 10);
   } else {
-    const xs = plan.walls.flatMap((w) => [w.start.x, w.end.x]);
-    const ys = plan.walls.flatMap((w) => [w.start.y, w.end.y]);
     const minX = Math.min(...xs);
     const maxX = Math.max(...xs);
     const minY = Math.min(...ys);
@@ -224,6 +246,18 @@ async function drawPlanPage(
     const originX = MARGIN + (planAreaW - bboxW * scale) / 2 - minX * scale;
     const originY = planTop + (planAreaH - bboxH * scale) / 2 - minY * scale;
     const toPage = (p: Point) => ({ x: originX + p.x * scale, y: originY + p.y * scale });
+
+    // The imported drawing goes down first, so the walls and fittings mark up
+    // over it instead of hiding behind it.
+    if (planImage) {
+      const topLeft = toPage({ x: 0, y: 0 });
+      try {
+        doc.addImage(planImage.dataUrl, "PNG", topLeft.x, topLeft.y, planImage.width * scale, planImage.height * scale);
+      } catch (err) {
+        // A drawing that won't embed shouldn't cost the rest of the page.
+        console.error("[setoutReport] Could not embed the plan image:", err);
+      }
+    }
 
     const centroid = wallsCentroid(plan.walls);
     for (const wall of plan.walls) {
@@ -604,13 +638,15 @@ export async function generateSetoutReportPdf(opts: {
   plan: SetoutPlan;
   fittings: SetoutFitting[];
   circuits: SetoutCircuit[];
+  /** The imported drawing, so the marked-up page shows what was marked up. */
+  planImage?: PlanImage;
 }): Promise<jsPDF> {
-  const { plan, fittings, circuits } = opts;
+  const { plan, fittings, circuits, planImage } = opts;
   const [{ svg2pdf }, { renderToStaticMarkup }] = await Promise.all([import("svg2pdf.js"), import("react-dom/server")]);
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const codes = buildFittingCodes(fittings);
 
-  await drawPlanPage(doc, plan, fittings, circuits, codes, svg2pdf, renderToStaticMarkup);
+  await drawPlanPage(doc, plan, fittings, circuits, codes, svg2pdf, renderToStaticMarkup, planImage);
   doc.addPage();
   drawMeasurementPage(doc, plan, fittings, codes);
   doc.addPage();

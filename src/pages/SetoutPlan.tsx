@@ -24,7 +24,7 @@ import CameraCapture from "@/components/setout/CameraCapture";
 import type { FittingType } from "@/components/setout/symbols";
 import { DEFAULT_LAYER_VISIBILITY, distance, gangsFor, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type MeasurementRef, type Point, type SetoutFitting } from "@/lib/setoutTypes";
 import { autoRotationForWallMount, computeMeasurementLock, defaultHeightForType } from "@/lib/setoutGeometry";
-import { generateSetoutReportPdf } from "@/lib/setoutReport";
+import { generateSetoutReportPdf, type PlanImage } from "@/lib/setoutReport";
 import { BASE_PDF_SCALE, renderPdfTile, type PdfPage } from "@/lib/planRender";
 import { extractPlanLines, PlanVectorIndex } from "@/lib/planVector";
 import type { BackgroundTile } from "@/components/setout/SetoutCanvas";
@@ -549,7 +549,25 @@ const SetoutPlan = () => {
     if (!plan || exporting) return;
     setExporting(true);
     try {
-      const doc = await generateSetoutReportPdf({ plan, fittings, circuits });
+      // The marked-up page needs the drawing that was marked up. jsPDF embeds
+      // data, not a remote URL, so the signed image is fetched and inlined —
+      // failing that, the page still renders with the walls and fittings.
+      let planImage: PlanImage | undefined;
+      if (backgroundImage) {
+        try {
+          const blob = await (await fetch(backgroundImage.href)).blob();
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(blob);
+          });
+          planImage = { dataUrl, width: backgroundImage.width, height: backgroundImage.height };
+        } catch (err) {
+          console.error("[SetoutPlan] Could not embed the plan image in the export:", err);
+        }
+      }
+      const doc = await generateSetoutReportPdf({ plan, fittings, circuits, planImage });
       const filename = `${(plan.name || "setout-plan").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.pdf`;
       doc.save(filename);
     } catch (err) {
