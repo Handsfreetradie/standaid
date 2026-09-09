@@ -1614,9 +1614,36 @@ export default function SetoutCanvas({
               const midY = (line.from.y + line.to.y) / 2;
               const fontSize = 11 * px2scene();
               return (
-                <g key={line.key}>
+                <g
+                  key={line.key}
+                  // On the group, not on the line: the label is painted text
+                  // and hit-tests in its own right, so a tap on the number —
+                  // the obvious thing to aim at — was being swallowed before it
+                  // reached the line underneath.
+                  className={onMeasurementDoubleTap ? "cursor-pointer" : undefined}
+                  onPointerDown={
+                    onMeasurementDoubleTap
+                      ? (e) => {
+                          e.stopPropagation();
+                          const now = Date.now();
+                          // Identified by fitting and slot rather than the
+                          // render key: that key carries the measured point,
+                          // which shifts whenever the fitting moves, so a
+                          // double-tap could fail to match itself.
+                          const id = `${line.fittingId}:${line.slot}`;
+                          const last = lastMeasurementTapRef.current;
+                          if (last && last.key === id && now - last.time < 400) {
+                            lastMeasurementTapRef.current = null;
+                            onMeasurementDoubleTap(line.fittingId, line.slot);
+                            return;
+                          }
+                          lastMeasurementTapRef.current = { key: id, time: now };
+                        }
+                      : undefined
+                  }
+                >
                   {/* A dashed hairline is far too thin to hit, especially with
-                      a finger, so an invisible fat line carries the tap. */}
+                      a finger, so an invisible fat line widens the target. */}
                   {onMeasurementDoubleTap && (
                     <line
                       x1={line.from.x}
@@ -1626,18 +1653,6 @@ export default function SetoutCanvas({
                       stroke="transparent"
                       strokeWidth={14 * px2scene()}
                       pointerEvents="stroke"
-                      className="cursor-pointer"
-                      onPointerDown={(e) => {
-                        e.stopPropagation();
-                        const now = Date.now();
-                        const last = lastMeasurementTapRef.current;
-                        if (last && last.key === line.key && now - last.time < 400) {
-                          lastMeasurementTapRef.current = null;
-                          onMeasurementDoubleTap(line.fittingId, line.slot);
-                          return;
-                        }
-                        lastMeasurementTapRef.current = { key: line.key, time: now };
-                      }}
                     />
                   )}
                   <line
