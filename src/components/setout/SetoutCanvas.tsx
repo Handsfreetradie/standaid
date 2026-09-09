@@ -2,7 +2,7 @@ import { useRef, useState, useCallback, useMemo, useEffect } from "react";
 import { GripHorizontal, Minus, Plus, MousePointer2, Camera } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatMm } from "@/lib/units";
-import { measurementRefId } from "@/lib/setoutTypes";
+import { measurementRefId, type MeasurementLock } from "@/lib/setoutTypes";
 import { FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
 import {
   colorForCircuit,
@@ -182,6 +182,11 @@ interface SetoutCanvasProps {
   // pick by double-tapping the plan strands the tradie in a mode with no
   // visible exit, since a tap in open space is deliberately ignored.
   onMeasurementPickCancel?: () => void;
+  // What a fitting's measurement would be at a given position. Used to keep
+  // the dimensions live while it's being dragged, so the tradie can see where
+  // to drop it — the stored numbers are for where it currently sits, which is
+  // exactly what they're trying to change.
+  measurementPreviewFor?: (fitting: SetoutFitting, position: Point) => MeasurementLock | null;
   selectedFittingType?: FittingType | null;
   onPlaceFitting?: (point: Point) => void;
   onFittingDrag?: (fittingId: string, position: Point) => void;
@@ -267,6 +272,7 @@ export default function SetoutCanvas({
   onPickPlanMeasurementRef,
   onMeasurementDoubleTap,
   onMeasurementPickCancel,
+  measurementPreviewFor,
   selectedFittingType,
   onPlaceFitting,
   onFittingDrag,
@@ -1157,8 +1163,12 @@ export default function SetoutCanvas({
     // with nothing visibly attached to it.
     for (const f of visibleFittings) {
       if (!f.measurement_lock) continue;
-      const pos = dragPreview?.id === f.id ? dragPreview.position : f.position;
-      const slotted = ([["refA", f.measurement_lock.refA], ["refB", f.measurement_lock.refB]] as const).filter(
+      const dragging = dragPreview?.id === f.id;
+      const pos = dragging ? dragPreview.position : f.position;
+      // While dragging, show what the measurement WILL be at the position
+      // under the finger, not what it was before the drag started.
+      const lock = (dragging ? measurementPreviewFor?.(f, pos) : null) ?? f.measurement_lock;
+      const slotted = ([["refA", lock.refA], ["refB", lock.refB]] as const).filter(
         (entry): entry is readonly ["refA" | "refB", MeasurementRef] => !!entry[1]
       );
       for (const [slot, ref] of slotted) {
@@ -1190,11 +1200,11 @@ export default function SetoutCanvas({
         }
         const label = formatMm(ref.distance);
         const refKey = measurementRefId(ref);
-        lines.push({ key: `${f.id}-${ref.kind}-${refKey}`, from: pos, to, label, note: f.measurement_lock.note, fittingId: f.id, slot });
+        lines.push({ key: `${f.id}-${ref.kind}-${refKey}`, from: pos, to, label, note: lock.note, fittingId: f.id, slot });
       }
     }
     return lines;
-  }, [visibleFittings, walls, openings, layerVisibility?.measurements, dragPreview]);
+  }, [visibleFittings, walls, openings, layerVisibility?.measurements, dragPreview, measurementPreviewFor, wallThickness]);
 
   /**
    * Where each measurement's label goes, nudged clear of the others.

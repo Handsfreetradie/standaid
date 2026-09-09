@@ -505,6 +505,31 @@ const SetoutPlan = () => {
     return refs.length > 1 ? { refA: refs[0], refB: refs[1] } : { refA: refs[0] };
   };
 
+  /**
+   * What this fitting's measurement should be if it sat here.
+   *
+   * Shared by the drag preview and the drop, deliberately: a number that
+   * changes the instant the fitting lands is worse than no number at all,
+   * because the tradie positions against what they can see.
+   */
+  // Referentially stable: the canvas holds this in the dependencies of the
+  // memo that lays out measurement labels, and that does a collision pass over
+  // every label — recreating this each render would redo all of it on any
+  // unrelated state change.
+  const lockForFittingAt = useCallback((fitting: SetoutFitting, position: Point): MeasurementLock | null => {
+    if (!plan) return null;
+    const existing = fitting.measurement_lock;
+    return existing?.userSet
+      ? remeasureLock(existing, position, {
+          walls: plan.walls,
+          openings: plan.openings ?? [],
+          fittings,
+          wallThickness: plan.wall_thickness,
+        })
+      : measurementLockFor(position, fitting.type);
+    // measurementLockFor reads plan and vectorIndex, both listed here.
+  }, [plan, fittings, vectorIndex]);
+
   const handlePlaceFitting = (point: Point) => {
     if (!selectedType || !plan) return;
     // A downlight is in the ceiling — there is no height to set it out to, so
@@ -545,20 +570,7 @@ const SetoutPlan = () => {
         ? { ...fitting.specs, rotation: autoRotationForWallMount(position, plan.walls) }
         : undefined;
     pushUndo({ type: "move", fittingId, prevPosition: fitting.position, prevMeasurementLock: fitting.measurement_lock, prevSpecs: fitting.specs });
-    // A measurement the tradie chose keeps ITS references and just gets the
-    // new distances; only an auto-derived one is worked out again from
-    // scratch. Re-deriving a chosen measurement meant the smallest nudge
-    // silently re-pointed it at whatever wall happened to be nearest.
-    const existing = fitting.measurement_lock;
-    const nextLock = existing?.userSet
-      ? remeasureLock(existing, position, {
-          walls: plan.walls,
-          openings: plan.openings ?? [],
-          fittings,
-          wallThickness: plan.wall_thickness,
-        })
-      : measurementLockFor(position, fitting.type);
-    updateFittingPosition.mutate({ fittingId, position, measurement_lock: nextLock, specs });
+    updateFittingPosition.mutate({ fittingId, position, measurement_lock: lockForFittingAt(fitting, position), specs });
   };
 
   const handleDeleteSelected = () => {
@@ -1000,6 +1012,7 @@ const SetoutPlan = () => {
                 backgroundTile={showBackgroundReference ? tile : null}
                 onViewSettled={pdfPage ? handleViewSettled : undefined}
                 snapToPlan={snapToPlan}
+                measurementPreviewFor={lockForFittingAt}
                 onPickPlanMeasurementRef={handlePickPlanMeasurementRef}
                 onMeasurementDoubleTap={handleMeasurementDoubleTap}
                 onMeasurementPickCancel={() => setPickingMeasurementSlot(null)}
