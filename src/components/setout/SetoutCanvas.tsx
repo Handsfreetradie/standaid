@@ -1165,6 +1165,66 @@ export default function SetoutCanvas({
     return lines;
   }, [visibleFittings, walls, openings, layerVisibility?.measurements, dragPreview]);
 
+  /**
+   * Where each measurement's label goes, nudged clear of the others.
+   *
+   * Labels sit at the middle of their line, and fittings set out in a row all
+   * measure to the same wall — so their labels land at the same height and
+   * print straight over each other. Two overlapping numbers don't read as a
+   * mess, they read as one wrong number: 2794 and 3298 on top of each other
+   * look exactly like a plausible 27943298.
+   *
+   * Colliding labels are pushed perpendicular to their own measurement line,
+   * so a label stays visibly attached to the run it belongs to.
+   */
+  const measurementLabels = useMemo(() => {
+    const scale = px2scene();
+    const fontSize = 11 * scale;
+    const lineHeight = fontSize * 1.35;
+    // Rough box for the text; the font is proportional, so this only has to be
+    // close enough to keep two labels from touching.
+    const widthOf = (text: string) => text.length * fontSize * 0.62;
+
+    const placed: { x: number; y: number; w: number; h: number }[] = [];
+    const overlaps = (a: { x: number; y: number; w: number; h: number }) =>
+      placed.some(
+        (b) =>
+          Math.abs(a.x - b.x) * 2 < a.w + b.w && Math.abs(a.y - b.y) * 2 < a.h + b.h
+      );
+
+    return measurementLines.map((line) => {
+      const midX = (line.from.x + line.to.x) / 2;
+      const midY = (line.from.y + line.to.y) / 2;
+      const dx = line.to.x - line.from.x;
+      const dy = line.to.y - line.from.y;
+      const len = Math.hypot(dx, dy) || 1;
+      // Perpendicular to the measurement, so the label moves away from its
+      // neighbours without drifting off its own line.
+      const nx = -dy / len;
+      const ny = dx / len;
+      const w = widthOf(line.label);
+      const h = lineHeight;
+
+      let best = { x: midX, y: midY };
+      // Alternate above and below, widening each time, and take the first spot
+      // that's clear. Six steps is enough for the densest run of downlights;
+      // beyond that the label stays put rather than flying off somewhere
+      // unrelated to its own line.
+      for (let step = 0; step <= 6; step++) {
+        for (const dir of step === 0 ? [0] : [1, -1]) {
+          const off = step * lineHeight * dir;
+          const candidate = { x: midX + nx * off, y: midY + ny * off, w, h };
+          if (!overlaps(candidate)) {
+            placed.push(candidate);
+            return { ...line, labelX: candidate.x, labelY: candidate.y };
+          }
+        }
+      }
+      placed.push({ x: best.x, y: best.y, w, h });
+      return { ...line, labelX: best.x, labelY: best.y };
+    });
+  }, [measurementLines, px2scene]);
+
   // Tell the owner which part of the plan is on screen, once the view has
   // stopped moving. Deliberately trailing-only: re-rendering a PDF mid-pinch
   // would fight the gesture, and the base image covers the interim.
@@ -1607,11 +1667,11 @@ export default function SetoutCanvas({
           </g>
         )}
 
-        {measurementLines.length > 0 && (
+        {measurementLabels.length > 0 && (
           <g>
-            {measurementLines.map((line) => {
-              const midX = (line.from.x + line.to.x) / 2;
-              const midY = (line.from.y + line.to.y) / 2;
+            {measurementLabels.map((line) => {
+              const midX = line.labelX;
+              const midY = line.labelY;
               const fontSize = 11 * px2scene();
               return (
                 <g
