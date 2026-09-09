@@ -255,6 +255,11 @@ export class PlanVectorIndex {
     return { x: fx, y: fy, distSq: (px - fx) ** 2 + (py - fy) ** 2 };
   }
 
+  /** Every line whose cells fall within `radius` of a point. */
+  linesNear(x: number, y: number, radius: number): PlanLine[] {
+    return this.candidates(x, y, radius).map((i) => this.lines[i]);
+  }
+
   private candidates(x: number, y: number, tolerance: number): number[] {
     const reach = Math.max(1, Math.ceil(tolerance / this.cellSize));
     const cx = Math.floor(x / this.cellSize);
@@ -350,4 +355,58 @@ export async function loadPlanVectorIndex(
   } catch {
     return null;
   }
+}
+
+/** A face found by measuring out from a point, and how far away it was. */
+export interface FaceHit {
+  point: Point;
+  distance: number;
+}
+
+/**
+ * The nearest drawn face directly left/right and directly up/down of a point.
+ *
+ * This is how a fitting is dimensioned on site — so much off one wall, so much
+ * off the one at right angles to it — and it is what makes a downlight placed
+ * on an untraced plan measurable at all. Only lines square to the axis being
+ * measured count: a diagonal isn't something a tape gets pulled to, and the
+ * face returned is the near side of the stroke, not its centre.
+ */
+export function measureToFaces(
+  index: PlanVectorIndex,
+  x: number,
+  y: number,
+  maxDistance = 12
+): { alongX?: FaceHit; alongY?: FaceHit } {
+  // Square to within about 3 degrees; a plan's walls are drawn true.
+  const SQUARE = 0.05;
+  let alongX: FaceHit | undefined;
+  let alongY: FaceHit | undefined;
+
+  for (const line of index.linesNear(x, y, maxDistance)) {
+    const dx = line.x2 - line.x1;
+    const dy = line.y2 - line.y1;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-9) continue;
+    const ux = dx / len;
+    const uy = dy / len;
+
+    // A vertical line is measured to horizontally, and vice versa.
+    if (Math.abs(ux) < SQUARE) {
+      const withinRun = y >= Math.min(line.y1, line.y2) && y <= Math.max(line.y1, line.y2);
+      if (!withinRun) continue;
+      const centre = line.x1;
+      const face = centre + (x > centre ? line.halfWidth : -line.halfWidth);
+      const d = Math.abs(x - face);
+      if (d <= maxDistance && (!alongX || d < alongX.distance)) alongX = { point: { x: face, y }, distance: d };
+    } else if (Math.abs(uy) < SQUARE) {
+      const withinRun = x >= Math.min(line.x1, line.x2) && x <= Math.max(line.x1, line.x2);
+      if (!withinRun) continue;
+      const centre = line.y1;
+      const face = centre + (y > centre ? line.halfWidth : -line.halfWidth);
+      const d = Math.abs(y - face);
+      if (d <= maxDistance && (!alongY || d < alongY.distance)) alongY = { point: { x, y: face }, distance: d };
+    }
+  }
+  return { alongX, alongY };
 }

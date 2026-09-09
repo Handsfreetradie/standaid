@@ -2,6 +2,7 @@ import { useRef, useState, useCallback, useMemo, useEffect } from "react";
 import { GripHorizontal, Minus, Plus, MousePointer2, Camera } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatMm } from "@/lib/units";
+import { measurementRefId } from "@/lib/setoutTypes";
 import { FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
 import {
   colorForCircuit,
@@ -1104,13 +1105,17 @@ export default function SetoutCanvas({
           const thickness = wall.kind === "interior" ? wallThickness.interior : wallThickness.exterior;
           const normal = roomFacingNormal(wall, edgePoint, wallsCentroid(walls));
           to = { x: edgePoint.x + normal.x * (thickness / 2), y: edgePoint.y + normal.y * (thickness / 2) };
+        } else if (ref.kind === "stroke") {
+          // A line on the imported drawing: the point it was measured to was
+          // frozen when the fitting was placed, because the drawing can't move.
+          to = ref.point;
         } else {
           const other = fittingById.get(ref.fittingId);
           if (!other) continue;
           to = dragPreview?.id === other.id ? dragPreview.position : other.position;
         }
         const label = formatMm(ref.distance);
-        const refKey = ref.kind === "wall" ? ref.wallId : ref.kind === "opening" ? ref.openingId : ref.fittingId;
+        const refKey = measurementRefId(ref);
         lines.push({ key: `${f.id}-${ref.kind}-${refKey}`, from: pos, to, label, note: f.measurement_lock.note });
       }
     }

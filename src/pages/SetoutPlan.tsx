@@ -26,7 +26,7 @@ import { DEFAULT_LAYER_VISIBILITY, distance, gangsFor, isSingleWallFitting, type
 import { autoRotationForWallMount, computeMeasurementLock, defaultHeightForType } from "@/lib/setoutGeometry";
 import { generateSetoutReportPdf, type PlanImage } from "@/lib/setoutReport";
 import { BASE_PDF_SCALE, renderPdfTile, type PdfPage } from "@/lib/planRender";
-import { extractPlanLines, PlanVectorIndex } from "@/lib/planVector";
+import { extractPlanLines, measureToFaces, PlanVectorIndex } from "@/lib/planVector";
 import type { BackgroundTile } from "@/components/setout/SetoutCanvas";
 import CircuitsPanel from "@/components/setout/CircuitsPanel";
 import EditWallsFlow from "@/components/setout/EditWallsFlow";
@@ -432,6 +432,24 @@ const SetoutPlan = () => {
     });
   };
 
+  // How this fitting gets dimensioned. Traced walls win when they exist —
+  // they're what the tradie chose as the reference, and a measurement against
+  // them survives editing them. With tracing skipped the imported drawing is
+  // the only reference there is, so the two nearest faces at right angles are
+  // measured to directly, which is how a fitting is dimensioned on site
+  // anyway: so much off one wall, so much off the one square to it.
+  const measurementLockFor = (point: Point): MeasurementLock | null => {
+    if (!plan) return null;
+    if (plan.walls.length > 0) return computeMeasurementLock(point, plan.walls, selectedType ?? undefined);
+    if (!vectorIndex) return null;
+    const { alongX, alongY } = measureToFaces(vectorIndex, point.x, point.y);
+    const refs = [alongX, alongY]
+      .filter((hit): hit is NonNullable<typeof hit> => !!hit)
+      .map((hit) => ({ kind: "stroke" as const, point: hit.point, distance: hit.distance }));
+    if (refs.length === 0) return null;
+    return refs.length > 1 ? { refA: refs[0], refB: refs[1] } : { refA: refs[0] };
+  };
+
   const handlePlaceFitting = (point: Point) => {
     if (!selectedType || !plan) return;
     const defaultHeight = defaultHeightForType(selectedType);
@@ -443,7 +461,7 @@ const SetoutPlan = () => {
       {
         type: selectedType,
         position: point,
-        measurement_lock: computeMeasurementLock(point, plan.walls, selectedType),
+        measurement_lock: measurementLockFor(point),
         specs: Object.keys(specs).length > 0 ? specs : undefined,
       },
       { onSuccess: (created) => pushUndo({ type: "create", fittingId: created.id }) }

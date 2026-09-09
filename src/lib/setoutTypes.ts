@@ -154,7 +154,43 @@ export interface OpeningRef {
   edge: "start" | "end";
 }
 
-export type MeasurementRef = WallRef | FittingRef | OpeningRef;
+// A measurement taken off a line printed on the imported plan rather than a
+// traced wall — the case where tracing was skipped and the drawing itself is
+// the only reference there is.
+//
+// Stores the geometry rather than an id, unlike every other ref here. The id
+// indirection exists so a measurement survives its wall being edited; a line
+// on an imported drawing has no id to point at and cannot move, so freezing
+// the point it was taken to is both simpler and safe. `point` is the face
+// measured to, in scene units.
+export interface StrokeRef {
+  kind: "stroke";
+  point: Point;
+  distance: number;
+}
+
+export type MeasurementRef = WallRef | FittingRef | OpeningRef | StrokeRef;
+
+/**
+ * The id of whatever a measurement points at, whichever kind it is.
+ *
+ * Reading `.fittingId` after only ruling out `"wall"` is a type error, because
+ * an opening ref has no such field — it was reached in three places and would
+ * have produced `undefined` at runtime rather than an opening's id.
+ */
+export function measurementRefId(ref: MeasurementRef): string {
+  switch (ref.kind) {
+    case "wall":
+      return ref.wallId;
+    case "fitting":
+      return ref.fittingId;
+    case "opening":
+      return ref.openingId;
+    case "stroke":
+      // No id to give: a line on the drawing is identified by where it is.
+      return `${ref.point.x.toFixed(4)},${ref.point.y.toFixed(4)}`;
+  }
+}
 
 // GPOs and switches lock to a single nearest wall (plus a mounting height) —
 // that's how a tradie actually measures them on site. Everything else locks

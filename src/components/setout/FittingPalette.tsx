@@ -17,7 +17,7 @@ import {
   type MeasurementLock,
   type MeasurementRef,
   type SetoutCircuit,
-  type SetoutFitting,
+  type SetoutFitting, measurementRefId
 } from "@/lib/setoutTypes";
 
 const FITTING_TYPES = Object.keys(FITTING_SYMBOLS) as FittingType[];
@@ -318,7 +318,7 @@ const FittingPalette = ({
                         </button>
                       </div>
                       <DraftNumberInput
-                        key={`${slot}-${selectedFitting.id}-${ref.kind}-${ref.kind === "wall" ? ref.wallId : ref.fittingId}-${ref.distance.toFixed(2)}`}
+                        key={`${slot}-${selectedFitting.id}-${ref.kind}-${measurementRefId(ref)}-${ref.distance.toFixed(2)}`}
                         type="number"
                         inputMode="decimal"
                         step="0.01"

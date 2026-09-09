@@ -17,6 +17,8 @@ export default function MeasurementListPanel({ fittings, walls }: MeasurementLis
 
   const refLabel = (ref: MeasurementRef) => {
     if (ref.kind === "wall") return wallLabel(ref.wallId);
+    if (ref.kind === "opening") return "an opening";
+    if (ref.kind === "stroke") return "the plan";
     const target = fittings.find((f) => f.id === ref.fittingId);
     return target ? FITTING_LABELS[target.type] : "another fitting";
   };
