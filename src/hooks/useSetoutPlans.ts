@@ -17,6 +17,7 @@ import {
   type MeasurementLock,
   type WallOpening,
   type WallThickness,
+  type PlanDefaults,
   CATEGORY_FOR_TYPE,
   gangsFor,
 } from "@/lib/setoutTypes";
@@ -242,6 +243,27 @@ export function useUpdateSetoutPlanWallThickness(planId: string) {
       const { error } = await sb
         .from("setout_plans")
         .update({ wall_thickness: wallThickness })
+        .eq("id", planId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["setout_plan", planId] });
+      queryClient.invalidateQueries({ queryKey: ["setout_plans"] });
+    },
+  });
+}
+
+// Job-wide seed values (twin downlight spacing, LED watts per metre). Only
+// ever read when a fitting is placed — see PlanDefaults — so saving these
+// never has to touch the fittings already on the plan.
+export function useUpdateSetoutPlanDefaults(planId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (planDefaults: PlanDefaults) => {
+      const { error } = await sb
+        .from("setout_plans")
+        .update({ plan_defaults: planDefaults })
         .eq("id", planId);
       if (error) throw error;
     },

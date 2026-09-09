@@ -19,6 +19,7 @@ export { default as HeaterFanLight2Symbol } from "./HeaterFanLight2Symbol";
 export { default as HeaterFanLight4Symbol } from "./HeaterFanLight4Symbol";
 export { default as HeatingDuctSymbol } from "./HeatingDuctSymbol";
 export { default as JunctionBoxSymbol } from "./JunctionBoxSymbol";
+export { default as LedStripSymbol } from "./LedStripSymbol";
 export { default as MeterBoxSymbol } from "./MeterBoxSymbol";
 export { default as MotionSensorSymbol } from "./MotionSensorSymbol";
 export { default as NbnBoxSymbol } from "./NbnBoxSymbol";
@@ -40,6 +41,7 @@ export { default as WallStairLightSymbol } from "./WallStairLightSymbol";
 
 export type { GpoSymbolProps } from "./GpoSymbol";
 export type { DownlightSymbolProps } from "./DownlightSymbol";
+export type { DataOutletSymbolProps } from "./DataOutletSymbol";
 export type { ParaFloodSymbolProps } from "./ParaFloodSymbol";
 export type { SwitchSymbolProps } from "./SwitchSymbol";
 export type { Fluoro1200SymbolProps } from "./Fluoro1200Symbol";

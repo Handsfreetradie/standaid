@@ -2,7 +2,8 @@ import { useRef, useState, useCallback, useMemo, useEffect } from "react";
 import { GripHorizontal, Minus, Plus, MousePointer2, Camera } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatMm } from "@/lib/units";
-import { measurementRefId, type MeasurementLock } from "@/lib/setoutTypes";
+import { measurementRefId, DEFAULT_TWIN_SPACING_MM, type MeasurementLock } from "@/lib/setoutTypes";
+import { pathLength, pathMidpoint } from "@/lib/setoutPathGeometry";
 import { FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
 import {
   colorForCircuit,
@@ -89,9 +90,14 @@ export type SetoutCanvasMode =
   | "select-multiple"
   | "pick-measurement-ref"
   | "place-photo-points"
-  | "link-data-cabinet";
+  | "link-data-cabinet"
+  | "draw-led-strip";
 
 interface SetoutCanvasProps {
+  // The LED strip run currently being traced. Held by the parent for the same
+  // reason sketchPoints is — undo and the "finish run" button live up there.
+  stripDraft?: Point[];
+  onStripPointAdd?: (point: Point) => void;
   backgroundImage?: BackgroundImage;
   backgroundTile?: BackgroundTile | null;
   // Fires once the view stops moving, so the owner can re-render the plan for
@@ -255,6 +261,8 @@ export default function SetoutCanvas({
   openings = [],
   fittings = [],
   mode,
+  stripDraft = [],
+  onStripPointAdd,
   sketchPoints = [],
   onSketchPointAdd,
   onSketchPointUndo,
@@ -629,6 +637,14 @@ export default function SetoutCanvas({
         const onEdge = snapToPlanEdge(scene);
         const point = onEdge ?? (snapWalls && last ? snapOrthogonal(last, scene) : scene);
         onSketchPointAdd?.(point);
+      } else if (mode === "draw-led-strip") {
+        // Snap to the plan's line work and square up to the previous point the
+        // same way a traced wall does — a strip almost always runs along a
+        // cupboard or a wall, so freehand angles are nearly always a misread
+        // tap rather than what the tradie meant.
+        const last = stripDraft[stripDraft.length - 1];
+        const onEdge = snapToPlanEdge(scene);
+        onStripPointAdd?.(onEdge ?? (snapWalls && last ? snapOrthogonal(last, scene) : scene));
       } else if (mode === "calibrate") {
         if (calibratePoints.length < 2) onCalibratePointAdd?.(scene);
       } else if (mode === "sketch-interior-wall") {
@@ -1833,9 +1849,87 @@ export default function SetoutCanvas({
           </g>
         )}
 
+        {/* LED strips are runs, not points — they're drawn as the polyline the
+            tradie traced rather than a fixed-size icon, so the length on the
+            plan is the real length. Drawn before the icons so a fitting that
+            sits on a strip still reads on top. */}
+        {visibleFittings
+          .filter((f) => f.type === "led_strip" && (f.specs.path?.length ?? 0) >= 2)
+          .map((f) => {
+            const path = f.specs.path!;
+            const points = path.map((pt) => `${pt.x},${pt.y}`).join(" ");
+            const selected = selectedFittingId === f.id;
+            const mid = pathMidpoint(path);
+            const lengthMm = Math.round(pathLength(path) * 1000);
+            const circuitColor = colorForCircuit(circuits, f.circuit_id);
+            return (
+              <g key={`strip-${f.id}`}>
+                {/* A wide transparent line under the visible one: a 4px strip is
+                    almost impossible to hit with a gloved finger. */}
+                <polyline
+                  points={points}
+                  fill="none"
+                  stroke="transparent"
+                  strokeWidth={16}
+                  vectorEffect="non-scaling-stroke"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  pointerEvents="stroke"
+                  onPointerDown={(e) => handleFittingPointerDown(e, f)}
+                  style={{ cursor: "pointer" }}
+                />
+                <polyline
+                  points={points}
+                  fill="none"
+                  className="text-primary"
+                  stroke={selected ? "hsl(var(--primary))" : circuitColor ?? "currentColor"}
+                  strokeWidth={selected ? 6 : 4}
+                  vectorEffect="non-scaling-stroke"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  pointerEvents="none"
+                />
+                <text
+                  x={mid.x}
+                  y={mid.y - iconScale * 6}
+                  textAnchor="middle"
+                  fontSize={iconScale * 9}
+                  fontWeight="600"
+                  className="text-primary"
+                  fill="currentColor"
+                  pointerEvents="none"
+                >
+                  {lengthMm}mm
+                </text>
+              </g>
+            );
+          })}
+
+        {/* The run being drawn right now, before it's saved. */}
+        {stripDraft.length > 0 && (
+          <g pointerEvents="none">
+            <polyline
+              points={stripDraft.map((pt) => `${pt.x},${pt.y}`).join(" ")}
+              fill="none"
+              className="text-primary"
+              stroke="currentColor"
+              strokeWidth={4}
+              strokeDasharray="6 4"
+              vectorEffect="non-scaling-stroke"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            {stripDraft.map((pt, i) => (
+              <circle key={i} cx={pt.x} cy={pt.y} r={iconScale * 3} className="text-primary" fill="currentColor" />
+            ))}
+          </g>
+        )}
+
         {visibleFittings.map((f) => {
           const Icon = FITTING_SYMBOLS[f.type];
           if (!Icon) return null;
+          // Already drawn as a run above — a strip has no icon on the plan.
+          if (f.type === "led_strip") return null;
           let pos = dragPreview?.id === f.id ? dragPreview.position : f.position;
           // Wall-mounted symbols offset into the room so they sit on the inside
           // edge of the wall, not straddling the wall centerline. Offset scales
@@ -1886,16 +1980,30 @@ export default function SetoutCanvas({
                 stroke={isActiveSwitch || isMultiSelected || isInSelectionGroup ? "hsl(var(--primary))" : "none"}
                 strokeWidth={isActiveSwitch || isMultiSelected || isInSelectionGroup ? 1.5 : 0}
               />
-              <Icon
-                size={24}
-                // Fittings are drawn in the app's red so they stand out against the
-                // black line work of a plan underneath. A circuit colour, when one
-                // is assigned, still wins.
-                className="text-primary"
-                style={circuitColor && !selected && !isActiveSwitch && !isInSelectionGroup ? { color: circuitColor } : undefined}
-                strokeWidth={selected || isActiveSwitch || isInSelectionGroup ? 2 : 1.5}
-                {...symbolExtraProps}
-              />
+              {/* A twin downlight is two lamps in one fixture, so it's drawn as
+                  two glyphs at their real centre-to-centre spacing rather than
+                  one "twin" glyph — on a setout plan the tradie measures the
+                  gap off the drawing, so it has to be to scale. Dividing the
+                  spacing by iconScale converts metres into the icon's own
+                  coordinate space, which the parent <g> then scales back. */}
+              {(f.type === "downlight" && f.specs.twin
+                ? [-1, 1].map((side) => (side * (f.specs.twinSpacingMm ?? DEFAULT_TWIN_SPACING_MM)) / 1000 / iconScale / 2)
+                : [0]
+              ).map((dx, i) => (
+                <g key={i} transform={dx ? `translate(${dx} 0)` : undefined}>
+                  <Icon
+                    size={24}
+                    // Fittings are drawn in the app's red so they stand out against the
+                    // black line work of a plan underneath. A circuit colour, when one
+                    // is assigned, still wins.
+                    className="text-primary"
+                    style={circuitColor && !selected && !isActiveSwitch && !isInSelectionGroup ? { color: circuitColor } : undefined}
+                    strokeWidth={selected || isActiveSwitch || isInSelectionGroup ? 2 : 1.5}
+                    {...symbolExtraProps}
+                    {...(f.type === "downlight" && f.specs.twin ? { twin: false } : {})}
+                  />
+                </g>
+              ))}
               {f.status === "confirmed" && (
                 <g transform="translate(15 -3)">
                   <circle r={5} fill="hsl(var(--primary))" />

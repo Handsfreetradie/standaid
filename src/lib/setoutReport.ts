@@ -5,6 +5,7 @@ import jsPDF from "jspdf";
 import { createElement } from "react";
 import { FITTING_LABELS, FITTING_SYMBOLS } from "@/components/setout/symbols";
 import type { FittingType } from "@/components/setout/symbols";
+import { aggregateMaterials } from "@/lib/setoutMaterials";
 import {
   CATEGORY_FOR_TYPE,
   FITTING_CATEGORY_ORDER,
@@ -100,7 +101,7 @@ const CODE_PREFIX: Record<FittingType, string> = {
   // Lighting
   downlight: "DL",
   batten_holder: "BH",
-  wall_batten_holder: "WBH",
+  wall_batten_holder: "WL",
   wall_stair_light: "WSL",
   external_light: "EXL",
   heater_fan_light_2: "HFL2",
@@ -115,6 +116,7 @@ const CODE_PREFIX: Record<FittingType, string> = {
   exhaust_fan: "EF",
   exhaust_fan_light: "EFL",
   pendant: "PEN",
+  led_strip: "LED",
   // Switches
   switch: "SW",
   // Power
@@ -636,6 +638,70 @@ function drawSwitchboardPage(
   }
 }
 
+// The order list. Quantities come from setoutMaterials, which reads each
+// fitting's specs — so a 4-gang GPO orders four mechs, a 6-port data plate
+// orders six, and an LED run is priced off the length actually drawn rather
+// than off a fitting count.
+function drawMaterialsPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting[]): void {
+  let y = drawPageHeader(doc, plan, "Materials list");
+  const ensureSpace = (needed: number) => {
+    if (y + needed > PAGE_H - MARGIN) {
+      doc.addPage();
+      y = MARGIN;
+    }
+  };
+
+  const lines = aggregateMaterials(fittings);
+  if (lines.length === 0) {
+    doc.setFontSize(10);
+    doc.setTextColor(120);
+    doc.text("Nothing to order yet — place some fittings first.", MARGIN, y + 4);
+    return;
+  }
+
+  const QTY_X = PAGE_W - MARGIN - 24;
+  let currentGroup = "";
+
+  for (const line of lines) {
+    if (line.group !== currentGroup) {
+      currentGroup = line.group;
+      ensureSpace(12);
+      y += 3;
+      doc.setFontSize(9);
+      doc.setTextColor(20);
+      doc.text(currentGroup.toUpperCase(), MARGIN, y);
+      y += 2;
+      doc.setDrawColor(220);
+      doc.line(MARGIN, y, PAGE_W - MARGIN, y);
+      y += 5;
+    }
+
+    const itemLines = doc.splitTextToSize(line.item, CONTENT_W - 30);
+    ensureSpace(Math.max(5, itemLines.length * 4));
+    doc.setFontSize(9);
+    doc.setTextColor(40);
+    doc.text(itemLines, MARGIN, y);
+    // Metres to one decimal, counts whole — a "3.0" against a light fitting
+    // reads as a misprint on an order.
+    const qty = line.unit === "m" ? `${line.qty.toFixed(1)} m` : `${Math.round(line.qty)}`;
+    doc.text(qty, QTY_X, y, { align: "right" });
+    y += Math.max(5, itemLines.length * 4);
+  }
+
+  ensureSpace(14);
+  y += 4;
+  doc.setFontSize(8);
+  doc.setTextColor(130);
+  doc.text(
+    doc.splitTextToSize(
+      "Check quantities before ordering — this list is worked out from what is on the plan and does not include cable, conduit, or fixings.",
+      CONTENT_W
+    ),
+    MARGIN,
+    y
+  );
+}
+
 export async function generateSetoutReportPdf(opts: {
   plan: SetoutPlan;
   fittings: SetoutFitting[];
@@ -655,6 +721,8 @@ export async function generateSetoutReportPdf(opts: {
   drawCableRunPage(doc, plan, fittings, codes);
   doc.addPage();
   drawSwitchboardPage(doc, plan, fittings, circuits, codes);
+  doc.addPage();
+  drawMaterialsPage(doc, plan, fittings);
 
   const pageCount = doc.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {

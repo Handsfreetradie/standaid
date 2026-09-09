@@ -21,6 +21,7 @@ import HeaterFanLight2Symbol from "./HeaterFanLight2Symbol";
 import HeaterFanLight4Symbol from "./HeaterFanLight4Symbol";
 import HeatingDuctSymbol from "./HeatingDuctSymbol";
 import JunctionBoxSymbol from "./JunctionBoxSymbol";
+import LedStripSymbol from "./LedStripSymbol";
 import MeterBoxSymbol from "./MeterBoxSymbol";
 import MotionSensorSymbol from "./MotionSensorSymbol";
 import NbnBoxSymbol from "./NbnBoxSymbol";
@@ -61,6 +62,7 @@ export const FITTING_SYMBOLS: Record<FittingType, ComponentType<SetoutSymbolProp
   exhaust_fan: ExhaustFanSymbol,
   exhaust_fan_light: ExhaustFanLightSymbol,
   pendant: PendantSymbol,
+  led_strip: LedStripSymbol,
   // Switches
   switch: SwitchSymbol,
   // Power
@@ -97,7 +99,7 @@ export const FITTING_LABELS: Record<FittingType, string> = {
   // Lighting
   downlight: "Downlight",
   batten_holder: "Batten holder",
-  wall_batten_holder: "Wall batten holder",
+  wall_batten_holder: "Wall light",
   wall_stair_light: "Wall stair light",
   external_light: "External light point",
   heater_fan_light_2: "Heater/fan/light (2 globe)",
@@ -112,6 +114,7 @@ export const FITTING_LABELS: Record<FittingType, string> = {
   exhaust_fan: "Exhaust fan",
   exhaust_fan_light: "Exhaust fan with light",
   pendant: "Suspended pendant",
+  led_strip: "LED strip",
   // Switches
   switch: "Light switch",
   // Power

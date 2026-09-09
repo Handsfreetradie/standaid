@@ -2,7 +2,7 @@ import type { SetoutSymbolProps } from "./types";
 import type { GpoVariant } from "@/lib/setoutTypes";
 
 export interface GpoSymbolProps extends SetoutSymbolProps {
-  count?: 1 | 2;
+  count?: 1 | 2 | 4;
   variant?: GpoVariant;
 }
 
@@ -22,7 +22,14 @@ const GpoSymbol = ({ size = 24, count = 1, variant = "standard", className, ...p
   >
     <path d="M3 20h18" />
     <path d="M6 20a6 6 0 0 1 12 0" />
-    {count === 2 ? (
+    {count === 4 ? (
+      <>
+        <path d="M7.5 16V9.5" />
+        <path d="M10.5 14.2V8" />
+        <path d="M13.5 14.2V8" />
+        <path d="M16.5 16V9.5" />
+      </>
+    ) : count === 2 ? (
       <>
         <path d="M9.5 14.6V8" />
         <path d="M14.5 14.6V8" />

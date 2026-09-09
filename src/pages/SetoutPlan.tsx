@@ -22,7 +22,8 @@ import DataCabinetLinksPanel from "@/components/setout/DataCabinetLinksPanel";
 import PhotoPointDialog from "@/components/setout/PhotoPointDialog";
 import CameraCapture from "@/components/setout/CameraCapture";
 import type { FittingType } from "@/components/setout/symbols";
-import { DEFAULT_LAYER_VISIBILITY, distance, gangsFor, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type MeasurementRef, type Point, type SetoutFitting } from "@/lib/setoutTypes";
+import { pathLength } from "@/lib/setoutPathGeometry";
+import { DEFAULT_LAYER_VISIBILITY, DEFAULT_TWIN_SPACING_MM, distance, gangsFor, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type MeasurementRef, type Point, type SetoutFitting } from "@/lib/setoutTypes";
 import { autoRotationForWallMount, computeMeasurementLock, defaultHeightForType, remeasureLock } from "@/lib/setoutGeometry";
 import { generateSetoutReportPdf, type PlanImage } from "@/lib/setoutReport";
 import { BASE_PDF_SCALE, renderPdfTile, type PdfPage } from "@/lib/planRender";
@@ -42,6 +43,7 @@ import {
   useUpdateSetoutFittingMeasurementLock,
   useUpdateSetoutPlanLayerVisibility,
   useUpdateSetoutPlanWallThickness,
+  useUpdateSetoutPlanDefaults,
   useToggleGangLink,
   useAddSwitchGang,
   useRemoveSwitchGang,
@@ -56,7 +58,7 @@ import { useSetoutCircuits, useAssignFittingCircuit } from "@/hooks/useSetoutCir
 
 type WorkspaceMode = Extract<
   SetoutCanvasMode,
-  "place-fittings" | "link-switches" | "select-multiple" | "place-photo-points" | "link-data-cabinet"
+  "place-fittings" | "link-switches" | "select-multiple" | "place-photo-points" | "link-data-cabinet" | "draw-led-strip"
 >;
 
 // A small in-memory undo history for the most common accidental actions —
@@ -91,6 +93,7 @@ const SetoutPlan = () => {
   const updateFittingMeasurementLock = useUpdateSetoutFittingMeasurementLock(planId || "");
   const updateLayerVisibility = useUpdateSetoutPlanLayerVisibility(planId || "");
   const updateWallThickness = useUpdateSetoutPlanWallThickness(planId || "");
+  const updatePlanDefaults = useUpdateSetoutPlanDefaults(planId || "");
   const toggleGangLink = useToggleGangLink(planId || "");
   const addSwitchGang = useAddSwitchGang(planId || "");
   const removeSwitchGang = useRemoveSwitchGang(planId || "");
@@ -115,6 +118,13 @@ const SetoutPlan = () => {
   const pushUndo = (entry: UndoEntry) => setUndoStack((prev) => [...prev.slice(-19), entry]);
   const [editingWalls, setEditingWalls] = useState(false);
   const [pickingMeasurementSlot, setPickingMeasurementSlot] = useState<"refA" | "refB" | null>(null);
+  // Points of the LED strip run being traced, kept here (not in the canvas)
+  // so undo and "finish run" can act on it — same split as sketchPoints.
+  const [stripDraft, setStripDraft] = useState<Point[]>([]);
+  const [planDefaultsDraft, setPlanDefaultsDraft] = useState({
+    twinDownlightSpacingMm: DEFAULT_TWIN_SPACING_MM,
+    ledWattsPerMetre: 14,
+  });
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>(DEFAULT_LAYER_VISIBILITY);
   const layerSyncedRef = useRef(false);
 
@@ -143,6 +153,12 @@ const SetoutPlan = () => {
         interior: Math.round(plan.wall_thickness.interior * 1000),
       });
       wallThicknessSyncedRef.current = true;
+      // Seeded the same guarded way, so a refetch can't snap the fields back
+      // to a stale value while the tradie is mid-edit.
+      setPlanDefaultsDraft({
+        twinDownlightSpacingMm: plan.plan_defaults?.twinDownlightSpacingMm ?? DEFAULT_TWIN_SPACING_MM,
+        ledWattsPerMetre: plan.plan_defaults?.ledWattsPerMetre ?? 14,
+      });
     }
   }, [plan]);
 
@@ -595,6 +611,48 @@ const SetoutPlan = () => {
     // switch/deselect.
   };
 
+  const commitPlanDefaults = () => {
+    updatePlanDefaults.mutate({
+      twinDownlightSpacingMm: planDefaultsDraft.twinDownlightSpacingMm,
+      ledWattsPerMetre: planDefaultsDraft.ledWattsPerMetre,
+      ledProfile: plan?.plan_defaults?.ledProfile,
+    });
+  };
+
+  const handleStripPointAdd = (point: Point) => setStripDraft((prev) => [...prev, point]);
+  const handleStripUndo = () => setStripDraft((prev) => prev.slice(0, -1));
+  const handleStripCancel = () => setStripDraft([]);
+
+  // A run needs at least two points to be a run. The fitting's position is
+  // path[0] so that measurements, circuits and selection — all of which work
+  // off position — keep working on a strip with no special-casing.
+  const handleStripFinish = () => {
+    if (stripDraft.length < 2) {
+      toast.error("A strip needs at least two points — tap along the run, then finish.");
+      return;
+    }
+    const path = stripDraft;
+    createFitting.mutate(
+      {
+        type: "led_strip",
+        position: path[0],
+        measurement_lock: measurementLockFor(path[0], "led_strip"),
+        specs: {
+          path,
+          ledWattsPerMetre: plan?.plan_defaults?.ledWattsPerMetre ?? 14,
+          ledProfile: plan?.plan_defaults?.ledProfile ?? "surface",
+        },
+      },
+      {
+        onSuccess: (created) => {
+          pushUndo({ type: "create", fittingId: created.id });
+          setStripDraft([]);
+          toast.success(`LED strip added — ${Math.round(pathLength(path) * 1000)}mm`);
+        },
+      }
+    );
+  };
+
   const handleFittingDrag = (fittingId: string, position: Point) => {
     if (!plan) return;
     const fitting = fittings.find((f) => f.id === fittingId);
@@ -828,6 +886,16 @@ const SetoutPlan = () => {
       >
         <CheckSquare className="h-3.5 w-3.5" /> Select multiple
       </button>
+      <button
+        type="button"
+        onClick={() => handleWorkspaceModeChange("draw-led-strip")}
+        className={cn(
+          "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+          workspaceMode === "draw-led-strip" ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"
+        )}
+      >
+        <Minus className="h-3.5 w-3.5" /> Draw LED strip
+      </button>
       {hasPhotoPointsAccess && (
         <button
           type="button"
@@ -840,6 +908,41 @@ const SetoutPlan = () => {
           <Camera className="h-3.5 w-3.5" /> Photo points
         </button>
       )}
+    </div>
+  );
+
+  // Tap along the run on the plan, then finish it. Kept as a panel rather
+  // than a double-tap-to-finish gesture because a strip is usually only two
+  // or three points — a mis-read double tap would cost the whole run.
+  const stripPanelUI = (
+    <div className="rounded-xl border border-border bg-card p-3 space-y-3">
+      <div>
+        <p className="text-sm font-medium">Draw an LED strip</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Tap along the run on the plan — corners and all — then finish it. It snaps to the plan's lines and squares up as you go.
+        </p>
+      </div>
+      <div className="rounded-lg bg-muted/50 px-3 py-2">
+        <p className="text-xs text-muted-foreground">
+          {stripDraft.length === 0
+            ? "No points yet"
+            : stripDraft.length === 1
+              ? "1 point — tap again to make a run"
+              : `${stripDraft.length} points · ${Math.round(pathLength(stripDraft) * 1000)}mm`}
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" onClick={handleStripFinish} disabled={stripDraft.length < 2 || createFitting.isPending}>
+          {createFitting.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : null}
+          Finish run
+        </Button>
+        <Button size="sm" variant="outline" onClick={handleStripUndo} disabled={stripDraft.length === 0}>
+          <Undo2 className="h-3.5 w-3.5 mr-1.5" /> Undo point
+        </Button>
+        <Button size="sm" variant="ghost" onClick={handleStripCancel} disabled={stripDraft.length === 0}>
+          Cancel
+        </Button>
+      </div>
     </div>
   );
 
@@ -882,6 +985,16 @@ const SetoutPlan = () => {
         title="Link data cabinet"
       >
         <Network className="h-5 w-5" />
+      </button>
+      <button
+        onClick={() => { handleWorkspaceModeChange("draw-led-strip"); setMobileDrawerOpen(true); }}
+        className={cn(
+          "flex flex-col items-center justify-center h-14 w-14 rounded-lg border transition-colors flex-shrink-0",
+          workspaceMode === "draw-led-strip" ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"
+        )}
+        title="Draw LED strip"
+      >
+        <Minus className="h-5 w-5" />
       </button>
       {hasPhotoPointsAccess && (
         <button
@@ -1030,6 +1143,54 @@ const SetoutPlan = () => {
                 </div>
               </PopoverContent>
             </Popover>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8 gap-1.5">
+                  <Ruler className="h-3.5 w-3.5" />
+                  Job defaults
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64" align="end">
+                <p className="text-xs font-semibold text-foreground mb-1">Defaults for this job</p>
+                <p className="text-[11px] text-muted-foreground mb-3">
+                  Starting values only. A fitting takes a copy when it's placed, so changing these never moves anything already set out.
+                </p>
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="twin-spacing-default" className="text-xs">Twin downlight spacing (mm)</Label>
+                    <Input
+                      id="twin-spacing-default"
+                      type="number"
+                      inputMode="numeric"
+                      min="0"
+                      step="10"
+                      value={planDefaultsDraft.twinDownlightSpacingMm}
+                      onChange={(e) =>
+                        setPlanDefaultsDraft((prev) => ({ ...prev, twinDownlightSpacingMm: Number(e.target.value) || prev.twinDownlightSpacingMm }))
+                      }
+                      onBlur={commitPlanDefaults}
+                      className="h-9"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="led-wpm-default" className="text-xs">LED strip watts per metre</Label>
+                    <Input
+                      id="led-wpm-default"
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      step="1"
+                      value={planDefaultsDraft.ledWattsPerMetre}
+                      onChange={(e) =>
+                        setPlanDefaultsDraft((prev) => ({ ...prev, ledWattsPerMetre: Number(e.target.value) || prev.ledWattsPerMetre }))
+                      }
+                      onBlur={commitPlanDefaults}
+                      className="h-9"
+                    />
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
             <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={handleUndo} disabled={undoStack.length === 0}>
               <Undo2 className="h-3.5 w-3.5" />
               Undo
@@ -1058,6 +1219,8 @@ const SetoutPlan = () => {
           <div className="md:flex-1 md:min-w-0">
             <div className="h-[65vh] md:h-[85vh] mb-4 md:mb-0 md:mb-0" style={{ marginBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
               <SetoutCanvas
+                stripDraft={stripDraft}
+                onStripPointAdd={handleStripPointAdd}
                 backgroundImage={showBackgroundReference ? (backgroundImage ?? undefined) : undefined}
                 backgroundTile={showBackgroundReference ? tile : null}
                 onViewSettled={pdfPage ? handleViewSettled : undefined}
@@ -1112,6 +1275,7 @@ const SetoutPlan = () => {
 
             {workspaceMode === "place-fittings" ? (
               <FittingPalette
+                twinSpacingDefaultMm={plan?.plan_defaults?.twinDownlightSpacingMm}
                 selectedType={selectedType}
                 onSelectType={setSelectedType}
                 selectedFittingId={selectedFittingId}
@@ -1126,6 +1290,8 @@ const SetoutPlan = () => {
                 circuits={circuits}
                 onAssignCircuit={handleAssignCircuit}
               />
+            ) : workspaceMode === "draw-led-strip" ? (
+              stripPanelUI
             ) : workspaceMode === "link-switches" ? (
               <SwitchLinksPanel
                 fittings={fittings}
@@ -1214,6 +1380,7 @@ const SetoutPlan = () => {
           <div className="p-4 space-y-4">
             {workspaceMode === "place-fittings" ? (
               <FittingPalette
+                twinSpacingDefaultMm={plan?.plan_defaults?.twinDownlightSpacingMm}
                 selectedType={selectedType}
                 onSelectType={setSelectedType}
                 selectedFittingId={selectedFittingId}
@@ -1228,6 +1395,8 @@ const SetoutPlan = () => {
                 circuits={circuits}
                 onAssignCircuit={handleAssignCircuit}
               />
+            ) : workspaceMode === "draw-led-strip" ? (
+              stripPanelUI
             ) : workspaceMode === "link-switches" ? (
               <SwitchLinksPanel
                 fittings={fittings}

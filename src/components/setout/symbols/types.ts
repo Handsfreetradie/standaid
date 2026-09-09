@@ -24,6 +24,7 @@ export type FittingType =
   | "exhaust_fan"
   | "exhaust_fan_light"
   | "pendant"
+  | "led_strip"
   // Switches
   | "switch"
   // Power

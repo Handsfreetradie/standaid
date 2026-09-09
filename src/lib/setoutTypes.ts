@@ -21,6 +21,7 @@ export const CATEGORY_FOR_TYPE: Record<FittingType, FittingCategory> = {
   exhaust_fan: "safety",
   exhaust_fan_light: "lighting",
   pendant: "lighting",
+  led_strip: "lighting",
   // Switches
   switch: "switches",
   // Power
@@ -99,10 +100,23 @@ export interface FittingSpecs {
   mountingHeight?: number;
   wattage?: number;
   // Single/double — shared by GPO, para flood, and 1200mm fluoro (same
-  // single-vs-double glyph convention across all three).
-  count?: 1 | 2;
+  // single-vs-double glyph convention across all three). GPO also comes as a
+  // 4-gang plate; para flood and 1200mm fluoro do not, so the palette offers
+  // 4 only for GPO rather than this type being narrowed per fitting.
+  count?: 1 | 2 | 4;
   gpoVariant?: GpoVariant;
   downlightSizeMm?: 50 | 70 | 90;
+  // Outlets on one data plate. A plate's outlets all home-run back to the
+  // same cabinet — one comms cabinet per house is the norm — so this is a
+  // count beside the single dataCabinetId below, not an outlet-by-outlet
+  // mapping. What it changes is how many cables the run list orders.
+  ports?: 1 | 2 | 3 | 4 | 5 | 6;
+  // Two lamps in one downlight fixture, at a set centre-to-centre spacing.
+  // Seeded from the plan's default when placed (see SetoutPlan.defaults) and
+  // then owned by the fitting, so changing the plan default later doesn't
+  // silently move downlights the tradie has already set out.
+  twin?: boolean;
+  twinSpacingMm?: number;
   // A switch plate's independent gangs — each gang is its own ordered
   // loop-in chain (switch -> target[0] -> target[1] -> ...), e.g. one
   // 2-gang plate where gang 1 runs 4 downlights and gang 2 runs a separate
@@ -127,7 +141,22 @@ export interface FittingSpecs {
   // points, one id each) rather than an ordered chain the cabinet itself
   // owns.
   dataCabinetId?: string | null;
+  // An LED strip is drawn as a run rather than dropped as a point, so it
+  // carries a polyline (plan-local metres) that can turn corners. Kept in
+  // specs rather than a new column because specs is JSONB — the same reason
+  // `gangs` lives here. `position` stays in step with path[0] so every
+  // existing position-based feature (measurements, selection, circuits,
+  // switch links) keeps working on a strip with no special-casing.
+  path?: Point[];
+  ledWattsPerMetre?: number;
+  ledProfile?: string;
+  ledColourTempK?: number;
 }
+
+// Centre-to-centre spacing for a twin downlight when the plan has no default
+// set — a common batten-fix spacing, and the tradie can change it per plan or
+// per fitting.
+export const DEFAULT_TWIN_SPACING_MM = 300;
 
 export interface WallRef {
   kind: "wall";
@@ -352,9 +381,17 @@ export function runGroupFittingIds(
 export function symbolExtraPropsFor(fitting: Pick<SetoutFitting, "type" | "specs">): Record<string, unknown> {
   const { type, specs } = fitting;
   if (type === "gpo" || type === "para_flood" || type === "fluoro_1200") {
-    return { count: specs.count ?? 1, ...(type === "gpo" ? { variant: specs.gpoVariant ?? "standard" } : {}) };
+    const count = specs.count ?? 1;
+    // Only a GPO comes as a 4-gang plate. Clamping here means a fitting that
+    // was switched from GPO to one of the other two can't render a glyph that
+    // doesn't exist for it.
+    if (type === "gpo") return { count, variant: specs.gpoVariant ?? "standard" };
+    return { count: count === 4 ? 2 : count };
   }
-  if (type === "downlight") return { sizeMm: specs.downlightSizeMm ?? 90 };
+  if (type === "downlight") {
+    return { sizeMm: specs.downlightSizeMm ?? 90, twin: specs.twin ?? false };
+  }
+  if (type === "data") return { ports: specs.ports ?? 1 };
   if (type === "switch") return { gangCount: Math.min(4, gangsFor(fitting).length) };
   return {};
 }
@@ -456,6 +493,16 @@ export const DEFAULT_WALL_THICKNESS: WallThickness = {
   interior: 0.015, // 15mm — clean, thin line for the plan
 };
 
+// Job-wide starting values the tradie sets once rather than re-entering on
+// every fitting. Deliberately only the seed: a fitting copies the value it
+// needs when it's placed, so changing a default later never moves anything
+// that's already been set out.
+export interface PlanDefaults {
+  twinDownlightSpacingMm?: number;
+  ledWattsPerMetre?: number;
+  ledProfile?: string;
+}
+
 export interface SetoutPlan {
   id: string;
   user_id: string;
@@ -467,6 +514,9 @@ export interface SetoutPlan {
   openings: WallOpening[];
   layer_visibility: LayerVisibility;
   wall_thickness: WallThickness;
+  // Optional so a plan row saved before this column existed still satisfies
+  // the type — every read goes through `plan.plan_defaults?.x ?? fallback`.
+  plan_defaults?: PlanDefaults;
   background_image_path: string | null;
   // The file as uploaded. A PDF here means the plan's exact geometry is still
   // available; null means there is none (an older plan, or a photo).

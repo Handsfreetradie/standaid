@@ -17,8 +17,10 @@ import {
   type MeasurementLock,
   type MeasurementRef,
   type SetoutCircuit,
-  type SetoutFitting, measurementRefId
+  type SetoutFitting, measurementRefId,
+  DEFAULT_TWIN_SPACING_MM,
 } from "@/lib/setoutTypes";
+import { pathLength } from "@/lib/setoutPathGeometry";
 
 const FITTING_TYPES = Object.keys(FITTING_SYMBOLS) as FittingType[];
 const TYPES_BY_CATEGORY = FITTING_CATEGORY_ORDER.map((category) => ({
@@ -32,8 +34,23 @@ const GPO_VARIANT_OPTIONS: { value: NonNullable<FittingSpecs["gpoVariant"]>; lab
   { value: "external", label: "External" },
 ];
 // Fitting types that use the shared single/double glyph convention (GPO,
-// para flood, 1200mm fluoro).
+// para flood, 1200mm fluoro). Only a GPO also comes as a 4-gang plate, so
+// the options are looked up per type rather than being one shared [1, 2] —
+// offering "4 gang" on a 1200mm fluoro would be offering something that
+// isn't made.
 const COUNT_VARIANT_TYPES: FittingType[] = ["gpo", "para_flood", "fluoro_1200"];
+const COUNT_OPTIONS_FOR_TYPE: Partial<Record<FittingType, readonly (1 | 2 | 4)[]>> = {
+  gpo: [1, 2, 4],
+  para_flood: [1, 2],
+  fluoro_1200: [1, 2],
+};
+const COUNT_LABELS: Record<1 | 2 | 4, string> = { 1: "Single", 2: "Double", 4: "4 gang" };
+
+// Outlets on one data plate. Plates are made in these sizes; 3 and 5 are
+// unusual but do exist, so the tradie isn't blocked from recording one.
+const DATA_PORT_OPTIONS = [1, 2, 3, 4, 5, 6] as const;
+
+const LED_PROFILE_OPTIONS = ["surface", "recessed", "suspended", "corner"] as const;
 
 // A plain controlled <input> whose value prop comes straight from the DB
 // fights the user mid-keystroke: every onChange fires a mutation, and the
@@ -81,6 +98,9 @@ interface FittingPaletteProps {
   pickingMeasurementSlot?: "refA" | "refB" | null;
   circuits?: SetoutCircuit[];
   onAssignCircuit?: (circuitId: string | null) => void;
+  // The job's default twin-downlight spacing, used only to seed a fitting the
+  // first time it's made a twin — see PlanDefaults.
+  twinSpacingDefaultMm?: number;
 }
 
 const FittingPalette = ({
@@ -97,6 +117,7 @@ const FittingPalette = ({
   pickingMeasurementSlot,
   circuits = [],
   onAssignCircuit,
+  twinSpacingDefaultMm,
 }: FittingPaletteProps) => {
   const refLabel = (ref: MeasurementRef) => (ref.kind === "wall" ? "Wall" : "Another fitting");
 
@@ -212,8 +233,128 @@ const FittingPalette = ({
                   })}
                 </div>
               </div>
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground mb-1">Lamps in the fixture</p>
+                <div className="flex gap-1.5">
+                  {([false, true] as const).map((twin) => {
+                    const active = (selectedFitting.specs.twin ?? false) === twin;
+                    return (
+                      <button
+                        key={String(twin)}
+                        type="button"
+                        onClick={() =>
+                          onUpdateSpecs({
+                            ...selectedFitting.specs,
+                            twin,
+                            // Seed the spacing from the job default the first time
+                            // it's made a twin, so the tradie doesn't retype it on
+                            // every fitting. Once set it belongs to this fitting.
+                            twinSpacingMm: twin
+                              ? selectedFitting.specs.twinSpacingMm ?? twinSpacingDefaultMm ?? DEFAULT_TWIN_SPACING_MM
+                              : selectedFitting.specs.twinSpacingMm,
+                          })
+                        }
+                        className={cn(
+                          "rounded-lg border px-2 py-1 text-[11px] font-medium",
+                          active ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"
+                        )}
+                      >
+                        {twin ? "Twin" : "Single"}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              {selectedFitting.specs.twin && (
+                <div>
+                  <p className="text-[11px] font-medium text-muted-foreground mb-1">Lamp spacing, centre to centre (mm)</p>
+                  <DraftNumberInput
+                    key={`twin-spacing-${selectedFitting.id}-${selectedFitting.specs.twinSpacingMm ?? DEFAULT_TWIN_SPACING_MM}`}
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    step="10"
+                    className="h-8 text-xs"
+                    initialValue={selectedFitting.specs.twinSpacingMm ?? twinSpacingDefaultMm ?? DEFAULT_TWIN_SPACING_MM}
+                    onCommit={(value) => onUpdateSpecs({ ...selectedFitting.specs, twinSpacingMm: value > 0 ? value : DEFAULT_TWIN_SPACING_MM })}
+                  />
+                </div>
+              )}
               {/* No mounting height for a downlight: it sits in the ceiling, so there
                   is no height to set it out to. */}
+            </div>
+          )}
+
+          {selectedFitting?.type === "data" && onUpdateSpecs && (
+            <div className="border-t border-destructive/10 pt-2">
+              <p className="text-[11px] font-medium text-muted-foreground mb-1">Outlets on the plate</p>
+              <div className="flex flex-wrap gap-1.5">
+                {DATA_PORT_OPTIONS.map((ports) => {
+                  const active = (selectedFitting.specs.ports ?? 1) === ports;
+                  return (
+                    <button
+                      key={ports}
+                      type="button"
+                      onClick={() => onUpdateSpecs({ ...selectedFitting.specs, ports })}
+                      className={cn(
+                        "rounded-lg border px-2 py-1 text-[11px] font-medium",
+                        active ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"
+                      )}
+                    >
+                      {ports}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                Every outlet on the plate home-runs to the same cabinet, so this sets how many cables get ordered.
+              </p>
+            </div>
+          )}
+
+          {selectedFitting?.type === "led_strip" && onUpdateSpecs && (
+            <div className="space-y-2 border-t border-destructive/10 pt-2">
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground mb-1">Run length</p>
+                <p className="text-xs font-medium tabular-nums">
+                  {Math.round(pathLength(selectedFitting.specs.path ?? []) * 1000)}mm
+                  <span className="ml-1 font-normal text-muted-foreground">(drawn on the plan)</span>
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground mb-1">Watts per metre</p>
+                <DraftNumberInput
+                  key={`led-wpm-${selectedFitting.id}-${selectedFitting.specs.ledWattsPerMetre ?? 14}`}
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="1"
+                  className="h-8 text-xs"
+                  initialValue={selectedFitting.specs.ledWattsPerMetre ?? 14}
+                  onCommit={(value) => onUpdateSpecs({ ...selectedFitting.specs, ledWattsPerMetre: value > 0 ? value : 14 })}
+                />
+              </div>
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground mb-1">Extrusion</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {LED_PROFILE_OPTIONS.map((profile) => {
+                    const active = (selectedFitting.specs.ledProfile ?? "surface") === profile;
+                    return (
+                      <button
+                        key={profile}
+                        type="button"
+                        onClick={() => onUpdateSpecs({ ...selectedFitting.specs, ledProfile: profile })}
+                        className={cn(
+                          "rounded-lg border px-2 py-1 text-[11px] font-medium capitalize",
+                          active ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"
+                        )}
+                      >
+                        {profile}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           )}
 
@@ -243,9 +384,9 @@ const FittingPalette = ({
 
           {selectedFitting && COUNT_VARIANT_TYPES.includes(selectedFitting.type) && onUpdateSpecs && (
             <div className="border-t border-destructive/10 pt-2">
-              <p className="text-[11px] font-medium text-muted-foreground mb-1">Single / double</p>
+              <p className="text-[11px] font-medium text-muted-foreground mb-1">Plate size</p>
               <div className="flex gap-1.5">
-                {([1, 2] as const).map((count) => {
+                {(COUNT_OPTIONS_FOR_TYPE[selectedFitting.type] ?? ([1, 2] as const)).map((count) => {
                   const active = (selectedFitting.specs.count ?? 1) === count;
                   return (
                     <button
@@ -257,7 +398,7 @@ const FittingPalette = ({
                         active ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"
                       )}
                     >
-                      {count === 1 ? "Single" : "Double"}
+                      {COUNT_LABELS[count]}
                     </button>
                   );
                 })}
