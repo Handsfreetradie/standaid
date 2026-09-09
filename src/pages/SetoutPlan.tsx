@@ -236,6 +236,34 @@ const SetoutPlan = () => {
     [pdfPage, backgroundImage, planPixelsPerMetre]
   );
 
+  /**
+   * Turns a tap on the plan into a measurement reference.
+   *
+   * The tap only chooses WHICH line is meant; the measurement itself is taken
+   * square to that line from the fitting, not along the diagonal the tap
+   * happened to land on. A tradie measuring a wall holds the tape at right
+   * angles to it, and a diagonal here would quietly record a longer distance
+   * than the one they'd read on site.
+   */
+  const handlePickPlanMeasurementRef = useCallback(
+    (tap: Point, from: Point, tolerance: number): MeasurementRef | null => {
+      const hit = vectorIndex?.nearestEdge(tap.x, tap.y, tolerance);
+      if (!hit) return null;
+      // The face runs parallel to the line it belongs to, through the snapped
+      // point. Drop a perpendicular from the fitting onto it.
+      const dx = hit.line.x2 - hit.line.x1;
+      const dy = hit.line.y2 - hit.line.y1;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-9) return null;
+      const ux = dx / len;
+      const uy = dy / len;
+      const along = (from.x - hit.point.x) * ux + (from.y - hit.point.y) * uy;
+      const foot = { x: hit.point.x + ux * along, y: hit.point.y + uy * along };
+      return { kind: "stroke", point: foot, distance: Math.hypot(from.x - foot.x, from.y - foot.y) };
+    },
+    [vectorIndex]
+  );
+
   // Fittings are set out from the FACE of a wall — what a tape measures to —
   // not its centreline, which is what tracing follows.
   const snapToPlan = useCallback(
@@ -935,6 +963,7 @@ const SetoutPlan = () => {
                 backgroundTile={showBackgroundReference ? tile : null}
                 onViewSettled={pdfPage ? handleViewSettled : undefined}
                 snapToPlan={snapToPlan}
+                onPickPlanMeasurementRef={handlePickPlanMeasurementRef}
                 walls={plan.walls}
                 wallThickness={{ exterior: wallThicknessMm.exterior / 1000, interior: wallThicknessMm.interior / 1000 }}
                 openings={plan.openings}

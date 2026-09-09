@@ -169,6 +169,11 @@ interface SetoutCanvasProps {
   // which. Given the tolerance in scene units, since only the canvas knows the
   // zoom. Absent for draw-on-site, where there's no plan to snap to.
   snapToPlan?: ((point: Point, tolerance: number) => Point | null) | null;
+  // Turns a tap on the plan's own line work into a measurement reference, for
+  // when there are no traced walls or openings to point at. Lives with the
+  // owner rather than here because it needs the plan's line geometry to work
+  // out a square measurement, which this component doesn't hold.
+  onPickPlanMeasurementRef?: (tap: Point, from: Point, tolerance: number) => MeasurementRef | null;
   selectedFittingType?: FittingType | null;
   onPlaceFitting?: (point: Point) => void;
   onFittingDrag?: (fittingId: string, position: Point) => void;
@@ -251,6 +256,7 @@ export default function SetoutCanvas({
   onMeasurementRefPick,
   snapWalls = false,
   snapToPlan = null,
+  onPickPlanMeasurementRef,
   selectedFittingType,
   onPlaceFitting,
   onFittingDrag,
@@ -660,6 +666,13 @@ export default function SetoutCanvas({
           }
         }
 
+        // Nothing traced to point at — fall back to the plan's own line work,
+        // which on a plan imported without tracing is the only reference there
+        // is, and the reason tapping used to do nothing at all here.
+        if (!nearestRef) {
+          nearestRef = onPickPlanMeasurementRef?.(scene, selectedFitting.position, tolerance) ?? null;
+        }
+
         if (nearestRef) {
           onMeasurementRefPick?.(nearestRef);
         }
@@ -711,6 +724,7 @@ export default function SetoutCanvas({
       snapInteriorWalls,
       onOpeningPlace,
       onMeasurementRefPick,
+      onPickPlanMeasurementRef,
       onPhotoPointPlace,
       selectedFittingId,
       selectedFittingType,
