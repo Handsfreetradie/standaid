@@ -437,6 +437,15 @@ const SetoutPlan = () => {
     setPickingMeasurementSlot((prev) => (prev === slot ? null : slot));
   };
 
+  // Double-tapping a measurement on the plan starts re-pointing it there and
+  // then, rather than selecting the fitting, finding the measurement in the
+  // panel and pressing Change. The next tap sets it.
+  const handleMeasurementDoubleTap = (fittingId: string, slot: "refA" | "refB") => {
+    setSelectedFittingId(fittingId);
+    setPickingMeasurementSlot(slot);
+    toast.info("Tap the plan to set where this measurement comes from");
+  };
+
   const handleMeasurementRefPick = (ref: MeasurementRef) => {
     if (!selectedFittingId || !selectedFitting?.measurement_lock || !pickingMeasurementSlot) return;
     updateFittingMeasurementLock.mutate({
@@ -978,6 +987,8 @@ const SetoutPlan = () => {
                 onViewSettled={pdfPage ? handleViewSettled : undefined}
                 snapToPlan={snapToPlan}
                 onPickPlanMeasurementRef={handlePickPlanMeasurementRef}
+                onMeasurementDoubleTap={handleMeasurementDoubleTap}
+                onMeasurementPickCancel={() => setPickingMeasurementSlot(null)}
                 walls={plan.walls}
                 wallThickness={{ exterior: wallThicknessMm.exterior / 1000, interior: wallThicknessMm.interior / 1000 }}
                 openings={plan.openings}

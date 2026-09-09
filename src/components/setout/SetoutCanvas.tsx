@@ -174,6 +174,13 @@ interface SetoutCanvasProps {
   // owner rather than here because it needs the plan's line geometry to work
   // out a square measurement, which this component doesn't hold.
   onPickPlanMeasurementRef?: (tap: Point, from: Point, tolerance: number) => MeasurementRef | null;
+  // Double-tapping a measurement on the plan re-points it, without going via
+  // the panel — the measurement itself is the obvious thing to aim at.
+  onMeasurementDoubleTap?: (fittingId: string, slot: "refA" | "refB") => void;
+  // A tap that lands on nothing while picking. Without a way out, starting a
+  // pick by double-tapping the plan strands the tradie in a mode with no
+  // visible exit, since a tap in open space is deliberately ignored.
+  onMeasurementPickCancel?: () => void;
   selectedFittingType?: FittingType | null;
   onPlaceFitting?: (point: Point) => void;
   onFittingDrag?: (fittingId: string, position: Point) => void;
@@ -257,6 +264,8 @@ export default function SetoutCanvas({
   snapWalls = false,
   snapToPlan = null,
   onPickPlanMeasurementRef,
+  onMeasurementDoubleTap,
+  onMeasurementPickCancel,
   selectedFittingType,
   onPlaceFitting,
   onFittingDrag,
@@ -388,6 +397,9 @@ export default function SetoutCanvas({
   const PERIMETER_DOUBLE_TAP_MS = 400;
   const PERIMETER_DOUBLE_TAP_PX = 20;
   const lastPerimeterTapRef = useRef<{ time: number; clientX: number; clientY: number; placed: boolean } | null>(null);
+  // Recognises a double-tap on a measurement. Done by hand rather than with
+  // onDoubleClick because touch doesn't reliably raise that on an SVG child.
+  const lastMeasurementTapRef = useRef<{ key: string; time: number } | null>(null);
   // A tap waiting to find out whether it was really a tap. Set on pointer down
   // in a placement mode, and either committed or discarded on pointer up
   // depending on how far the pointer travelled in between.
@@ -675,6 +687,10 @@ export default function SetoutCanvas({
 
         if (nearestRef) {
           onMeasurementRefPick?.(nearestRef);
+        } else {
+          // Tapped open space: take it as "never mind" rather than leaving the
+          // tradie in a mode nothing appears to get them out of.
+          onMeasurementPickCancel?.();
         }
       } else if (mode === "place-fittings" && selectedFittingType) {
         // Alignment applies to every ceiling/surface-mounted fitting (not
@@ -725,6 +741,7 @@ export default function SetoutCanvas({
       onOpeningPlace,
       onMeasurementRefPick,
       onPickPlanMeasurementRef,
+      onMeasurementPickCancel,
       onPhotoPointPlace,
       selectedFittingId,
       selectedFittingType,
@@ -1092,7 +1109,17 @@ export default function SetoutCanvas({
     const wallById = new Map(walls.map((w) => [w.id, w]));
     const fittingById = new Map(fittings.map((f) => [f.id, f]));
     const openingById = new Map(openings?.map((o) => [o.id, o]) ?? []);
-    const lines: { key: string; from: Point; to: Point; label: string; note?: string }[] = [];
+    const lines: {
+      key: string;
+      from: Point;
+      to: Point;
+      label: string;
+      note?: string;
+      // Carried so a tap on the line knows which measurement of which fitting
+      // it belongs to, rather than working it back out from geometry.
+      fittingId: string;
+      slot: "refA" | "refB";
+    }[] = [];
     // visibleFittings, not the raw fittings list — a fitting whose category
     // layer is toggled off should have its measurement line disappear too,
     // otherwise a hidden GPO still leaves a dangling wall-measurement line
@@ -1100,8 +1127,10 @@ export default function SetoutCanvas({
     for (const f of visibleFittings) {
       if (!f.measurement_lock) continue;
       const pos = dragPreview?.id === f.id ? dragPreview.position : f.position;
-      const refs = [f.measurement_lock.refA, f.measurement_lock.refB].filter((r): r is MeasurementRef => !!r);
-      for (const ref of refs) {
+      const slotted = ([["refA", f.measurement_lock.refA], ["refB", f.measurement_lock.refB]] as const).filter(
+        (entry): entry is readonly ["refA" | "refB", MeasurementRef] => !!entry[1]
+      );
+      for (const [slot, ref] of slotted) {
         let to: Point | null = null;
         if (ref.kind === "wall") {
           const wall = wallById.get(ref.wallId);
@@ -1130,7 +1159,7 @@ export default function SetoutCanvas({
         }
         const label = formatMm(ref.distance);
         const refKey = measurementRefId(ref);
-        lines.push({ key: `${f.id}-${ref.kind}-${refKey}`, from: pos, to, label, note: f.measurement_lock.note });
+        lines.push({ key: `${f.id}-${ref.kind}-${refKey}`, from: pos, to, label, note: f.measurement_lock.note, fittingId: f.id, slot });
       }
     }
     return lines;
@@ -1586,6 +1615,31 @@ export default function SetoutCanvas({
               const fontSize = 11 * px2scene();
               return (
                 <g key={line.key}>
+                  {/* A dashed hairline is far too thin to hit, especially with
+                      a finger, so an invisible fat line carries the tap. */}
+                  {onMeasurementDoubleTap && (
+                    <line
+                      x1={line.from.x}
+                      y1={line.from.y}
+                      x2={line.to.x}
+                      y2={line.to.y}
+                      stroke="transparent"
+                      strokeWidth={14 * px2scene()}
+                      pointerEvents="stroke"
+                      className="cursor-pointer"
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        const now = Date.now();
+                        const last = lastMeasurementTapRef.current;
+                        if (last && last.key === line.key && now - last.time < 400) {
+                          lastMeasurementTapRef.current = null;
+                          onMeasurementDoubleTap(line.fittingId, line.slot);
+                          return;
+                        }
+                        lastMeasurementTapRef.current = { key: line.key, time: now };
+                      }}
+                    />
+                  )}
                   <line
                     x1={line.from.x}
                     y1={line.from.y}
