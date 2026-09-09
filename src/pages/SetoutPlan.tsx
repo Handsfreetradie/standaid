@@ -23,7 +23,7 @@ import PhotoPointDialog from "@/components/setout/PhotoPointDialog";
 import CameraCapture from "@/components/setout/CameraCapture";
 import type { FittingType } from "@/components/setout/symbols";
 import { DEFAULT_LAYER_VISIBILITY, distance, gangsFor, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type MeasurementRef, type Point, type SetoutFitting } from "@/lib/setoutTypes";
-import { autoRotationForWallMount, computeMeasurementLock, defaultHeightForType } from "@/lib/setoutGeometry";
+import { autoRotationForWallMount, computeMeasurementLock, defaultHeightForType, remeasureLock } from "@/lib/setoutGeometry";
 import { generateSetoutReportPdf, type PlanImage } from "@/lib/setoutReport";
 import { BASE_PDF_SCALE, renderPdfTile, type PdfPage } from "@/lib/planRender";
 import { extractPlanLines, measureToFaces, PlanVectorIndex } from "@/lib/planVector";
@@ -259,7 +259,7 @@ const SetoutPlan = () => {
       const uy = dy / len;
       const along = (from.x - hit.point.x) * ux + (from.y - hit.point.y) * uy;
       const foot = { x: hit.point.x + ux * along, y: hit.point.y + uy * along };
-      return { kind: "stroke", point: foot, distance: Math.hypot(from.x - foot.x, from.y - foot.y) };
+      return { kind: "stroke", point: foot, dirX: ux, dirY: uy, distance: Math.hypot(from.x - foot.x, from.y - foot.y) };
     },
     [vectorIndex]
   );
@@ -441,7 +441,10 @@ const SetoutPlan = () => {
     if (!selectedFittingId || !selectedFitting?.measurement_lock || !pickingMeasurementSlot) return;
     updateFittingMeasurementLock.mutate({
       fittingId: selectedFittingId,
-      measurement_lock: { ...selectedFitting.measurement_lock, [pickingMeasurementSlot]: ref },
+      // Marks the whole lock as the tradie's choice, so moving the fitting
+      // re-measures against what they picked instead of reverting to whatever
+      // wall is nearest.
+      measurement_lock: { ...selectedFitting.measurement_lock, [pickingMeasurementSlot]: ref, userSet: true },
     });
     setPickingMeasurementSlot(null);
   };
@@ -471,9 +474,10 @@ const SetoutPlan = () => {
     if (plan.walls.length > 0) return computeMeasurementLock(point, plan.walls, type);
     if (!vectorIndex) return null;
     const { alongX, alongY } = measureToFaces(vectorIndex, point.x, point.y);
-    const refs = [alongX, alongY]
-      .filter((hit): hit is NonNullable<typeof hit> => !!hit)
-      .map((hit) => ({ kind: "stroke" as const, point: hit.point, distance: hit.distance }));
+    // alongX was measured to a line running vertically, and vice versa.
+    const refs: MeasurementRef[] = [];
+    if (alongX) refs.push({ kind: "stroke", point: alongX.point, dirX: 0, dirY: 1, distance: alongX.distance });
+    if (alongY) refs.push({ kind: "stroke", point: alongY.point, dirX: 1, dirY: 0, distance: alongY.distance });
     if (refs.length === 0) return null;
     return refs.length > 1 ? { refA: refs[0], refB: refs[1] } : { refA: refs[0] };
   };
@@ -518,10 +522,20 @@ const SetoutPlan = () => {
         ? { ...fitting.specs, rotation: autoRotationForWallMount(position, plan.walls) }
         : undefined;
     pushUndo({ type: "move", fittingId, prevPosition: fitting.position, prevMeasurementLock: fitting.measurement_lock, prevSpecs: fitting.specs });
-    // Re-measure the way it was measured when placed. Going straight to the
-    // wall-based version wiped the measurement of anything dimensioned off the
-    // plan's own lines the moment it was nudged.
-    updateFittingPosition.mutate({ fittingId, position, measurement_lock: measurementLockFor(position, fitting.type), specs });
+    // A measurement the tradie chose keeps ITS references and just gets the
+    // new distances; only an auto-derived one is worked out again from
+    // scratch. Re-deriving a chosen measurement meant the smallest nudge
+    // silently re-pointed it at whatever wall happened to be nearest.
+    const existing = fitting.measurement_lock;
+    const nextLock = existing?.userSet
+      ? remeasureLock(existing, position, {
+          walls: plan.walls,
+          openings: plan.openings ?? [],
+          fittings,
+          wallThickness: plan.wall_thickness,
+        })
+      : measurementLockFor(position, fitting.type);
+    updateFittingPosition.mutate({ fittingId, position, measurement_lock: nextLock, specs });
   };
 
   const handleDeleteSelected = () => {

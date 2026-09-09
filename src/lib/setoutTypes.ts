@@ -166,6 +166,12 @@ export interface OpeningRef {
 export interface StrokeRef {
   kind: "stroke";
   point: Point;
+  // Unit direction of the line this was measured to. Kept so the measurement
+  // can be re-taken square to the SAME line after the fitting moves — without
+  // it, only the point survives and there is no way to tell which way the line
+  // ran, so a move could only start again from scratch.
+  dirX: number;
+  dirY: number;
   distance: number;
 }
 
@@ -202,6 +208,11 @@ export interface MeasurementLock {
   refA: MeasurementRef;
   refB?: MeasurementRef;
   note?: string; // Optional user note about where this measurement was taken
+  // Set once the tradie has chosen what this measures to. Auto-derivation
+  // picks the nearest walls, which is a fine starting point but a guess; once
+  // they've said otherwise, moving the fitting re-measures against THEIR
+  // reference rather than silently reverting to the nearest thing.
+  userSet?: boolean;
 }
 
 export const SINGLE_WALL_FITTING_TYPES: FittingType[] = [

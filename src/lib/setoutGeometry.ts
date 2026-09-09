@@ -1,4 +1,4 @@
-import { distance, isSingleWallFitting, type Point, type WallSegment, type WallOpening, type FittingSpecs, type MeasurementLock, type SetoutPhotoPoint, type SetoutPhotoGallery } from "./setoutTypes";
+import { distance, isSingleWallFitting, type Point, type WallSegment, type WallOpening, type FittingSpecs, type MeasurementLock, type MeasurementRef, type SetoutPhotoPoint, type SetoutPhotoGallery, type WallThickness, type SetoutFitting } from "./setoutTypes";
 import type { FittingType } from "@/components/setout/symbols";
 
 let wallIdCounter = 0;
@@ -460,4 +460,58 @@ export function groupPhotosByPosition(photos: SetoutPhotoPoint[]): SetoutPhotoGa
   // Sort photos within each gallery by creation date
   galleries.forEach((g) => g.photos.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()));
   return galleries;
+}
+
+/**
+ * Re-takes a measurement against the SAME references after a fitting moves.
+ *
+ * Auto-derivation picks the nearest walls, which is a reasonable starting
+ * guess. But once the tradie has said what a measurement is taken to, nudging
+ * the fitting must not quietly re-point it at whatever is nearest now — the
+ * number on the drawing would change meaning without anything saying so. So a
+ * user-set lock keeps its references and only updates how far away they are.
+ */
+export function remeasureLock(
+  lock: MeasurementLock,
+  position: Point,
+  ctx: { walls: WallSegment[]; openings: WallOpening[]; fittings: SetoutFitting[]; wallThickness: WallThickness }
+): MeasurementLock {
+  const wallById = new Map(ctx.walls.map((w) => [w.id, w]));
+  const openingById = new Map(ctx.openings.map((o) => [o.id, o]));
+  const fittingById = new Map(ctx.fittings.map((f) => [f.id, f]));
+  const centroid = ctx.walls.length > 0 ? wallsCentroid(ctx.walls) : { x: 0, y: 0 };
+
+  const again = (ref: MeasurementRef): MeasurementRef => {
+    switch (ref.kind) {
+      case "wall": {
+        const wall = wallById.get(ref.wallId);
+        return wall ? { ...ref, distance: perpendicularDistanceToWall(position, wall) } : ref;
+      }
+      case "fitting": {
+        const other = fittingById.get(ref.fittingId);
+        return other ? { ...ref, distance: distance(position, other.position) } : ref;
+      }
+      case "opening": {
+        const opening = openingById.get(ref.openingId);
+        const wall = opening ? wallById.get(opening.wallId) : undefined;
+        if (!opening || !wall) return ref;
+        const len = wallLength(wall);
+        const offset = ref.edge === "start" ? Math.max(0, opening.offset) : Math.min(len, opening.offset + opening.width);
+        const edgePoint = pointAtOffset(wall, offset);
+        const thickness = wall.kind === "interior" ? ctx.wallThickness.interior : ctx.wallThickness.exterior;
+        const normal = roomFacingNormal(wall, edgePoint, centroid);
+        const at = { x: edgePoint.x + normal.x * (thickness / 2), y: edgePoint.y + normal.y * (thickness / 2) };
+        return { ...ref, distance: distance(position, at) };
+      }
+      case "stroke": {
+        // Square to the same line: drop a perpendicular from the new position
+        // onto the line through the stored point, in its stored direction.
+        const along = (position.x - ref.point.x) * ref.dirX + (position.y - ref.point.y) * ref.dirY;
+        const foot = { x: ref.point.x + ref.dirX * along, y: ref.point.y + ref.dirY * along };
+        return { ...ref, point: foot, distance: Math.hypot(position.x - foot.x, position.y - foot.y) };
+      }
+    }
+  };
+
+  return { ...lock, refA: again(lock.refA), refB: lock.refB ? again(lock.refB) : undefined };
 }
