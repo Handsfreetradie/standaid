@@ -36,23 +36,41 @@ export interface MaterialLine {
 // either was set. Watts per metre works the same way.
 export const DEFAULT_EXTRUSION_STOCK_LENGTH_M = 2;
 export const DEFAULT_LED_WATTS_PER_METRE = 14;
-// Drivers are sized above the strip's actual load so they aren't run at
-// 100% continuously (shortens driver life) — 20% is a common rule of thumb,
-// not a spec'd figure for this job.
-export const DRIVER_HEADROOM = 1.2; // provisional — 20% headroom
+export const DEFAULT_DRIVER_HEADROOM_PCT = 20;
+
+// What the tradie buys on THIS job: the extrusion length off the shelf, the
+// driver sizes they stock, and how much headroom they size a driver with.
+// Passed in at takeoff time rather than copied onto each strip when it's
+// drawn — these are job-wide, so changing one has to change every strip
+// already on the plan, which a copy stamped on the fitting would not.
+export interface MaterialsJobSettings {
+  extrusionStockLengthM?: number;
+  driverSizesW?: number[];
+  driverHeadroomPct?: number;
+}
 
 // Common AU constant-voltage driver wattages. Picking from a fixed ladder
 // instead of "exactly enough" means an off-the-shelf part actually exists
 // at the size chosen. A run bigger than the largest rung splits across
 // multiple of the largest driver rather than inventing a bigger size.
-const DRIVER_SIZES_W = [30, 60, 100, 150, 200] as const;
+export const DEFAULT_DRIVER_SIZES_W = [30, 60, 100, 150, 200];
 
-function pickDriver(totalWattsWithHeadroom: number): { sizeW: number; qty: number } {
-  const maxSize = DRIVER_SIZES_W[DRIVER_SIZES_W.length - 1];
+// Sizes are the tradie's own list, so they can't be trusted to arrive sorted,
+// positive, or non-empty — a bad list would otherwise pick a nonsense driver
+// or divide by zero.
+function usableDriverSizes(sizes: number[] | undefined): number[] {
+  const clean = (sizes ?? []).filter((n) => Number.isFinite(n) && n > 0).sort((a, b) => a - b);
+  return clean.length > 0 ? clean : DEFAULT_DRIVER_SIZES_W;
+}
+
+function pickDriver(totalWattsWithHeadroom: number, sizes: number[]): { sizeW: number; qty: number } {
+  const maxSize = sizes[sizes.length - 1];
   if (totalWattsWithHeadroom <= maxSize) {
-    const size = DRIVER_SIZES_W.find((s) => s >= totalWattsWithHeadroom) ?? maxSize;
+    const size = sizes.find((s) => s >= totalWattsWithHeadroom) ?? maxSize;
     return { sizeW: size, qty: 1 };
   }
+  // Bigger than anything they carry: split across multiples of the largest
+  // rather than inventing a size that can't be bought.
   return { sizeW: maxSize, qty: Math.ceil(totalWattsWithHeadroom / maxSize) };
 }
 
@@ -67,7 +85,7 @@ function ledStripLengthMetres(specs: FittingSpecs): number {
   return total;
 }
 
-function ledStripMaterials(specs: FittingSpecs): MaterialLine[] {
+function ledStripMaterials(specs: FittingSpecs, job: MaterialsJobSettings): MaterialLine[] {
   const metres = ledStripLengthMetres(specs);
   if (metres <= 0) return [];
 
@@ -76,12 +94,16 @@ function ledStripMaterials(specs: FittingSpecs): MaterialLine[] {
   const profile = specs.ledProfile ?? "surface";
   // A zero or missing stock length would divide to Infinity and order an
   // impossible number of lengths, so it falls back rather than trusting it.
-  const stockLengthM = specs.ledExtrusionStockLengthM && specs.ledExtrusionStockLengthM > 0
-    ? specs.ledExtrusionStockLengthM
-    : DEFAULT_EXTRUSION_STOCK_LENGTH_M;
+  // A strip may override the job's stock length (one room run in a different
+  // profile), otherwise the job setting decides.
+  const stockLengthM =
+    (specs.ledExtrusionStockLengthM && specs.ledExtrusionStockLengthM > 0 && specs.ledExtrusionStockLengthM) ||
+    (job.extrusionStockLengthM && job.extrusionStockLengthM > 0 && job.extrusionStockLengthM) ||
+    DEFAULT_EXTRUSION_STOCK_LENGTH_M;
   const stockLengths = Math.ceil(metres / stockLengthM);
+  const headroom = 1 + (job.driverHeadroomPct ?? DEFAULT_DRIVER_HEADROOM_PCT) / 100;
   const clips = Math.ceil(metres / 0.5); // roughly 1 clip per 500mm
-  const driver = pickDriver(metres * wattsPerMetre * DRIVER_HEADROOM);
+  const driver = pickDriver(metres * wattsPerMetre * headroom, usableDriverSizes(job.driverSizesW));
   const group = "LED";
 
   return [
@@ -270,9 +292,12 @@ export const BASE_MATERIALS_BY_TYPE: Record<TableFittingType, BaseLine[]> = {
 };
 
 /** Materials for ONE fitting, driven by its type AND its specs. */
-export function materialsForFitting(fitting: Pick<SetoutFitting, "type" | "specs">): MaterialLine[] {
+export function materialsForFitting(
+  fitting: Pick<SetoutFitting, "type" | "specs">,
+  job: MaterialsJobSettings = {}
+): MaterialLine[] {
   const { type, specs } = fitting;
-  if (type === "led_strip") return ledStripMaterials(specs);
+  if (type === "led_strip") return ledStripMaterials(specs, job);
   if (type === "gpo") return gpoMaterials(specs);
   if (type === "data") return dataMaterials(specs);
   if (type === "switch") return switchMaterials(fitting);
@@ -287,10 +312,13 @@ export function materialsForFitting(fitting: Pick<SetoutFitting, "type" | "specs
 }
 
 /** Roll up a whole plan: sum identical {item, unit, group} lines, sorted by group then item. */
-export function aggregateMaterials(fittings: Pick<SetoutFitting, "type" | "specs">[]): MaterialLine[] {
+export function aggregateMaterials(
+  fittings: Pick<SetoutFitting, "type" | "specs">[],
+  job: MaterialsJobSettings = {}
+): MaterialLine[] {
   const totals = new Map<string, MaterialLine>();
   for (const fitting of fittings) {
-    for (const line of materialsForFitting(fitting)) {
+    for (const line of materialsForFitting(fitting, job)) {
       const key = `${line.group} ${line.item} ${line.unit}`;
       const existing = totals.get(key);
       if (existing) existing.qty += line.qty;

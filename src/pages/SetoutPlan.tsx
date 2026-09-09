@@ -23,7 +23,12 @@ import PhotoPointDialog from "@/components/setout/PhotoPointDialog";
 import CameraCapture from "@/components/setout/CameraCapture";
 import type { FittingType } from "@/components/setout/symbols";
 import { pathLength } from "@/lib/setoutPathGeometry";
-import { DEFAULT_EXTRUSION_STOCK_LENGTH_M, DEFAULT_LED_WATTS_PER_METRE } from "@/lib/setoutMaterials";
+import {
+  DEFAULT_EXTRUSION_STOCK_LENGTH_M,
+  DEFAULT_LED_WATTS_PER_METRE,
+  DEFAULT_DRIVER_HEADROOM_PCT,
+  DEFAULT_DRIVER_SIZES_W,
+} from "@/lib/setoutMaterials";
 import { DEFAULT_LAYER_VISIBILITY, DEFAULT_TWIN_SPACING_MM, distance, gangsFor, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type MeasurementRef, type Point, type SetoutFitting } from "@/lib/setoutTypes";
 import { autoRotationForWallMount, computeMeasurementLock, defaultHeightForType, remeasureLock } from "@/lib/setoutGeometry";
 import { generateSetoutReportPdf, type PlanImage } from "@/lib/setoutReport";
@@ -71,6 +76,17 @@ type UndoEntry =
   | { type: "delete"; fitting: SetoutFitting }
   | { type: "bulk-delete"; fittings: SetoutFitting[] }
   | { type: "move"; fittingId: string; prevPosition: Point; prevMeasurementLock: MeasurementLock | null; prevSpecs: FittingSpecs };
+
+// "30, 60, 100" -> [30, 60, 100]. Anything that isn't a positive number is
+// dropped rather than rejected, so a stray comma or a trailing space doesn't
+// stop the tradie saving the rest of the list.
+function parseDriverSizes(text: string): number[] {
+  const sizes = text
+    .split(/[,\s]+/)
+    .map((part) => Number(part.trim()))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  return Array.from(new Set(sizes)).sort((a, b) => a - b);
+}
 
 const SetoutPlan = () => {
   const { planId } = useParams();
@@ -126,7 +142,12 @@ const SetoutPlan = () => {
     twinDownlightSpacingMm: DEFAULT_TWIN_SPACING_MM,
     ledWattsPerMetre: DEFAULT_LED_WATTS_PER_METRE,
     ledExtrusionStockLengthM: DEFAULT_EXTRUSION_STOCK_LENGTH_M,
+    ledDriverHeadroomPct: DEFAULT_DRIVER_HEADROOM_PCT,
   });
+  // The driver sizes are typed as a list ("30, 60, 100"), so the field keeps
+  // raw text while it's being edited and only parses on blur — otherwise the
+  // comma the tradie just typed gets eaten mid-keystroke.
+  const [driverSizesDraft, setDriverSizesDraft] = useState(DEFAULT_DRIVER_SIZES_W.join(", "));
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>(DEFAULT_LAYER_VISIBILITY);
   const layerSyncedRef = useRef(false);
 
@@ -162,7 +183,9 @@ const SetoutPlan = () => {
         ledWattsPerMetre: plan.plan_defaults?.ledWattsPerMetre ?? DEFAULT_LED_WATTS_PER_METRE,
         ledExtrusionStockLengthM:
           plan.plan_defaults?.ledExtrusionStockLengthM ?? DEFAULT_EXTRUSION_STOCK_LENGTH_M,
+        ledDriverHeadroomPct: plan.plan_defaults?.ledDriverHeadroomPct ?? DEFAULT_DRIVER_HEADROOM_PCT,
       });
+      setDriverSizesDraft((plan.plan_defaults?.ledDriverSizesW ?? DEFAULT_DRIVER_SIZES_W).join(", "));
     }
   }, [plan]);
 
@@ -620,6 +643,8 @@ const SetoutPlan = () => {
       twinDownlightSpacingMm: planDefaultsDraft.twinDownlightSpacingMm,
       ledWattsPerMetre: planDefaultsDraft.ledWattsPerMetre,
       ledExtrusionStockLengthM: planDefaultsDraft.ledExtrusionStockLengthM,
+      ledDriverHeadroomPct: planDefaultsDraft.ledDriverHeadroomPct,
+      ledDriverSizesW: parseDriverSizes(driverSizesDraft),
       ledProfile: plan?.plan_defaults?.ledProfile,
     });
   };
@@ -1197,6 +1222,49 @@ const SetoutPlan = () => {
                       onBlur={commitPlanDefaults}
                       className="h-9"
                     />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="led-driver-sizes" className="text-xs">LED driver sizes you carry (W)</Label>
+                    <Input
+                      id="led-driver-sizes"
+                      inputMode="numeric"
+                      placeholder="30, 60, 100, 150, 200"
+                      value={driverSizesDraft}
+                      onChange={(e) => setDriverSizesDraft(e.target.value)}
+                      onBlur={() => {
+                        // Show the tidied list back, so it's obvious what was
+                        // actually saved rather than what was typed.
+                        const parsed = parseDriverSizes(driverSizesDraft);
+                        setDriverSizesDraft((parsed.length > 0 ? parsed : DEFAULT_DRIVER_SIZES_W).join(", "));
+                        commitPlanDefaults();
+                      }}
+                      className="h-9"
+                    />
+                    <p className="text-[10px] text-muted-foreground">
+                      A run is sized to the smallest one that fits. A run bigger than your largest splits across several.
+                    </p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="led-driver-headroom" className="text-xs">Driver headroom (%)</Label>
+                    <Input
+                      id="led-driver-headroom"
+                      type="number"
+                      inputMode="numeric"
+                      min="0"
+                      step="5"
+                      value={planDefaultsDraft.ledDriverHeadroomPct}
+                      onChange={(e) =>
+                        setPlanDefaultsDraft((prev) => ({
+                          ...prev,
+                          ledDriverHeadroomPct: Number(e.target.value) || 0,
+                        }))
+                      }
+                      onBlur={commitPlanDefaults}
+                      className="h-9"
+                    />
+                    <p className="text-[10px] text-muted-foreground">
+                      How far above the strip's actual load the driver gets sized.
+                    </p>
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="led-wpm-default" className="text-xs">LED strip watts per metre</Label>

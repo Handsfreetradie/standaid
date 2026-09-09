@@ -505,6 +505,11 @@ export interface PlanDefaults {
   ledWattsPerMetre?: number;
   ledProfile?: string;
   ledExtrusionStockLengthM?: number;
+  // The driver sizes this tradie actually stocks, and how much headroom they
+  // size one with. Job-wide: they apply to every strip on the plan at takeoff
+  // time, so changing them re-sizes what's already drawn.
+  ledDriverSizesW?: number[];
+  ledDriverHeadroomPct?: number;
 }
 
 export interface SetoutPlan {

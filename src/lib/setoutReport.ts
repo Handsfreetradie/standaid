@@ -651,7 +651,11 @@ function drawMaterialsPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting
     }
   };
 
-  const lines = aggregateMaterials(fittings);
+  const lines = aggregateMaterials(fittings, {
+    extrusionStockLengthM: plan.plan_defaults?.ledExtrusionStockLengthM,
+    driverSizesW: plan.plan_defaults?.ledDriverSizesW,
+    driverHeadroomPct: plan.plan_defaults?.ledDriverHeadroomPct,
+  });
   if (lines.length === 0) {
     doc.setFontSize(10);
     doc.setTextColor(120);
