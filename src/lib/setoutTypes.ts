@@ -150,6 +150,9 @@ export interface FittingSpecs {
   path?: Point[];
   ledWattsPerMetre?: number;
   ledProfile?: string;
+  // Stock length the extrusion is bought in, which decides how many lengths
+  // the takeoff orders. Suppliers differ, so it's the tradie's to set.
+  ledExtrusionStockLengthM?: number;
   ledColourTempK?: number;
 }
 
@@ -501,6 +504,7 @@ export interface PlanDefaults {
   twinDownlightSpacingMm?: number;
   ledWattsPerMetre?: number;
   ledProfile?: string;
+  ledExtrusionStockLengthM?: number;
 }
 
 export interface SetoutPlan {

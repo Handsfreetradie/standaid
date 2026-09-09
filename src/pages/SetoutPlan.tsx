@@ -23,6 +23,7 @@ import PhotoPointDialog from "@/components/setout/PhotoPointDialog";
 import CameraCapture from "@/components/setout/CameraCapture";
 import type { FittingType } from "@/components/setout/symbols";
 import { pathLength } from "@/lib/setoutPathGeometry";
+import { DEFAULT_EXTRUSION_STOCK_LENGTH_M, DEFAULT_LED_WATTS_PER_METRE } from "@/lib/setoutMaterials";
 import { DEFAULT_LAYER_VISIBILITY, DEFAULT_TWIN_SPACING_MM, distance, gangsFor, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type MeasurementRef, type Point, type SetoutFitting } from "@/lib/setoutTypes";
 import { autoRotationForWallMount, computeMeasurementLock, defaultHeightForType, remeasureLock } from "@/lib/setoutGeometry";
 import { generateSetoutReportPdf, type PlanImage } from "@/lib/setoutReport";
@@ -123,7 +124,8 @@ const SetoutPlan = () => {
   const [stripDraft, setStripDraft] = useState<Point[]>([]);
   const [planDefaultsDraft, setPlanDefaultsDraft] = useState({
     twinDownlightSpacingMm: DEFAULT_TWIN_SPACING_MM,
-    ledWattsPerMetre: 14,
+    ledWattsPerMetre: DEFAULT_LED_WATTS_PER_METRE,
+    ledExtrusionStockLengthM: DEFAULT_EXTRUSION_STOCK_LENGTH_M,
   });
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>(DEFAULT_LAYER_VISIBILITY);
   const layerSyncedRef = useRef(false);
@@ -157,7 +159,9 @@ const SetoutPlan = () => {
       // to a stale value while the tradie is mid-edit.
       setPlanDefaultsDraft({
         twinDownlightSpacingMm: plan.plan_defaults?.twinDownlightSpacingMm ?? DEFAULT_TWIN_SPACING_MM,
-        ledWattsPerMetre: plan.plan_defaults?.ledWattsPerMetre ?? 14,
+        ledWattsPerMetre: plan.plan_defaults?.ledWattsPerMetre ?? DEFAULT_LED_WATTS_PER_METRE,
+        ledExtrusionStockLengthM:
+          plan.plan_defaults?.ledExtrusionStockLengthM ?? DEFAULT_EXTRUSION_STOCK_LENGTH_M,
       });
     }
   }, [plan]);
@@ -615,6 +619,7 @@ const SetoutPlan = () => {
     updatePlanDefaults.mutate({
       twinDownlightSpacingMm: planDefaultsDraft.twinDownlightSpacingMm,
       ledWattsPerMetre: planDefaultsDraft.ledWattsPerMetre,
+      ledExtrusionStockLengthM: planDefaultsDraft.ledExtrusionStockLengthM,
       ledProfile: plan?.plan_defaults?.ledProfile,
     });
   };
@@ -639,8 +644,10 @@ const SetoutPlan = () => {
         measurement_lock: measurementLockFor(path[0], "led_strip"),
         specs: {
           path,
-          ledWattsPerMetre: plan?.plan_defaults?.ledWattsPerMetre ?? 14,
+          ledWattsPerMetre: plan?.plan_defaults?.ledWattsPerMetre ?? DEFAULT_LED_WATTS_PER_METRE,
           ledProfile: plan?.plan_defaults?.ledProfile ?? "surface",
+          ledExtrusionStockLengthM:
+            plan?.plan_defaults?.ledExtrusionStockLengthM ?? DEFAULT_EXTRUSION_STOCK_LENGTH_M,
         },
       },
       {
@@ -1167,6 +1174,25 @@ const SetoutPlan = () => {
                       value={planDefaultsDraft.twinDownlightSpacingMm}
                       onChange={(e) =>
                         setPlanDefaultsDraft((prev) => ({ ...prev, twinDownlightSpacingMm: Number(e.target.value) || prev.twinDownlightSpacingMm }))
+                      }
+                      onBlur={commitPlanDefaults}
+                      className="h-9"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="led-stock-default" className="text-xs">LED extrusion stock length (m)</Label>
+                    <Input
+                      id="led-stock-default"
+                      type="number"
+                      inputMode="decimal"
+                      min="0.1"
+                      step="0.1"
+                      value={planDefaultsDraft.ledExtrusionStockLengthM}
+                      onChange={(e) =>
+                        setPlanDefaultsDraft((prev) => ({
+                          ...prev,
+                          ledExtrusionStockLengthM: Number(e.target.value) || prev.ledExtrusionStockLengthM,
+                        }))
                       }
                       onBlur={commitPlanDefaults}
                       className="h-9"

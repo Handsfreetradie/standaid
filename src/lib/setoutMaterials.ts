@@ -30,10 +30,12 @@ export interface MaterialLine {
   group: string; // grouping heading for the report, e.g. "Lighting", "Power", "Data", "LED", "Accessories"
 }
 
-// PROVISIONAL — awaiting the electrician's confirmation on both of these.
-// Extrusion comes in fixed lengths off the shelf; 2m is a common stock size
-// but suppliers vary, and this is what decides how many lengths get ordered.
-export const EXTRUSION_STOCK_LENGTH_M = 2; // provisional
+// Extrusion comes in fixed lengths off the shelf and suppliers vary, so the
+// stock length is set by the tradie — per strip, seeded from the job default
+// (see PlanDefaults). This is only the fallback for a strip drawn before
+// either was set. Watts per metre works the same way.
+export const DEFAULT_EXTRUSION_STOCK_LENGTH_M = 2;
+export const DEFAULT_LED_WATTS_PER_METRE = 14;
 // Drivers are sized above the strip's actual load so they aren't run at
 // 100% continuously (shortens driver life) — 20% is a common rule of thumb,
 // not a spec'd figure for this job.
@@ -70,17 +72,22 @@ function ledStripMaterials(specs: FittingSpecs): MaterialLine[] {
   if (metres <= 0) return [];
 
   const roundedMetres = Math.round(metres * 10) / 10; // nearest 100mm — plenty precise for an order
-  const wattsPerMetre = specs.ledWattsPerMetre ?? 14;
+  const wattsPerMetre = specs.ledWattsPerMetre ?? DEFAULT_LED_WATTS_PER_METRE;
   const profile = specs.ledProfile ?? "surface";
-  const stockLengths = Math.ceil(metres / EXTRUSION_STOCK_LENGTH_M);
+  // A zero or missing stock length would divide to Infinity and order an
+  // impossible number of lengths, so it falls back rather than trusting it.
+  const stockLengthM = specs.ledExtrusionStockLengthM && specs.ledExtrusionStockLengthM > 0
+    ? specs.ledExtrusionStockLengthM
+    : DEFAULT_EXTRUSION_STOCK_LENGTH_M;
+  const stockLengths = Math.ceil(metres / stockLengthM);
   const clips = Math.ceil(metres / 0.5); // roughly 1 clip per 500mm
   const driver = pickDriver(metres * wattsPerMetre * DRIVER_HEADROOM);
   const group = "LED";
 
   return [
     { item: `LED strip, ${roundedMetres}m`, qty: roundedMetres, unit: "m", group },
-    { item: `LED extrusion (${profile}), ${EXTRUSION_STOCK_LENGTH_M}m length`, qty: stockLengths, unit: "ea", group },
-    { item: `LED diffuser (${profile}), ${EXTRUSION_STOCK_LENGTH_M}m length`, qty: stockLengths, unit: "ea", group },
+    { item: `LED extrusion (${profile}), ${stockLengthM}m length`, qty: stockLengths, unit: "ea", group },
+    { item: `LED diffuser (${profile}), ${stockLengthM}m length`, qty: stockLengths, unit: "ea", group },
     { item: `LED end cap (${profile})`, qty: 2, unit: "ea", group },
     { item: `LED mounting clip (${profile})`, qty: clips, unit: "ea", group },
     { item: `LED driver, ${driver.sizeW}W constant-voltage`, qty: driver.qty, unit: "ea", group },

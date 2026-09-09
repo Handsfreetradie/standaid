@@ -21,6 +21,7 @@ import {
   DEFAULT_TWIN_SPACING_MM,
 } from "@/lib/setoutTypes";
 import { pathLength } from "@/lib/setoutPathGeometry";
+import { DEFAULT_EXTRUSION_STOCK_LENGTH_M, DEFAULT_LED_WATTS_PER_METRE } from "@/lib/setoutMaterials";
 
 const FITTING_TYPES = Object.keys(FITTING_SYMBOLS) as FittingType[];
 const TYPES_BY_CATEGORY = FITTING_CATEGORY_ORDER.map((category) => ({
@@ -324,15 +325,36 @@ const FittingPalette = ({
               <div>
                 <p className="text-[11px] font-medium text-muted-foreground mb-1">Watts per metre</p>
                 <DraftNumberInput
-                  key={`led-wpm-${selectedFitting.id}-${selectedFitting.specs.ledWattsPerMetre ?? 14}`}
+                  key={`led-wpm-${selectedFitting.id}-${selectedFitting.specs.ledWattsPerMetre ?? DEFAULT_LED_WATTS_PER_METRE}`}
                   type="number"
                   inputMode="decimal"
                   min="0"
                   step="1"
                   className="h-8 text-xs"
-                  initialValue={selectedFitting.specs.ledWattsPerMetre ?? 14}
-                  onCommit={(value) => onUpdateSpecs({ ...selectedFitting.specs, ledWattsPerMetre: value > 0 ? value : 14 })}
+                  initialValue={selectedFitting.specs.ledWattsPerMetre ?? DEFAULT_LED_WATTS_PER_METRE}
+                  onCommit={(value) => onUpdateSpecs({ ...selectedFitting.specs, ledWattsPerMetre: value > 0 ? value : DEFAULT_LED_WATTS_PER_METRE })}
                 />
+              </div>
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground mb-1">Extrusion stock length (m)</p>
+                <DraftNumberInput
+                  key={`led-stock-${selectedFitting.id}-${selectedFitting.specs.ledExtrusionStockLengthM ?? DEFAULT_EXTRUSION_STOCK_LENGTH_M}`}
+                  type="number"
+                  inputMode="decimal"
+                  min="0.1"
+                  step="0.1"
+                  className="h-8 text-xs"
+                  initialValue={selectedFitting.specs.ledExtrusionStockLengthM ?? DEFAULT_EXTRUSION_STOCK_LENGTH_M}
+                  onCommit={(value) =>
+                    onUpdateSpecs({
+                      ...selectedFitting.specs,
+                      ledExtrusionStockLengthM: value > 0 ? value : DEFAULT_EXTRUSION_STOCK_LENGTH_M,
+                    })
+                  }
+                />
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  What the extrusion comes in off the shelf — sets how many lengths get ordered.
+                </p>
               </div>
               <div>
                 <p className="text-[11px] font-medium text-muted-foreground mb-1">Extrusion</p>
