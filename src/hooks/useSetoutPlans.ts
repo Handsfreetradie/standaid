@@ -416,7 +416,7 @@ export function useAddSwitchGang(planId: string) {
 }
 
 // Removes a gang entirely (not just clearing its links) — e.g. undoing an
-// accidental "+ Add gang".
+// accidental "+ Add switch".
 export function useRemoveSwitchGang(planId: string) {
   const queryClient = useQueryClient();
 

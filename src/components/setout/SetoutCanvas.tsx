@@ -202,7 +202,7 @@ interface SetoutCanvasProps {
   linkActiveGangIndex?: number;
   onSwitchTap?: (switchId: string | null) => void;
   onLinkTargetTap?: (fittingId: string) => void;
-  // Double-tap/double-click a switch to open its "add gang" menu — reports
+  // Double-tap/double-click a switch to open its menu — reports
   // the raw client (screen) coordinates so the parent can anchor a
   // position-controlled menu right where the tradie tapped, rather than
   // making them find the switch's card in the side panel.

@@ -672,7 +672,7 @@ const SetoutPlan = () => {
     setActiveSwitchId(switchFitting.id);
     setActiveGangIndex(gangIndex);
     setSwitchMenu(null);
-    toast.info(`Linking gang ${gangIndex + 1} — tap the lights it switches`);
+    toast.info(`Linking switch ${gangIndex + 1} — tap the lights it operates`);
   };
 
   const handleRemoveLastGangFromMenu = () => {
@@ -1299,7 +1299,7 @@ const SetoutPlan = () => {
             gangsFor(switchMenuFitting).map((gang, i) => (
               <DropdownMenuItem key={i} onClick={() => handleLinkFromGang(switchMenuFitting, i)}>
                 <Cable className="h-3.5 w-3.5 mr-1.5" />
-                Link gang {i + 1}
+                Link switch {i + 1}
                 <span className="ml-1.5 text-muted-foreground">
                   {gang.length === 0 ? "— nothing yet" : `— ${gang.length} light${gang.length === 1 ? "" : "s"}`}
                 </span>
@@ -1313,12 +1313,12 @@ const SetoutPlan = () => {
             }}
           >
             <Plus className="h-3.5 w-3.5 mr-1.5" />
-            Add gang
+            Add switch
           </DropdownMenuItem>
           {switchMenuFitting && gangsFor(switchMenuFitting).length > 1 && (
             <DropdownMenuItem onClick={handleRemoveLastGangFromMenu}>
               <Minus className="h-3.5 w-3.5 mr-1.5" />
-              Remove last gang
+              Remove last switch
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />

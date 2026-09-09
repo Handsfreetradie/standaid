@@ -462,13 +462,13 @@ function drawCableRunPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting[
     ensureSpace(6);
     doc.setFontSize(10);
     doc.setTextColor(20);
-    doc.text(`${codes.get(sw.id) ?? "?"}${gangs.length > 1 ? ` (${gangs.length}-gang)` : ""}`, MARGIN, y);
+    doc.text(`${codes.get(sw.id) ?? "?"}${gangs.length > 1 ? ` (${gangs.length} switches)` : ""}`, MARGIN, y);
     y += 5;
 
     doc.setFontSize(9);
     doc.setTextColor(60);
     gangs.forEach((gang, gangIndex) => {
-      const gangLabel = gangs.length > 1 ? `Gang ${gangIndex + 1}: ` : "";
+      const gangLabel = gangs.length > 1 ? `Switch ${gangIndex + 1}: ` : "";
       // Each gang is a loop-in chain in tap order (switch -> first light ->
       // second light -> ...), not a set of separate home-runs — same
       // topology as SetoutCanvas.tsx's switchLinks and SwitchLinksPanel.tsx.

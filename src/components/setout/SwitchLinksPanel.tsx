@@ -40,10 +40,10 @@ export default function SwitchLinksPanel({
             <div className="flex items-center justify-between mb-1.5">
               <p className="text-sm font-semibold text-foreground">
                 Switch {i + 1}
-                {gangs.length > 1 && <span className="ml-1 text-xs font-normal text-muted-foreground">({gangs.length}-gang)</span>}
+                {gangs.length > 1 && <span className="ml-1 text-xs font-normal text-muted-foreground">({gangs.length} switches)</span>}
               </p>
               <Button variant="ghost" size="sm" className="h-6 gap-1 text-[11px] text-muted-foreground" onClick={() => onAddGang(sw)}>
-                <Plus className="h-3 w-3" /> Add gang
+                <Plus className="h-3 w-3" /> Add switch
               </Button>
             </div>
             <div className="space-y-1.5">
@@ -69,7 +69,7 @@ export default function SwitchLinksPanel({
                     }}
                   >
                     <span className="text-[10px] font-medium text-muted-foreground flex-shrink-0">
-                      {gangs.length > 1 ? `Gang ${gangIndex + 1}` : "Switch"}
+                      {gangs.length > 1 ? `Switch ${gangIndex + 1}` : "Switch"}
                     </span>
                     {links.length === 0 ? (
                       <span className="text-xs text-muted-foreground">{isActiveGang ? "Tap lights to link" : "Not linked yet"}</span>
@@ -136,7 +136,7 @@ export default function SwitchLinksPanel({
         <Cable className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
         Each gang is its own cable run — tap a gang, then tap lights on the canvas to link them. Link the same light from a
         second switch's gang and it's automatically picked up as 2-way (a third switch makes it 3-way, and so on). Use
-        "Add gang" for a plate that controls more than one thing (e.g. downlights on one gang, a fan on another).
+        "Add switch" for a plate that controls more than one thing (e.g. downlights on one switch, a fan on another).
       </div>
     </div>
   );
