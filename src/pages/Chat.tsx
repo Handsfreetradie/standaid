@@ -38,8 +38,13 @@ interface Citation {
 
 const GUIDE_DISCLAIMER = "Simplified summary — always verify against the current clause of the standard.";
 
+// CC BY 4.0 §3(a): creator + copyright notice, licence notice with link,
+// reference to the licensor's disclaimer, and an indication that the
+// material was modified (extracted, reformatted, summarised by AI).
 const NCC_ATTRIBUTION =
   "The National Construction Code 2025 was provided by the Australian Building Codes Board under the CC BY 4.0 licence.";
+const NCC_LICENCE_URL = "https://creativecommons.org/licenses/by/4.0/";
+const NCC_COPYRIGHT = "© Commonwealth of Australia and the States and Territories of Australia 2026, published by the ABCB";
 
 interface ImageRef {
   figure_number?: string;
@@ -763,7 +768,14 @@ const Chat = () => {
                         {codes.size > 0 && (
                           <p>Sourced from {Array.from(codes).join(", ")} — © Standards Australia. Shown under your personal licence.</p>
                         )}
-                        {hasNcc && <p>Source: NCC 2025, © ABCB, CC BY 4.0. {NCC_ATTRIBUTION}</p>}
+                        {hasNcc && (
+                          <p>
+                            {NCC_ATTRIBUTION} {NCC_COPYRIGHT}; licence:{" "}
+                            <a href={NCC_LICENCE_URL} target="_blank" rel="noopener noreferrer" className="underline">CC BY 4.0</a>.
+                            NCC text has been extracted and reformatted, and this answer is an AI-generated summary of it — not the NCC itself.
+                            The ABCB publishes the NCC without warranty and it is not professional advice; check the current edition at ncc.abcb.gov.au.
+                          </p>
+                        )}
                         {hasGuide && <p>Guide chips are StandAId's own simplified summaries, not the standard's text. {GUIDE_DISCLAIMER}</p>}
                       </div>
                     );

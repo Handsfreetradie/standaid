@@ -21,13 +21,16 @@ We have taken the ABCB's XML dataset, extracted the **text** of every clause and
 - State and territory variations are stored as separate entries tagged by state and only shown to users in that state or who ask about it.
 - The attribution line appears under every NCC-sourced answer, in the Terms of Service, and on the Profile page. The ToS also states StandAId is independent and not endorsed by the ABCB, and our marketing guideline is never to imply an ABCB partnership.
 
-**Attachments (available on request):** the ABCB copyright/licence page from the dataset; a one-page diagram of the shared-index architecture (single shared table separate from per-user tables; read-only to users; served only with attribution).
+**Attachments (available on request):** the ABCB copyright/licence page from the dataset; our internal compliance review against the licence and the ABCB's FAQs (`ncc-licence-compliance-review.md`, with sources); a one-page diagram of the shared-index architecture (single shared table separate from per-user tables; read-only to users; served only with attribution).
 
 **Questions.**
 1a. Does our use — storing NCC text, embedding it for search, and having an AI model generate answers that quote and cite it, all with attribution and a link back — sit within CC BY 4.0 as you read it? Is there anything in the ABCB's own terms of use for ncc.abcb.gov.au (as opposed to the CC licence) that constrains this?
 1b. Are we right that tables (which are text) are inside the licence, while figures/diagrams/photographs are excluded and must stay out?
 1c. Is our attribution treatment sufficient (per-answer line, ToS section, Profile page), and is the "independent / not endorsed" statement worded strongly enough?
 1d. Anything you'd want changed about linking users to ncc.abcb.gov.au (deep links to clause anchors)?
+1e. Trade marks: the ABCB says its logos (including the NCC logo) need written permission. We use no logos — only the words "NCC" / "National Construction Code" in plain text to name the source. Is that nominative use, and should we check the word-mark register?
+1f. The Livable Housing Design Standard states it was "adapted from the Livable Housing Design Guidelines (2017)" (Livable Housing Australia). The ABCB publishes its adaptation under the same CC BY notice, but "third party material" is excluded from that licence. We have **held those 16 clauses back** pending your view: can we serve the ABCB's adaptation, or do we need Livable Housing Australia's permission?
+1g. Attribution: we now show, on every NCC answer, the ABCB's required line, the copyright notice, a link to the CC BY 4.0 licence, a statement that the text was extracted/reformatted and the answer is an AI-generated summary, and a reference to the ABCB's disclaimer. Is that an adequate "reasonable manner" for an AI chat medium (CC BY 4.0 §3(a))?
 
 ## Question 2 — plain-English summaries of selected AS/NZS 3000 clauses (built; **not live** pending your advice)
 

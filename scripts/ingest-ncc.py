@@ -627,6 +627,14 @@ def main():
         all_chunks.extend(g)
         print(f"  glossary {len(g)} terms")
 
+    # The Livable Housing Design Standard states it was "adapted from the
+    # Livable Housing Design Guidelines (2017)" — a third-party document. The
+    # ABCB licenses its adaptation under CC BY, but "third party material" is
+    # excluded from that licence, so it stays dark until legal confirms.
+    for c in all_chunks:
+        if c["publication"] == "livable":
+            c["is_live"] = False; c["needs_legal_review"] = True
+
     # global dedupe on (xml_id, chunk_index) — a spec clause can be conref'd from two publications;
     # first publication wins (walk order above).
     seen, deduped = set(), []

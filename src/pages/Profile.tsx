@@ -938,7 +938,9 @@ const Profile = () => {
                         </a>
                         <p className="text-[10px] text-muted-foreground pt-1">
                           The National Construction Code 2025 was provided by the Australian Building Codes Board
-                          under the CC BY 4.0 licence. StandAId is independent and not endorsed by the ABCB.
+                          under the{" "}
+                          <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer" className="underline">CC BY 4.0 licence</a>.
+                          StandAId is independent and not endorsed by the ABCB.
                         </p>
                       </div>
                     </div>

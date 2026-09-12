@@ -112,7 +112,11 @@ export function WhyThisMatters({ trade, label, states }: { trade: string | null 
             </div>
           ))}
           {(ncc?.length ?? 0) > 0 && (
-            <p className="text-[10px] text-muted-foreground">NCC 2025 © ABCB, CC BY 4.0 — provided by the Australian Building Codes Board.</p>
+            <p className="text-[10px] text-muted-foreground">
+              The National Construction Code 2025 was provided by the Australian Building Codes Board under the{" "}
+              <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer" className="underline">CC BY 4.0 licence</a>.
+              Text extracted and reformatted; not professional advice — check the current edition on ncc.abcb.gov.au.
+            </p>
           )}
         </div>
       )}

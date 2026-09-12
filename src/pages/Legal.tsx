@@ -96,12 +96,23 @@ const Legal = ({ kind }: LegalProps) => {
             <Section title="3A. National Construction Code content">
               <p>
                 StandAId includes the text of the National Construction Code (NCC) 2025 — Volumes
-                One, Two and Three, the ABCB Housing Provisions and the Livable Housing Design
-                Standard — for every account, without any upload. The National Construction Code
-                2025 was provided by the Australian Building Codes Board under the CC BY 4.0
-                licence. Figures, diagrams and photographs are not included in that licence, so
-                StandAId never reproduces them: answers link you to the relevant clause on the
-                ABCB's website instead.
+                One, Two and Three and the ABCB Housing Provisions — for every account, without any
+                upload. <strong>The National Construction Code 2025 was provided by the Australian
+                Building Codes Board under the CC BY 4.0 licence.</strong> © Commonwealth of
+                Australia and the States and Territories of Australia 2026, published by the
+                Australian Building Codes Board. Licence:{" "}
+                <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer" className="text-primary underline">
+                  creativecommons.org/licenses/by/4.0
+                </a>.
+              </p>
+              <p>
+                <strong>What we changed.</strong> The NCC text was taken from the ABCB's machine-readable
+                dataset, split into clauses and reformatted for search, and answers you receive are
+                AI-generated summaries of that text — they are not the NCC itself. Figures, diagrams
+                and photographs are excluded from the ABCB's licence, so StandAId never reproduces
+                them: answers link you to the relevant clause on the ABCB's website instead. The
+                ABCB's own disclaimer applies to the NCC text: it is published without warranty as to
+                accuracy, currency or completeness, and it is not legal or professional advice.
               </p>
               <p>
                 StandAId is an independent product. It is not published, endorsed, sponsored or
