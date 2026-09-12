@@ -10,6 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ClauseGuidesPanel } from "@/components/admin/ClauseGuidesPanel";
 import { useAuth } from "@/hooks/useAuth";
 import { useProfile, useStandards, useOrganization, useSubscription } from "@/hooks/useData";
 import { supabase } from "@/integrations/supabase/client";
@@ -1138,6 +1139,27 @@ const Profile = () => {
                         </p>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* Clause Guides review — Kyle only */}
+                {isAdmin && (
+                  <div>
+                    <button
+                      onClick={() => togglePanel("clause-guides")}
+                      className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-foreground hover:bg-secondary transition-colors min-h-[44px]"
+                    >
+                      <BookOpen className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
+                      <div className="flex-1 text-left">
+                        <span className="block">Clause Guides</span>
+                        <span className="block text-xs text-muted-foreground font-normal mt-0.5">Admin only — review drafts, flip live</span>
+                      </div>
+                      {activePanel === "clause-guides"
+                        ? <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        : <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      }
+                    </button>
+                    {activePanel === "clause-guides" && <ClauseGuidesPanel />}
                   </div>
                 )}
 

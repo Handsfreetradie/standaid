@@ -2,15 +2,20 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { logTokenUsage } from "../_shared/log-usage.ts";
 
-// Embeds rows in the shared NCC index (public.ncc_chunks) that have no
-// embedding yet. scripts/ingest-ncc.py upserts the text-only rows; this fills
-// in the vectors server-side so the OpenAI key never leaves the function
-// secrets. Ops-only: the caller must present the service-role key. Idempotent
-// and resumable — call it until `remaining` is 0. Each call stops before the
+// Embeds rows in a shared index (public.ncc_chunks by default, or
+// public.clause_guides with {"table":"clause_guides"}) that have no embedding
+// yet. The ingest/seed scripts upsert text-only rows; this fills in the
+// vectors server-side so the OpenAI key never leaves the function secrets.
+// Ops-only: the caller must present the service-role key. Idempotent and
+// resumable — call it until `remaining` is 0. Each call stops before the
 // runtime limit and reports progress.
 //
 //   curl -X POST "$SUPABASE_URL/functions/v1/embed-ncc" \
 //     -H "Authorization: Bearer $SERVICE_ROLE_KEY" -H "Content-Type: application/json" -d '{}'
+//   … -d '{"table":"clause_guides"}'
+
+// table -> column holding the text to embed
+const TABLES: Record<string, string> = { ncc_chunks: "content", clause_guides: "search_text" };
 
 const BATCH = 50;
 const PARALLEL = 2; // 4 tripped WORKER_RESOURCE_LIMIT on the first full run
@@ -61,6 +66,11 @@ serve(async (req) => {
   const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
   if (!OPENAI_API_KEY) return json({ error: "OPENAI_API_KEY not set" }, 500);
 
+  const body = await req.json().catch(() => ({}));
+  const table = typeof body?.table === "string" ? body.table : "ncc_chunks";
+  const textCol = TABLES[table];
+  if (!textCol) return json({ error: `unknown table: ${table}` }, 400);
+
   const supabase = createClient(Deno.env.get("SUPABASE_URL")!, serviceRoleKey);
   const t0 = Date.now();
   let embedded = 0;
@@ -69,14 +79,15 @@ serve(async (req) => {
 
   try {
     while (Date.now() - t0 < TIME_BUDGET_MS) {
-      const { data: rows, error } = await supabase
-        .from("ncc_chunks")
-        .select("id, content")
+      const { data: rawRows, error } = await supabase
+        .from(table)
+        .select(`id, ${textCol}`)
         .is("embedding", null)
         .order("created_at", { ascending: true })
         .limit(BATCH * PARALLEL);
       if (error) throw error;
-      if (!rows?.length) break;
+      const rows = ((rawRows || []) as any[]).map((r) => ({ id: r.id as string, content: String(r[textCol] ?? "") }));
+      if (!rows.length) break;
 
       const groups: Array<typeof rows> = [];
       for (let i = 0; i < rows.length; i += BATCH) groups.push(rows.slice(i, i + BATCH));
@@ -87,7 +98,7 @@ serve(async (req) => {
         const updates = groups[gi].map((r, i) => ({ id: r.id, embedding: results[gi].vectors[i] }));
         await Promise.all(updates.map(async (u) => {
           if (!u.embedding) { failed++; return; }
-          const { error: upErr } = await supabase.from("ncc_chunks").update({ embedding: u.embedding }).eq("id", u.id);
+          const { error: upErr } = await supabase.from(table).update({ embedding: u.embedding }).eq("id", u.id);
           if (upErr) { failed++; console.error("[embed-ncc] update failed", u.id, upErr.message); }
           else embedded++;
         }));
@@ -98,13 +109,13 @@ serve(async (req) => {
 
     if (tokens > 0) {
       await logTokenUsage(supabase, {
-        userId: null, kind: "ncc_embed", model: MODEL,
+        userId: null, kind: `${table}_embed`, model: MODEL,
         usage: { input_tokens: tokens, output_tokens: 0 },
       });
     }
 
-    const { count } = await supabase.from("ncc_chunks").select("id", { count: "exact", head: true }).is("embedding", null);
-    return json({ embedded, failed, tokens, remaining: count ?? null, elapsed_ms: Date.now() - t0 });
+    const { count } = await supabase.from(table).select("id", { count: "exact", head: true }).is("embedding", null);
+    return json({ table, embedded, failed, tokens, remaining: count ?? null, elapsed_ms: Date.now() - t0 });
   } catch (e) {
     console.error("[embed-ncc]", e);
     return json({ error: String((e as Error)?.message || e), embedded, failed, tokens }, 500);

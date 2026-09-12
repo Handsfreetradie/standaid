@@ -1,0 +1,256 @@
+{
+  "_about": "StandAId clause guides for AS/NZS 3000:2018 (Wiring Rules). Independent plain-English summaries — NOT the standard's text. Each entry cites the clause by number only and restates the rule in our own words. source_notes is the authorship paper trail and the SME review checklist. Seeded with scripts/seed-clause-guides.py; entries go live only after SME review + legal sign-off (is_live is never set by the seed).",
+  "standard_code": "AS/NZS 3000",
+  "standard_id": "a0000000-0000-4000-8000-00000000cc11",
+  "trade": "electrical",
+  "guides": [
+    {
+      "clause_ref": "2.6.3.2.2",
+      "topic": "rcd-protection",
+      "title": "RCD protection in homes",
+      "summary": "In a house or other residential installation, the final subcircuits need 30 mA RCD (safety switch) protection — that covers the circuits feeding power points, lights and anything you plug in or hold in your hand, and since the 2018 rules (as amended) it effectively extends to all final subcircuits in the home. The RCD sits at the switchboard on the circuit, so a fault anywhere downstream trips it. There are only narrow carve-outs for fixed equipment where an unexpected trip would create a bigger hazard than the shock risk it removes, and those have to be justified, not assumed.",
+      "key_values": [
+        { "label": "RCD sensitivity", "value": "30 mA maximum" },
+        { "label": "Applies to", "value": "final subcircuits in residential installations — power points, lighting, hand-held and portable equipment; all final subcircuits under the current edition" }
+      ],
+      "related_ncc": [],
+      "keywords": ["safety switch", "RCD", "30mA", "residual current device", "domestic", "house", "power points", "lights", "final subcircuit"],
+      "source_notes": "Source: AS/NZS 3000:2018 cl 2.6.3.2.2 (residential RCD requirement). Wording written from the rule as understood by a licensed electrician; no text copied. SME CHECK: confirm the post-Amendment-2 scope ('all final subcircuits' vs the original socket/lighting/hand-held list) and the exact exception wording before going live."
+    },
+    {
+      "clause_ref": "2.6.3.2.3",
+      "topic": "rcd-protection",
+      "title": "RCD protection in commercial and industrial sites",
+      "summary": "Outside the home, RCD protection is still required on the circuits people most often touch: power points rated up to 20 A, lighting circuits, and circuits feeding hand-held or portable gear. The RCD must be 30 mA. Larger fixed machinery and some specialised circuits sit outside this rule, but the everyday circuits in an office, shop, workshop or factory need a safety switch the same as a house does.",
+      "key_values": [
+        { "label": "RCD sensitivity", "value": "30 mA maximum" },
+        { "label": "Socket-outlets covered", "value": "rated up to 20 A" }
+      ],
+      "related_ncc": [],
+      "keywords": ["commercial RCD", "industrial", "shop", "office", "workshop", "20 amp socket", "safety switch", "non-domestic"],
+      "source_notes": "Source: AS/NZS 3000:2018 cl 2.6.3.2.3 (non-residential RCD requirement). Own wording. SME CHECK: confirm the socket-outlet current threshold (20 A) and whether lighting is unconditional in the current edition."
+    },
+    {
+      "clause_ref": "2.6.3.2.4",
+      "topic": "rcd-protection",
+      "title": "How many circuits can share one RCD",
+      "summary": "Don't hang the whole house off one safety switch. A single RCD can protect at most three final subcircuits, and where an installation has more than one final subcircuit the lighting and power should be split across at least two RCDs so one nuisance trip doesn't black out everything. Combining an RCD with the circuit breaker (RCBO) per circuit is the cleanest way to meet this.",
+      "key_values": [
+        { "label": "Max final subcircuits per RCD", "value": "3" },
+        { "label": "Minimum RCDs", "value": "2, where more than one final subcircuit is protected — spread lighting and power across them" }
+      ],
+      "related_ncc": [],
+      "keywords": ["RCBO", "how many circuits per RCD", "three circuits", "split lighting and power", "nuisance trip"],
+      "source_notes": "Source: AS/NZS 3000:2018 cl 2.6.3.2.4 (grouping/limitation of circuits per RCD). Own wording. SME CHECK: confirm the 3-circuit limit and the two-RCD minimum are both in 2.6.3.2.4 (vs a neighbouring sub-clause) in the current edition."
+    },
+    {
+      "clause_ref": "2.5.3",
+      "topic": "circuit-protection",
+      "title": "Sizing the circuit breaker to the cable",
+      "summary": "The circuit breaker (or fuse) is there to protect the cable, not the appliance. Its rating must not be higher than the current the cable can safely carry in the way it's installed — that current-carrying capacity comes from AS/NZS 3008 and drops when cables are bunched, run in insulation, or in hot spaces. Pick the cable for the load and the run, then pick a breaker no bigger than what that cable can carry. If the breaker is bigger than the cable's capacity, the cable is the fuse.",
+      "key_values": [
+        { "label": "Rule of thumb", "value": "breaker rating ≤ cable current-carrying capacity (AS/NZS 3008, derated for installation conditions)" }
+      ],
+      "related_ncc": [],
+      "keywords": ["MCB rating", "circuit breaker size", "cable size", "current carrying capacity", "overload protection", "3008", "derating"],
+      "source_notes": "Source: AS/NZS 3000:2018 cl 2.5.3 (overload protection coordination with conductor capacity), with capacity values by reference to AS/NZS 3008.1.1. Own wording; no table values reproduced. SME CHECK: confirm 2.5.3 is the right sub-clause for the In ≤ Iz coordination requirement."
+    },
+    {
+      "clause_ref": "3.6.2",
+      "topic": "cable-sizing",
+      "title": "Voltage drop limit",
+      "summary": "The voltage at the far end of a circuit can't sag more than 5% below what the installation is supplied at, measured from the point of supply to the furthest point on the circuit. On a 230 V supply that's about 11.5 V total across mains, submains and the final subcircuit combined — so a long run to a shed or a big load on a small cable can fail this even when the cable's current rating is fine. Size up the cable (or shorten the run) until the drop is inside the limit.",
+      "key_values": [
+        { "label": "Maximum voltage drop", "value": "5% of nominal, point of supply to any point in the installation" },
+        { "label": "At 230 V", "value": "roughly 11.5 V total" }
+      ],
+      "related_ncc": [],
+      "keywords": ["voltage drop", "5 percent", "long run", "shed", "cable size", "volt drop calculation"],
+      "source_notes": "Source: AS/NZS 3000:2018 cl 3.6.2 (voltage drop). Own wording; the 11.5 V figure is our arithmetic, not a value from the standard. SME CHECK: confirm 5% is the whole-of-installation limit in the current edition and note any sub-limits applied by convention."
+    },
+    {
+      "clause_ref": "3.4.1",
+      "topic": "cable-sizing",
+      "title": "Working out what a cable can carry",
+      "summary": "A cable's current rating isn't a single number printed on the drum — it depends on how you install it. Start from the AS/NZS 3008 tables for the cable type, then reduce the rating for anything that makes it run hotter: bunching with other cables, running through or under thermal insulation, high ambient temperature, or enclosure in conduit. The lowest resulting figure is the current the cable can actually carry, and that's the number the circuit breaker has to sit under.",
+      "key_values": [
+        { "label": "Method", "value": "AS/NZS 3008.1.1 base rating × derating factors for grouping, insulation, ambient temperature and enclosure" }
+      ],
+      "related_ncc": [],
+      "keywords": ["current carrying capacity", "cable rating", "derating", "thermal insulation", "bunched cables", "3008 tables"],
+      "source_notes": "Source: AS/NZS 3000:2018 cl 3.4.1 (conductor current-carrying capacity by reference to AS/NZS 3008.1.1). Own wording; no capacity values reproduced. SME CHECK: confirm 3.4.1 (vs 3.4.2) is the operative reference clause."
+    },
+    {
+      "clause_ref": "5.5.3.1",
+      "topic": "earthing",
+      "title": "The MEN link",
+      "summary": "Every installation on the MEN system has exactly one MEN connection — a link between the neutral bar and the earth bar in the main switchboard. That link is what makes an earth fault look like a short circuit so the breaker or RCD trips. It lives in the main switchboard only: never put a second neutral-to-earth link in a sub-board, and never leave the main one out. Sub-boards keep neutral and earth separate all the way back to the main board.",
+      "key_values": [
+        { "label": "MEN connections per installation", "value": "one, at the main switchboard" },
+        { "label": "Sub-boards", "value": "neutral and earth kept separate — no MEN link" }
+      ],
+      "related_ncc": [],
+      "keywords": ["MEN link", "multiple earthed neutral", "neutral earth link", "main switchboard", "sub board", "earth bar", "neutral bar"],
+      "source_notes": "Source: AS/NZS 3000:2018 cl 5.5.3.1 (MEN connection). Own wording. SME CHECK: confirm the 'one per installation' rule and the outbuilding/separate-supply exceptions are correctly excluded from this summary."
+    },
+    {
+      "clause_ref": "5.3.3.1.1",
+      "topic": "earthing",
+      "title": "Main earthing conductor size",
+      "summary": "The main earthing conductor — the cable from the earth bar to the earth electrode — is sized from the size of the consumer mains, using the table in this part of the standard, and it can never be smaller than the table's minimum. For an ordinary house with small consumer mains that works out to a modest copper conductor; bigger mains need a bigger earth. Use the table for the actual mains size rather than guessing, and make sure the electrode connection is accessible and labelled.",
+      "key_values": [
+        { "label": "Sized by", "value": "consumer mains conductor size, per the main earthing conductor table" },
+        { "label": "Minimum", "value": "the table's floor value for copper — never smaller" }
+      ],
+      "related_ncc": [],
+      "keywords": ["main earth", "earth electrode", "earthing conductor size", "earth stake", "consumer mains", "Table 5.1"],
+      "source_notes": "Source: AS/NZS 3000:2018 cl 5.3.3.1.1 and the associated main earthing conductor table. Own wording; the table itself is deliberately NOT reproduced — the tradie is pointed to it. SME CHECK: consider whether stating the domestic minimum (mm²) is safe to include; currently left out."
+    },
+    {
+      "clause_ref": "5.6.2",
+      "topic": "earthing",
+      "title": "Bonding metal pipework and showers",
+      "summary": "Conductive pipework and metal parts that could carry a fault voltage get bonded to the earthing system so everything a person can touch at once sits at the same potential. The classic case is a shower or bath with metal water pipes, a metal drain, or a metal frame: those conductive parts need an equipotential bonding conductor back to earth. The bonding conductor has its own minimum size in the standard, and the connection points need to stay accessible for testing.",
+      "key_values": [
+        { "label": "Where", "value": "conductive water pipes, metal drains and other extraneous conductive parts in showers/baths and similar locations" },
+        { "label": "Bonding conductor", "value": "minimum size set by the standard (small copper conductor) — check the clause for the figure" }
+      ],
+      "related_ncc": ["10.2.1"],
+      "keywords": ["equipotential bonding", "bond the pipes", "shower bonding", "metal pipe earth", "bonding conductor", "4mm bond"],
+      "source_notes": "Source: AS/NZS 3000:2018 cl 5.6.2 (equipotential bonding of conductive parts, incl. bathrooms/showers) and its bonding-conductor size sub-clause. Own wording; size deliberately not stated. SME CHECK: confirm the sub-clause numbers for shower bonding and for the 4 mm² minimum, and whether the 2018 edition changed the shower requirement."
+    },
+    {
+      "clause_ref": "6.2.4",
+      "topic": "wet-areas",
+      "title": "Bathroom zones around baths and showers",
+      "summary": "Around a bath or shower the standard draws zones, and what you're allowed to install depends on the zone. Zone 0 is inside the bath or shower base itself. Zone 1 is the space directly above the bath or shower to a set height. Zone 2 wraps horizontally around Zone 1, and Zone 3 extends further out again. The closer the zone, the tighter the rules: nothing but purpose-rated gear in Zone 0, only suitable IP-rated equipment in Zone 1, power points kept out of Zones 0 and 1 and only allowed further out with RCD protection and the right positioning. Measure the zones from the bath/shower, not from the room walls.",
+      "key_values": [
+        { "label": "Zone 0", "value": "inside the bath or shower base" },
+        { "label": "Zone 1", "value": "directly above the bath/shower to the height set in the standard" },
+        { "label": "Zone 2 / Zone 3", "value": "bands extending horizontally beyond Zone 1, each with its own distance" },
+        { "label": "Power points", "value": "not in Zones 0 or 1; further out only with 30 mA RCD protection and compliant placement" }
+      ],
+      "related_ncc": ["10.2.1", "10.2.2"],
+      "keywords": ["bathroom zones", "zone 0", "zone 1", "zone 2", "zone 3", "shower GPO", "power point near bath", "wet area", "IP rating bathroom"],
+      "source_notes": "Source: AS/NZS 3000:2018 cl 6.2.4 (classification of zones, bath/shower) and the equipment permissions sub-clauses. Own wording; the zone dimensions are deliberately described rather than quoted. SME CHECK: decide whether to add the actual zone dimensions (2.25 m / 0.6 m / 2.4 m) as restated facts, and confirm the Zone 2 socket-outlet conditions."
+    },
+    {
+      "clause_ref": "4.7.1",
+      "topic": "isolation",
+      "title": "Isolating switch for a cooktop or oven",
+      "summary": "A fixed cooking appliance — cooktop, oven, range — needs its own isolating switch in the same room. The switch has to be within easy reach of the appliance, visible from it, and positioned so you don't have to lean over a hot cooktop to get at it. That way anyone can kill the power fast in a fire or when servicing. A cooktop and a separate oven can share the one switch if it's placed to serve both.",
+      "key_values": [
+        { "label": "Location", "value": "same room, within the distance set in the clause, visible from the appliance" },
+        { "label": "Not", "value": "positioned where you'd reach across the cooktop to operate it" }
+      ],
+      "related_ncc": [],
+      "keywords": ["cooktop isolator", "oven switch", "isolating switch kitchen", "cooking appliance switch", "within 2 metres"],
+      "source_notes": "Source: AS/NZS 3000:2018 cl 4.7.1 (switching for cooking appliances). Own wording; distance described not quoted. SME CHECK: confirm the maximum distance (commonly cited as 2 m) and whether the 'visible from the appliance' requirement is in the clause or a note."
+    },
+    {
+      "clause_ref": "4.13.4",
+      "topic": "isolation",
+      "title": "Isolating switch for an air conditioner",
+      "summary": "A split-system's outdoor unit needs an isolating switch right next to it so a tech can lock the power off while working on it without going back to the switchboard. The isolator has to be weatherproof for where it's mounted, adjacent to the unit and clearly for that unit, and it should be lockable in the off position. The indoor and outdoor units are normally on the one dedicated circuit, so that single isolator covers the whole system.",
+      "key_values": [
+        { "label": "Location", "value": "adjacent to the outdoor unit" },
+        { "label": "Type", "value": "weatherproof, lockable-off isolating switch" }
+      ],
+      "related_ncc": [],
+      "keywords": ["air con isolator", "split system isolating switch", "outdoor unit isolator", "weatherproof isolator", "lockable"],
+      "source_notes": "Source: AS/NZS 3000:2018 — isolating switch requirement for air-conditioning/refrigeration equipment (cited here as 4.13.4). Own wording. SME CHECK: CONFIRM THE CLAUSE NUMBER — the AC isolator requirement may sit under 4.19 or a different 4.13 sub-clause in the current edition; fix clause_ref before going live."
+    },
+    {
+      "clause_ref": "3.11.4",
+      "topic": "underground",
+      "title": "How deep underground cables have to be",
+      "summary": "Cables buried in the ground are sorted into categories by how much extra protection they have — in heavy-duty conduit, in conduit with marker tape, or direct-buried — and each category has its own minimum cover depth. Better-protected runs can be shallower; direct-buried cable with no extra protection has to go deepest. Whatever the category, the run needs marker tape above it, the cable has to be rated for underground use, and the depth is measured from the finished ground surface, not from the bottom of your trench before backfill.",
+      "key_values": [
+        { "label": "Depth depends on", "value": "installation category — more mechanical protection allows shallower cover" },
+        { "label": "Also required", "value": "orange marker tape above the run; underground-rated cable/conduit" }
+      ],
+      "related_ncc": [],
+      "keywords": ["underground cable depth", "how deep", "trench", "buried cable", "conduit underground", "marker tape", "category A", "category B", "category C"],
+      "source_notes": "Source: AS/NZS 3000:2018 cl 3.11.4 (underground wiring systems) and its depth-of-cover table. Own wording; the depth figures per category are deliberately NOT reproduced. SME CHECK: consider adding the restated depths (commonly 0.5 m / 0.75 m) as key values once verified against the current table."
+    },
+    {
+      "clause_ref": "3.9.3",
+      "topic": "cable-protection",
+      "title": "Protecting cables where they can get damaged",
+      "summary": "A cable that could be hit, crushed, chafed or pierced needs mechanical protection. That's the rule behind grommets or bushes where a cable passes through metal framing, protection for cables run low on walls in workshops and garages, conduit where a cable is exposed to impact, and keeping cables out of spots where fixings will go through them. If you can picture a screw, a trolley, a sharp edge or a foot getting to the cable, protect it or move it.",
+      "key_values": [
+        { "label": "Metal framing", "value": "protect the cable at every pass-through (grommet, bush or sleeve)" },
+        { "label": "Exposed runs", "value": "conduit, ducting or an equivalent barrier where impact is likely" }
+      ],
+      "related_ncc": [],
+      "keywords": ["cable protection", "grommet", "metal stud", "steel frame", "conduit", "mechanical damage", "nail plate", "cables through studs"],
+      "source_notes": "Source: AS/NZS 3000:2018 cl 3.9.3 (protection against mechanical damage) and related sub-clauses on metal framing. Own wording. SME CHECK: confirm the specific sub-clause for metal-frame pass-throughs and whether nail plates are required or just recommended in the current edition."
+    },
+    {
+      "clause_ref": "4.5.2.3",
+      "topic": "lighting",
+      "title": "Downlights, insulation and clearances",
+      "summary": "Recessed downlights get hot, and the rule is simple: install them exactly as their marking allows. A fitting rated for direct contact with insulation (IC / IC-F marked) can be covered; anything without that rating has to keep clear of insulation and other combustible material, using the clearances from the fitting's own instructions or the standard's default distances where the fitting isn't marked. Don't bury an unrated downlight or its driver under batts, and keep the driver where it can shed heat.",
+      "key_values": [
+        { "label": "IC-rated fitting", "value": "may be in contact with insulation as its marking allows" },
+        { "label": "Unrated fitting", "value": "keep the clearance from insulation and combustibles required by its marking, or the standard's default where unmarked" }
+      ],
+      "related_ncc": ["13.2.2"],
+      "keywords": ["downlight clearance", "IC rated", "insulation around downlight", "recessed luminaire", "LED driver in ceiling", "batts"],
+      "source_notes": "Source: AS/NZS 3000:2018 cl 4.5.2.3 (recessed luminaires — clearance and marking). Own wording; default clearance distances deliberately not stated. SME CHECK: confirm 4.5.2.3 is the recessed-luminaire clause in the current edition and whether to add the default clearances as restated values. NCC ref 13.2.2 (housing insulation) is a plausibility link only — verify."
+    },
+    {
+      "clause_ref": "8.3",
+      "topic": "testing",
+      "title": "Tests before you energise",
+      "summary": "Before a new or altered installation goes live it has to be tested, and the tests come in a fixed set: continuity of the earthing system (the earth path is unbroken back to the main earth), insulation resistance (no leakage between conductors and earth), polarity (active and neutral are the right way round at every point), correct circuit connections (things are wired to the circuit they're meant to be on), earth fault-loop impedance (a fault will actually draw enough current to trip the protection), and RCD operation (the safety switch trips within its time limit). Record the results — the certificate of compliance depends on them.",
+      "key_values": [
+        { "label": "Tests", "value": "earth continuity, insulation resistance, polarity, correct connections, earth fault-loop impedance, RCD operation" },
+        { "label": "Insulation resistance", "value": "tested at 500 V DC; must meet the standard's minimum (commonly cited as 1 MΩ)" }
+      ],
+      "related_ncc": [],
+      "keywords": ["testing", "insulation resistance", "megger", "polarity test", "earth continuity", "fault loop impedance", "RCD trip test", "before energising", "8.3"],
+      "source_notes": "Source: AS/NZS 3000:2018 Section 8.3 (mandatory tests: 8.3.5–8.3.10). Own wording. SME CHECK: confirm the 1 MΩ figure and 500 V test voltage in the current edition before leaving them in key_values; confirm sub-clause numbering."
+    },
+    {
+      "clause_ref": "3.8.3",
+      "topic": "identification",
+      "title": "Conductor colours",
+      "summary": "Neutrals and earths have reserved colours and nothing else may use them: the earth is green/yellow, the neutral is black (or light blue in the newer flexible-cable convention). Actives can be any colour other than those — red, white and blue for the three phases is the usual Australian convention, brown for a single-phase flex active. If an existing installation uses a different scheme, don't mix conventions on the same job without labelling, and never re-purpose a green/yellow or black core as an active.",
+      "key_values": [
+        { "label": "Earth", "value": "green/yellow only" },
+        { "label": "Neutral", "value": "black (light blue in flexible cords) only" },
+        { "label": "Actives", "value": "any other colour — never green/yellow, black or light blue" }
+      ],
+      "related_ncc": [],
+      "keywords": ["cable colours", "conductor identification", "which wire is neutral", "red white blue", "brown blue", "green yellow earth"],
+      "source_notes": "Source: AS/NZS 3000:2018 cl 3.8.3 (identification of conductors by colour) and its table. Own wording; table not reproduced. SME CHECK: confirm 3.8.3 is the colour-identification clause and the exact treatment of light blue neutrals in fixed wiring."
+    },
+    {
+      "clause_ref": "2.10.2",
+      "topic": "switchboards",
+      "title": "Where a switchboard can go and the space around it",
+      "summary": "A switchboard has to be somewhere you can actually get to it and work on it safely: not in a bathroom or a spot where it'll get wet, not behind a door that swings into it, not where stored goods will block it, and with enough clear space in front for a person to stand and operate it. Main switchboards also need to be accessible to the people who'll need the main switch in an emergency. If the only place it fits is a cupboard, the cupboard has to be dedicated and the clearances still apply.",
+      "key_values": [
+        { "label": "Not permitted", "value": "bathrooms and other wet/damp locations, positions obstructed by doors or storage" },
+        { "label": "Access", "value": "clear working space in front, per the clause; main switch reachable in an emergency" }
+      ],
+      "related_ncc": [],
+      "keywords": ["switchboard location", "switchboard clearance", "switchboard in bathroom", "switchboard in cupboard", "access to switchboard", "working space"],
+      "source_notes": "Source: AS/NZS 3000:2018 cl 2.10.2 (location and access of switchboards) and related sub-clauses. Own wording; clearance distance deliberately not stated. SME CHECK: confirm the sub-clause numbers and whether to add the clearance figure (commonly 0.6 m) once verified."
+    },
+    {
+      "clause_ref": "7.9",
+      "topic": "ev-charging",
+      "title": "EV charging circuits",
+      "summary": "A fixed EV charger gets its own dedicated final subcircuit, sized for its full load with no diversity. It needs RCD protection that can handle DC leakage from the vehicle electronics — either an RCD Type B, or a Type A RCD combined with a device that detects DC fault current and trips it — because an ordinary Type AC RCD can be blinded by DC and fail to trip. Install the charger's isolating switch where the standard requires, and check whether the charger itself already includes the DC detection before doubling up.",
+      "key_values": [
+        { "label": "Circuit", "value": "dedicated final subcircuit, no diversity" },
+        { "label": "RCD", "value": "Type B, or Type A plus DC fault-current detection (6 mA DC class)" }
+      ],
+      "related_ncc": [],
+      "keywords": ["EV charger", "electric vehicle", "Type B RCD", "6mA DC", "dedicated circuit", "car charger installation"],
+      "source_notes": "Source: AS/NZS 3000:2018 as amended — Section 7.9 (electric vehicle charging). Own wording. SME CHECK: CONFIRM Section 7.9 exists in the amendment level you're working to (added by Amendment 2) and the exact RCD type wording; fix clause_ref if the section number differs."
+    }
+  ]
+}

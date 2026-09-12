@@ -109,8 +109,10 @@ serve(async (req) => {
     const userId = user.id;
 
     // ── Pro gate ──
-    const { data: profile } = await supabase.from("profiles").select("subscription_tier").eq("user_id", userId).single();
+    const { data: profile } = await supabase.from("profiles").select("subscription_tier, states").eq("user_id", userId).single();
     const tier = profile?.subscription_tier || "free";
+    // NCC state variations follow the states the tradie works in (Profile).
+    const nccStates: string[] = Array.isArray((profile as any)?.states) ? (profile as any).states : [];
     if (tier !== "pro" && tier !== "business") {
       return json({ error: "Site Audit is a Pro feature. Upgrade to use it.", upgrade_required: true }, 403);
     }
@@ -177,13 +179,19 @@ serve(async (req) => {
           });
         }
         const emb = embJson.data[0].embedding;
-        const { data: chunks } = await supabase.rpc("match_chunks", {
-          query_embedding: emb, match_user_id: userId, match_threshold: 0.25, match_count: 16,
-        });
-        if (chunks?.length) {
-          contextChunks = chunks.map((c: any, i: number) =>
-            `[Source ${i + 1} — ${c.clause_number || "N/A"}]\n${c.content}`).join("\n\n");
-        }
+        // The user's own standards, plus the shared NCC index and StandAId's
+        // clause guides (Phase 3 of the content plan) so a photo of, say, a
+        // smoke alarm can cite NCC 9.5.1 even when the tradie owns no standard.
+        const [own, ncc, guides] = await Promise.all([
+          supabase.rpc("match_chunks", { query_embedding: emb, match_user_id: userId, match_threshold: 0.25, match_count: 16 }),
+          supabase.rpc("match_ncc_chunks", { query_embedding: emb, match_threshold: 0.30, match_count: 6, p_states: nccStates }),
+          supabase.rpc("match_clause_guides", { query_embedding: emb, match_threshold: 0.30, match_count: 4 }),
+        ]);
+        const labelled: string[] = [];
+        for (const c of own.data || []) labelled.push(`[Source ${labelled.length + 1} — ${c.clause_number || "N/A"}]\n${c.content}`);
+        for (const c of ncc.data || []) labelled.push(`[Source ${labelled.length + 1} — NCC ${c.clause_number || "N/A"}${c.state ? ` (${c.state} variation)` : ""} — cite as "NCC ${c.clause_number}"]\n${c.content}`);
+        for (const g of guides.data || []) labelled.push(`[Source ${labelled.length + 1} — ${g.standard_code} ${g.clause_ref} — StandAId SIMPLIFIED SUMMARY, not the standard's text; cite as "${g.standard_code} ${g.clause_ref} (guide)"]\n${g.search_text}`);
+        if (labelled.length) contextChunks = labelled.join("\n\n");
       }
     } catch (e) {
       console.error("[analyze-audit-photo] retrieval failed:", e);
@@ -194,7 +202,7 @@ serve(async (req) => {
 CRITICAL RULES:
 - Assess ONLY what is clearly visible. NEVER guess measurements, distances, heights, clearances, cable sizes, or whether something is RCD-protected from a photo — a wrong value is dangerous.
 - Use your general trade knowledge to identify issues and explain your reasoning — you are not limited to only what's in the retrieved extracts below.
-- However, only put a clause number in "clause" when that exact clause appears in the retrieved standard extracts below. If you're confident something is wrong from general knowledge but no matching clause was retrieved, still raise it (leave "clause" empty) and say plainly that the exact clause should be checked against the standard. NEVER invent or guess a clause number.
+- However, only put a clause number in "clause" when that exact clause appears in the retrieved standard extracts below. Copy the citation form shown on the extract's label: an NCC extract is cited as "NCC <clause>" (e.g. "NCC 9.5.1"), a simplified-summary extract as "<standard> <clause> (guide)" — never as a bare number, and never as if the summary were the standard's own wording. If you're confident something is wrong from general knowledge but no matching clause was retrieved, still raise it (leave "clause" empty) and say plainly that the exact clause should be checked against the standard. NEVER invent or guess a clause number.
 - For anything you cannot determine from the image, put a specific question in "needs_to_know" (e.g. "What is the horizontal distance from the socket to the sink edge?").
 - This is a reference aid, not a certified inspection.
 

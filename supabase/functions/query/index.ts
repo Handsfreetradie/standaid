@@ -7,6 +7,26 @@ import { detectTrade, standardTradeFromCode } from "./trade-detection.ts";
 // citations, gating) can tell them from the user's own uploads.
 const tagNcc = (rows: any[]) => rows.map((r: any) => ({ ...r, source: "ncc", is_normative: true }));
 
+// Clause guides (Phase 2): StandAId's own plain-English summaries of AS/NZS
+// clauses, shared like the NCC. Shaped like a chunk so they fuse into the same
+// pool, but flagged so context, citations and the UI treat them as a
+// simplified summary — never as the standard's text.
+const tagGuide = (rows: any[]) => rows.map((g: any) => ({
+  id: g.id,
+  standard_id: g.standard_id,
+  clause_number: g.clause_ref,
+  clause_title: g.title,
+  content: `[SIMPLIFIED SUMMARY written by StandAId — NOT the text of ${g.standard_code}. Cite clause ${g.clause_ref} of ${g.standard_code} by number only; tell the tradie to verify against the current clause.]\n${g.search_text}`,
+  chunk_index: 0,
+  chunk_type: "guide",
+  is_normative: true,
+  similarity: g.similarity ?? 0.5,
+  rank: g.rank,
+  source: "guide",
+  guide_of: g.standard_code,
+  related_ncc: g.related_ncc || [],
+}));
+
 // State/territory named in the question, for NCC state variations. Without a
 // per-profile state (not stored yet) this is the only signal we have; null
 // means national clauses only.
@@ -462,7 +482,7 @@ serve(async (req) => {
     )].join(" or ");
 
     // Phase 2: all expensive operations in parallel
-    const [embResponse, expandedEmbResponse, keywordChunksResult, clauseResult, ownedStandardsResult, nccFtsResult, nccClauseResult] = await Promise.all([
+    const [embResponse, expandedEmbResponse, keywordChunksResult, clauseResult, ownedStandardsResult, nccFtsResult, guideFtsResult, nccClauseResult] = await Promise.all([
       fetch("https://api.openai.com/v1/embeddings", {
         method: "POST",
         headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
@@ -495,9 +515,12 @@ serve(async (req) => {
       // mapping, codeToStdId and citation resolution treat them like any
       // other standard. They never appear in standard_chunks/figures lookups
       // keyed on ownedStandardIds — there are simply no rows there for them.
-      supabase.from("standards").select("id, standard_code, title, source").or(`${ownershipFilter},source.eq.ncc`),
+      supabase.from("standards").select("id, standard_code, title, source").or(`${ownershipFilter},source.eq.ncc,source.eq.guide`),
       ftsQuery
         ? supabase.rpc("match_ncc_chunks_fts", { query_text: ftsQuery, match_count: 10, p_states: nccStates })
+        : Promise.resolve({ data: [] }),
+      ftsQuery
+        ? supabase.rpc("match_clause_guides_fts", { query_text: ftsQuery, match_count: 6 })
         : Promise.resolve({ data: [] }),
       nccClauseMatches.length > 0
         ? supabase
@@ -542,6 +565,7 @@ serve(async (req) => {
     let vectorChunks1: any[] = [];
     let nccVectorChunks1: any[] = [];
     let nccVectorChunks2: any[] = [];
+    let guideVectorChunks: any[] = [];
     let feedbackCorrections: Array<{ question_text: string; user_comment: string }> = [];
     // Hoisted so the cache-write step near the end of a cache MISS can reuse
     // the same embedding — no second OpenAI call needed either way.
@@ -646,7 +670,7 @@ serve(async (req) => {
         }
       }
 
-      const [chunksResult, correctionsResult, nccResult] = await Promise.all([
+      const [chunksResult, correctionsResult, nccResult, guideResult] = await Promise.all([
         supabase.rpc("match_chunks", {
           query_embedding: queryEmbedding,
           match_user_id: userId,
@@ -665,9 +689,11 @@ serve(async (req) => {
           match_count: 10,
           p_states: nccStates,
         }),
+        supabase.rpc("match_clause_guides", { query_embedding: queryEmbedding, match_threshold: 0.30, match_count: 6 }),
       ]);
       if (!chunksResult.error && chunksResult.data?.length) vectorChunks1 = chunksResult.data;
       if (!nccResult.error && nccResult.data?.length) nccVectorChunks1 = tagNcc(nccResult.data);
+      if (!guideResult.error && guideResult.data?.length) guideVectorChunks = tagGuide(guideResult.data);
       if (!correctionsResult.error && correctionsResult.data?.length) feedbackCorrections = correctionsResult.data;
     }
 
@@ -716,6 +742,24 @@ serve(async (req) => {
       ...tagNcc(nccClauseResult.data || []),
     ].map((c: any) => ({ ...c, similarity: 1.0 }));
     const nccKeywordChunks: any[] = tagNcc(nccFtsResult.data || []);
+    // Guides are a fallback for tradies who don't own the standard. If the
+    // user's own upload already has the real clause in the pool, the summary
+    // adds nothing but noise — drop it in favour of the real text.
+    const ownedCodeById = new Map<string, string>(
+      (ownedStandardsResult.data || []).filter((s: any) => s.source !== "ncc" && s.source !== "guide")
+        .map((s: any) => [s.id, (s.standard_code || s.title || "").replace(/\bNZS\b/gi, "").replace(/[^a-z0-9]/gi, "").toLowerCase()])
+    );
+    const ownedClauseKeys = new Set<string>();
+    for (const c of [...vectorChunks1, ...vectorChunks2, ...keywordChunks, ...(clauseResult.data || [])]) {
+      const code = ownedCodeById.get(c.standard_id);
+      if (code) ownedClauseKeys.add(`${code}::${(c.clause_number || "").toString().trim().toUpperCase()}`);
+    }
+    const unshadowed = (list: any[]) => list.filter((g: any) => {
+      const code = (g.guide_of || "").replace(/\bNZS\b/gi, "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+      return !ownedClauseKeys.has(`${code}::${(g.clause_number || "").toString().trim().toUpperCase()}`);
+    });
+    guideVectorChunks = unshadowed(guideVectorChunks);
+    const guideKeywordChunks: any[] = unshadowed(tagGuide(guideFtsResult.data || []));
     // NCC vector hits count as real similarity signal too (see maxVectorSim).
     for (const c of [...nccVectorChunks1, ...nccVectorChunks2]) {
       if (!seenVectorIds.has(c.id)) { seenVectorIds.add(c.id); vectorChunks.push(c); }
@@ -729,6 +773,8 @@ serve(async (req) => {
     vectorChunks2 = filterCrossTrade(vectorChunks2);
     nccVectorChunks1 = filterCrossTrade(nccVectorChunks1);
     nccVectorChunks2 = filterCrossTrade(nccVectorChunks2);
+    guideVectorChunks = filterCrossTrade(guideVectorChunks);
+    const guideKeywordChunksFiltered = filterCrossTrade(guideKeywordChunks);
     const keywordChunksFiltered = filterCrossTrade(keywordChunks);
     const nccKeywordChunksFiltered = filterCrossTrade(nccKeywordChunks);
     const clauseChunksFiltered = filterCrossTrade(clauseChunks);
@@ -760,6 +806,9 @@ serve(async (req) => {
     addRanked(nccVectorChunks1, 1.0);
     addRanked(nccVectorChunks2, 1.0);
     addRanked(nccKeywordChunksFiltered, 0.8);
+    // Guides rank below real sources — they're the fallback, not the authority.
+    addRanked(guideVectorChunks, 0.7);
+    addRanked(guideKeywordChunksFiltered, 0.6);
     const clauseIds = new Set(clauseChunksFiltered.map((c: any) => c.id));
     const fused = [...rrf.values()]
       .sort((a, b) => b.score - a.score)
@@ -1116,7 +1165,9 @@ serve(async (req) => {
           const std = standardMap.get(chunk.standard_id);
           const where = chunk.source === "ncc"
             ? ` (NCC${chunk.state ? ` — ${chunk.state} variation` : ""}; © ABCB, CC BY 4.0)`
-            : ` (Page ${chunk.page_number || "N/A"})`;
+            : chunk.source === "guide"
+              ? ` (StandAId SIMPLIFIED SUMMARY of ${chunk.guide_of} — not the standard's text)`
+              : ` (Page ${chunk.page_number || "N/A"})`;
           return `[Source ${i + 1} — ${std?.standard_code || "Unknown"} ${std?.version || ""} Clause ${chunk.clause_number || "N/A"}${where}${chunkTag(chunk)}]
 ${chunk.content}`;
         }).join("\n\n") + tableRowContext + figCaptionContext + correctionsContext +
@@ -1190,7 +1241,8 @@ ${chunk.content}`;
 
     const staticSystemPrompt = buildStaticSystemPrompt(trade);
     const hasNccContext = matchedChunks.some((c: any) => c.source === "ncc");
-    const contextSystemBlock = buildContextSystemBlock(contextChunks, matchedPhrases, hasNccContext);
+    const hasGuideContext = matchedChunks.some((c: any) => c.source === "guide");
+    const contextSystemBlock = buildContextSystemBlock(contextChunks, matchedPhrases, hasNccContext, hasGuideContext);
     const queryId = crypto.randomUUID();
     // Calibrated for genuine text-embedding-3-small similarities (real matches
     // ~0.45–0.65; 0.80 was unreachable and flagged nearly every answer). An
@@ -1603,7 +1655,7 @@ User's question/context: ${effectiveQuestion}` : "";
           const resolveStdId = (code: string | null | undefined): string | null => {
             if (!code) return null;
             const norm = normCode(code);
-            return [...codeToStdId.entries()].find(([k]) => k.includes(norm) || norm.includes(k))?.[1] ?? null;
+            return codeToStdId.get(norm) ?? [...codeToStdId.entries()].find(([k]) => k.includes(norm) || norm.includes(k))?.[1] ?? null;
           };
 
           // The standard-figures bucket is private, but rows store the public
@@ -1744,7 +1796,7 @@ User's question/context: ${effectiveQuestion}` : "";
             const cHint = normCode(c.standard_code || "");
             // Find the standard_id that best matches the AI's stated standard_code
             const hintStdId = cHint
-              ? ([...codeToStdId.entries()].find(([code]) => code.includes(cHint) || cHint.includes(code))?.[1] ?? null)
+              ? (codeToStdId.get(cHint) ?? [...codeToStdId.entries()].find(([code]) => code.includes(cHint) || cHint.includes(code))?.[1] ?? null)
               : null;
 
             if (hintStdId) {
@@ -1857,7 +1909,7 @@ User's question/context: ${effectiveQuestion}` : "";
               // document map) and use letter codes like H1D4/S42C1, so they
               // get their own test rather than the PDF-pipeline heuristics.
               const realClauseChunks = matchedChunks.filter((c: any) =>
-                c.source === "ncc"
+                c.source === "ncc" || c.source === "guide"
                   ? !!c.clause_number && c.chunk_type !== "glossary"
                   : isRealClause((c.clause_number || "").toString().trim()) && c.chunk_index !== 0,
               );
@@ -1933,6 +1985,23 @@ User's question/context: ${effectiveQuestion}` : "";
         // resolved to an NCC standard so the frontend never tries to clip one.
         {
           const isNccStd = (id: string | null | undefined) => !!id && standardMap.get(id)?.source === "ncc";
+          const isGuideStd = (id: string | null | undefined) => !!id && standardMap.get(id)?.source === "guide";
+          // Guide citations: the chip shows the REAL standard + clause with a
+          // "simplified summary" treatment and no PDF/page to open.
+          const guideChunks = matchedChunks.filter((mc: any) => mc.source === "guide");
+          for (const c of parsedResponse.citations || []) {
+            const want = (c.clause_number || "").toString().trim().toUpperCase();
+            const hit =
+              guideChunks.find((mc: any) => mc.standard_id === c.standard_id && (mc.clause_number || "").toString().trim().toUpperCase() === want) ||
+              (isGuideStd(c.standard_id) ? null : guideChunks.find((mc: any) => (mc.clause_number || "").toString().trim().toUpperCase() === want && !ownedClauseKeys.has(`${(mc.guide_of || "").replace(/\bNZS\b/gi, "").replace(/[^a-z0-9]/gi, "").toLowerCase()}::${want}`)));
+            if (!hit && !isGuideStd(c.standard_id)) continue;
+            if (hit) c.standard_id = hit.standard_id;
+            c.source = "guide";
+            c.standard_code = hit?.guide_of || (standardMap.get(c.standard_id)?.standard_code || "").replace(/ Guide$/, "");
+            c.standard_version = null;
+            c.page_number = null;
+            c.guide_title = hit?.clause_title || null;
+          }
           const nccChunks = matchedChunks.filter((mc: any) => mc.source === "ncc");
           for (const c of parsedResponse.citations || []) {
             const want = (c.clause_number || "").toString().trim().toUpperCase();
@@ -1949,15 +2018,15 @@ User's question/context: ${effectiveQuestion}` : "";
             c.page_number = null;
             if (hit?.figure_refs?.length) c.figure_refs = hit.figure_refs;
           }
-          parsedResponse.figures_referenced = (parsedResponse.figures_referenced || []).filter((r: any) => !isNccStd(r.standard_id));
-          parsedResponse.tables_referenced = (parsedResponse.tables_referenced || []).filter((r: any) => !isNccStd(r.standard_id));
+          parsedResponse.figures_referenced = (parsedResponse.figures_referenced || []).filter((r: any) => !isNccStd(r.standard_id) && !isGuideStd(r.standard_id));
+          parsedResponse.tables_referenced = (parsedResponse.tables_referenced || []).filter((r: any) => !isNccStd(r.standard_id) && !isGuideStd(r.standard_id));
           // The model sometimes names the same NCC clause twice under slightly
           // different standard_code spellings ("… Housing Provisions" vs "…
           // Housing Provisions (WA)"); the dedupe above ran before those were
           // normalised, so dedupe NCC citations again on standard_id + clause.
           const seenNcc = new Set<string>();
           parsedResponse.citations = (parsedResponse.citations || []).filter((c: any) => {
-            if (c.source !== "ncc") return true;
+            if (c.source !== "ncc" && c.source !== "guide") return true;
             const key = `${c.standard_id}::${(c.clause_number || "").toString().trim().toUpperCase()}`;
             if (seenNcc.has(key)) return false;
             seenNcc.add(key);
@@ -1976,7 +2045,7 @@ User's question/context: ${effectiveQuestion}` : "";
         if (tier === "free" && parsedResponse.citations) {
           let gatedAny = false;
           parsedResponse.citations = parsedResponse.citations.map((c: any) => {
-            if (c.source === "ncc") return c;
+            if (c.source === "ncc" || c.source === "guide") return c;
             gatedAny = true;
             return {
               ...c,

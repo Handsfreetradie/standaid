@@ -14,7 +14,7 @@ export function promptVersionSource(): string {
   // RETRIEVAL_VERSION: bump when what gets retrieved changes (not just how
   // it's worded) — e.g. adding the shared NCC index — so cached answers made
   // without the new sources aren't served as if they had them.
-  const RETRIEVAL_VERSION = "ncc-v1";
+  const RETRIEVAL_VERSION = "ncc-v1+guides-v1";
   return CORE_SYSTEM_PROMPT + JSON.stringify(TRADE_GUIDANCE) + JSON.stringify(EXAMPLES_BY_TRADE) + RETRIEVAL_VERSION;
 }
 
@@ -35,7 +35,11 @@ export function buildContextSystemBlock(
   contextChunks: string,
   matchedTradieTerms: string[] = [],
   hasNccSources = false,
+  hasGuideSources = false,
 ): string {
+  const guideNote = hasGuideSources
+    ? `\nNOTE ON SIMPLIFIED SUMMARIES: Some extracts are marked "StandAId SIMPLIFIED SUMMARY of <standard>". They are StandAId's own plain-English restatement of a clause, NOT the standard's text, and the user may not own that standard. You may use them to answer, and cite them with the REAL standard's name (e.g. "AS/NZS 3000") and clause number in "citations" — but never present the summary wording as a quote from the standard: put a short paraphrase in "relevant_text", and tell the tradie to verify the detail against the current clause. If a real extract from the same standard covers the same point, prefer the real extract.\n`
+    : "";
   // Sources marked "(NCC …)" come from the shared National Construction Code
   // index, not the user's uploads. They cite exactly like a standard — the
   // Source label's name is the standard_code — but the tradie opens them on
@@ -50,7 +54,7 @@ export function buildContextSystemBlock(
     : "";
 
   return `---
-${conversationNote}${tradieTermNote}${nccNote}
+${conversationNote}${tradieTermNote}${nccNote}${guideNote}
 RETRIEVED STANDARD EXTRACTS:
 ${contextChunks}
 

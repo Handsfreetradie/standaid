@@ -16,6 +16,7 @@ import {
 } from "@/lib/audit";
 import { generateAuditReportPdf, urlToBase64, type ReportPhoto } from "@/lib/auditReport";
 import MicButton from "@/components/MicButton";
+import { WhyThisMatters } from "@/components/audit/WhyThisMatters";
 
 const sb = supabase as any;
 
@@ -31,6 +32,9 @@ const AuditDetail = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { data: profile } = useProfile();
+  // States the tradie works in (Profile) — picks which NCC state variations
+  // the "why this matters" panel shows alongside the national clause.
+  const profileStates: string[] = Array.isArray((profile as any)?.states) ? (profile as any).states : [];
   const [audit, setAudit] = useState<any>(null);
   const [photos, setPhotos] = useState<AuditPhoto[]>([]);
   const [urls, setUrls] = useState<Record<string, string>>({});
@@ -338,6 +342,7 @@ const AuditDetail = () => {
                         ))}
                       </div>
                     )}
+                    <WhyThisMatters trade={audit?.trade} label={p.label} states={profileStates} />
                     {/* Q&A loop — always available, not just when the AI has an
                         outstanding question, so the tradie can flag something
                         the AI missed entirely. */}

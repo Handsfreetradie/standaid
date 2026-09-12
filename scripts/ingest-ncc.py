@@ -11,9 +11,8 @@ by the embed-ncc function).
 
 What goes where
   - clause text            -> chunk_type 'text',  is_live true
-  - tables (CALS <table>)  -> chunk_type 'table', is_live false, needs_legal_review true
-                              (held back pending legal; embedded anyway so
-                              going live later is one UPDATE)
+  - tables (CALS <table>)  -> chunk_type 'table', live (CC BY covers the text;
+                              only images/photographs are outside the licence)
   - figures/images         -> never stored. The licence excludes images. We keep
                               the figure number + title in figure_refs and a
                               link to the clause on ncc.abcb.gov.au instead.
@@ -65,7 +64,7 @@ PUBLICATIONS = {
     "ncc-2025-volume-two":             ("vol2",    "a0000000-0000-4000-8000-00000000cc02", "volume-two"),
     "ncc-2025-volume-three":           ("vol3",    "a0000000-0000-4000-8000-00000000cc03", "volume-three"),
     "ncc-2025-abcb-housing-provisions":("housing", "a0000000-0000-4000-8000-00000000cc04", "housing-provisions"),
-    "ncc-2025-livable-housing-design": ("livable", "a0000000-0000-4000-8000-00000000cc05", None),  # no verified web path
+    "ncc-2025-livable-housing-design": ("livable", "a0000000-0000-4000-8000-00000000cc05", None),  # not on ncc.abcb.gov.au — see LIVABLE_URL
 }
 PUB_LABEL = {
     "vol1": "NCC 2025 Volume One", "vol2": "NCC 2025 Volume Two", "vol3": "NCC 2025 Volume Three",
@@ -73,6 +72,9 @@ PUB_LABEL = {
     "glossary": "NCC 2025 Schedule 1 Definitions",
 }
 GLOSSARY_STANDARD_ID = "a0000000-0000-4000-8000-00000000cc06"
+# The Livable Housing Design Standard isn't published clause-by-clause on
+# ncc.abcb.gov.au; link to ABCB's page for the standard itself.
+LIVABLE_URL = "https://www.abcb.gov.au/resources/publications/abcb-livable-housing-design-standard"
 GLOSSARY_SOURCE_FOLDER = "ncc-2025-volume-one"  # Schedule 1 is identical in every volume; ingest once
 
 ALL_CLASSES = ("1a", "1b", "2", "3", "4", "5", "6", "7a", "7b", "8", "9a", "9b", "9c", "10a", "10b", "10c")
@@ -327,7 +329,7 @@ def crawl_url_map(cache_path):
     print(f"  crawled {len(found)} part/spec pages -> {cache_path}")
 
 def clause_url(pub_slug, ctx, xml_id, state=None):
-    fallback = f"{WEB_BASE}/{pub_slug}" if pub_slug else "https://ncc.abcb.gov.au/editions/ncc-2025"
+    fallback = f"{WEB_BASE}/{pub_slug}" if pub_slug else LIVABLE_URL
     if not pub_slug or not ctx.get("part_num"):
         return fallback
     num = re.sub(r"[^a-z0-9]", "", ctx["part_num"].lower())
@@ -505,7 +507,7 @@ def build_publication(folder, pub, standard_id, pub_slug):
                 "content": content, "chunk_index": 0, "chunk_type": "table", "state": state,
                 "building_classes": facets, "figure_refs": [], "source_url": url,
                 "content_hash": hashlib.sha256(content.encode()).hexdigest(),
-                "is_live": False, "needs_legal_review": True,
+                "is_live": True, "needs_legal_review": False,
             })
             stats["table"] += 1
 

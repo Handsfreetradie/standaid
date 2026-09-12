@@ -26,12 +26,17 @@ interface Citation {
   page_number?: number;
   relevant_text?: string;
   gated?: boolean;
-  // Shared NCC index (© ABCB, CC BY 4.0). Opens the clause on ncc.abcb.gov.au
-  // instead of a PDF page; figures are linked, never stored (outside the licence).
-  source?: "ncc";
+  // "ncc": shared NCC index (© ABCB, CC BY 4.0) — opens the clause on
+  // ncc.abcb.gov.au instead of a PDF page; figures are linked, never stored.
+  // "guide": StandAId's own simplified summary of a clause — nothing to open,
+  // shown with a verify-against-the-standard treatment.
+  source?: "ncc" | "guide";
   source_url?: string;
   figure_refs?: Array<{ number: string; title: string; url: string }>;
+  guide_title?: string | null;
 }
+
+const GUIDE_DISCLAIMER = "Simplified summary — always verify against the current clause of the standard.";
 
 const NCC_ATTRIBUTION =
   "The National Construction Code 2025 was provided by the Australian Building Codes Board under the CC BY 4.0 licence.";
@@ -638,6 +643,16 @@ const Chat = () => {
                             🔒 {citation.clause_number}
                             {citation.standard_code ? ` (${citation.standard_code})` : ""}
                           </Badge>
+                        ) : citation.source === "guide" ? (
+                          <span
+                            key={idx}
+                            title={`${citation.guide_title ? citation.guide_title + " — " : ""}${GUIDE_DISCLAIMER}`}
+                            className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold border border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+                          >
+                            <span className="rounded-sm bg-amber-500 px-1 text-[9px] font-bold uppercase leading-4 text-white">Guide</span>
+                            {citation.clause_number}
+                            {citation.standard_code ? ` (${citation.standard_code})` : ""}
+                          </span>
                         ) : citation.source === "ncc" ? (
                           <a
                             key={idx}
@@ -734,19 +749,22 @@ const Chat = () => {
                   {!msg.isTyping && (() => {
                     const codes = new Set<string>();
                     let hasNcc = false;
+                    let hasGuide = false;
                     msg.citations?.forEach((c) => {
                       if (c.source === "ncc") { hasNcc = true; return; }
+                      if (c.source === "guide") { hasGuide = true; return; }
                       if (c.standard_code) codes.add(c.standard_code);
                     });
                     msg.figures_referenced?.forEach((f) => f.standard_code && codes.add(f.standard_code));
                     msg.tables_referenced?.forEach((t) => t.standard_code && codes.add(t.standard_code));
-                    if (codes.size === 0 && !hasNcc) return null;
+                    if (codes.size === 0 && !hasNcc && !hasGuide) return null;
                     return (
                       <div className="mt-2 space-y-0.5 text-[10px] text-muted-foreground/70">
                         {codes.size > 0 && (
                           <p>Sourced from {Array.from(codes).join(", ")} — © Standards Australia. Shown under your personal licence.</p>
                         )}
                         {hasNcc && <p>Source: NCC 2025, © ABCB, CC BY 4.0. {NCC_ATTRIBUTION}</p>}
+                        {hasGuide && <p>Guide chips are StandAId's own simplified summaries, not the standard's text. {GUIDE_DISCLAIMER}</p>}
                       </div>
                     );
                   })()}
