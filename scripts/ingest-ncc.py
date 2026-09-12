@@ -2,26 +2,29 @@
 """
 StandAId — NCC 2025 ingest (shared index, migration 20260912000000_ncc_shared_index.sql)
 
-Reads the ABCB's official NCC 2025 XML dataset (DITA-style, one folder per
-publication) and turns it into rows for public.ncc_chunks. No PDF, no OCR, no
-vision model — every clause number, title, subclause, list item, building-class
-facet, state variation, table and figure is already tagged in the XML, so the
-only spend is OpenAI embeddings (~$0.015 for the whole code, done server-side
-by the embed-ncc function).
+Reads the ABCB's official NCC 2025 XML dataset (data.gov.au, v1.2 — one
+contents.xml per publication) and turns it into rows for public.ncc_chunks.
+No PDF, no OCR, no vision model — every clause number, title, subclause,
+list item, building-class facet, state variation, table and figure is already
+tagged in the XML, so the only spend is OpenAI embeddings (~$0.015 for the
+whole code, done server-side by the embed-ncc function).
 
 What goes where
   - clause text            -> chunk_type 'text',  is_live true
-  - tables (CALS <table>)  -> chunk_type 'table', live (CC BY covers the text;
+  - state variations       -> separate rows tagged state='WA' etc. (clause-level,
+                              subclause-level and table variations)
+  - tables (HTML <table>)  -> chunk_type 'table', live (CC BY covers the text;
                               only images/photographs are outside the licence)
   - figures/images         -> never stored. The licence excludes images. We keep
                               the figure number + title in figure_refs and a
                               link to the clause on ncc.abcb.gov.au instead.
   - Schedule 1 definitions -> chunk_type 'glossary' under the Definitions row
+  - Livable Housing        -> ingested but held dark (adapted from a third-party
+                              guideline — see the legal review)
 
-Membership: each publication folder is a superset dump (Volume One's folder
-contains Housing Provisions clause files too), so a clause belongs to a
-publication only if that publication's FlattenedFile.xml conrefs it. State
-variation files (…-WA.xml) are referenced the same way and carry state='WA'.
+Source: unzip each ncc-2025-<pub>-v1.2.zip from
+https://data.gov.au/data/dataset/national-construction-code-2025-version-1-2
+into NCC_SOURCE_DIR/<zip name without -v1.2.zip>/contents.xml.
 
 Usage
   python3 scripts/ingest-ncc.py                      # dry run: parse, stats, sample -> scratch JSON, no network
@@ -51,8 +54,8 @@ from collections import Counter, defaultdict
 
 # ── config ──────────────────────────────────────────────────────────────────
 
-EDITION = "ncc_2025"
-SOURCE_DIR = os.environ.get("NCC_SOURCE_DIR", "/Users/kyledixon/Documents/Standards & References/NCC")
+EDITION = "ncc_2025_v1_2"     # dataset v1.2 (data.gov.au, released 2026-06-18); bump per dataset release
+SOURCE_DIR = os.environ.get("NCC_SOURCE_DIR", "/Users/kyledixon/Documents/Standards & References/NCC-2025-v1.2")
 OUT_DIR = os.environ.get("NCC_OUT_DIR", "/tmp/ncc-ingest")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://wyxeqkgpwkcckyntqcns.supabase.co")
 EMBED_PRICE_PER_M = 0.02  # USD per 1M tokens
@@ -63,7 +66,7 @@ PUBLICATIONS = {
     "ncc-2025-volume-one":             ("vol1",    "a0000000-0000-4000-8000-00000000cc01", "volume-one"),
     "ncc-2025-volume-two":             ("vol2",    "a0000000-0000-4000-8000-00000000cc02", "volume-two"),
     "ncc-2025-volume-three":           ("vol3",    "a0000000-0000-4000-8000-00000000cc03", "volume-three"),
-    "ncc-2025-abcb-housing-provisions":("housing", "a0000000-0000-4000-8000-00000000cc04", "housing-provisions"),
+    "ncc-2025-housing-provisions":     ("housing", "a0000000-0000-4000-8000-00000000cc04", "housing-provisions"),
     "ncc-2025-livable-housing-design": ("livable", "a0000000-0000-4000-8000-00000000cc05", None),  # not on ncc.abcb.gov.au — see LIVABLE_URL
 }
 PUB_LABEL = {
@@ -79,7 +82,6 @@ GLOSSARY_SOURCE_FOLDER = "ncc-2025-volume-one"  # Schedule 1 is identical in eve
 
 ALL_CLASSES = ("1a", "1b", "2", "3", "4", "5", "6", "7a", "7b", "8", "9a", "9b", "9c", "10a", "10b", "10c")
 STATES = ("NT", "WA", "SA", "QLD", "VIC", "NSW", "TAS", "ACT")
-STATE_RE = re.compile(r"-(NT|WA|SA|QLD|VIC|NSW|TAS|ACT)\.xml$")
 CALLOUT_LABEL = {
     "info": "Explanatory information", "notes": "Note", "limitation": "Limitation",
     "application": "Application", "exemption": "Exemption",
@@ -89,13 +91,25 @@ TARGET_CHUNK_CHARS = 1800
 MAX_EMBED_CHARS = 24000  # ~6k tokens, well under the 8191 limit
 
 # ── xml helpers ─────────────────────────────────────────────────────────────
+# Dataset v1.1+ format: ONE contents.xml per publication (ncc-volume /
+# ncc-standard), everything inline — no conrefs. Hierarchy is
+#   ncc-section[type=section|other|schedule, num] > part[num] | specification[num]
+#     > (subtopic | spec-topic)? > clause[id, building] > subclause[num, state] > content
+# State variations are inline: <clause-variation state=… type=REPLACE|INSERT>
+# (under a part = a whole clause for that state; under a clause = replaces
+# that clause), <subclause-variation state=…> under a clause/subclause, and
+# <table-reference-variation state=…>. Schedules (state sections) only hold
+# <variation> pointers to those ids, so they are skipped. Tables are HTML
+# (table/thead/tbody/tr/th/td), cross-refs are <a>, callouts carry
+# callout-type, MathML is inline. The Livable Housing Design Standard uses
+# <standard-clause> instead of <clause>.
 
 def local(tag):
     return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else ""
 
 def child_text(el, name):
     c = next((c for c in el if local(c.tag) == name), None)
-    return inline(c).strip() if c is not None else ""
+    return clean(inline(c)) if c is not None else ""
 
 def clean(s):
     return re.sub(r"[ \t]+", " ", re.sub(r"\s*\n\s*", " ", s or "")).strip()
@@ -120,14 +134,15 @@ def math_text(el):
         return ""
     return "".join(math_text(k) for k in kids)
 
+SKIP_INLINE = {"image-reference", "table-reference", "table-reference-variation", "clause-variation",
+               "subclause-variation", "img", "col"}
+
 def inline(el):
     """Flatten an element to a single line of text (inline context)."""
     if el is None:
         return ""
     t = local(el.tag)
-    if t == "delText":            # track-changes deletion — not part of the published text
-        return el.tail or ""
-    if t in ("image-reference", "table-reference", "meta", "clause-variation", "specification-variation"):
+    if t in SKIP_INLINE:
         return el.tail or ""
     if t in ("mathML", "math", "equation-inline", "equation-block"):
         return " " + math_text(el) + " " + (el.tail or "")
@@ -137,13 +152,13 @@ def inline(el):
     out.append(el.tail or "")
     return "".join(out)
 
-def list_label(depth, outputclass, i):
-    if outputclass == "numbered":
+def list_label(depth, cls, i):
+    if cls == "numbered":
         return f"({i})"
-    if outputclass == "alpha" or depth == 0:
-        return f"({chr(ord('a') + i - 1) if i <= 26 else i})"
-    if depth == 1:
+    if cls == "lower-roman" or (cls != "alpha" and depth == 1):
         return f"({roman(i)})"
+    if cls == "alpha" or depth == 0:
+        return f"({chr(ord('a') + i - 1) if i <= 26 else i})"
     return f"({chr(ord('A') + i - 1) if i <= 26 else i})"
 
 def roman(n):
@@ -156,126 +171,132 @@ def roman(n):
 
 # ── block rendering ─────────────────────────────────────────────────────────
 
+CALLOUT_LABEL.update({"explanatory": "Explanatory information", "information": "Explanatory information"})
+
 class Rendered:
     def __init__(self):
         self.lines = []        # text lines of the clause body
-        self.tables = []       # [(num, title, text)] inline tables found
-        self.figures = []      # [(num, title)] inline image refs found
-        self.variations = []   # ["SA REPLACE", ...]
+        self.tables = []       # [(num, title, text, xml_id, state)]
+        self.figures = []      # [(num, title)]
 
 def render_list(el, depth, r, indent):
-    oc = el.get("outputclass", "")
+    cls = el.get("class", "")
     i = 0
     for li in el:
         if local(li.tag) != "li":
             continue
         i += 1
-        label = list_label(depth, oc, i) if local(el.tag) == "ol" else "•"
-        # li text = own text + inline children, excluding nested lists/blocks
+        label = list_label(depth, cls, i) if local(el.tag) == "ol" else "•"
         head = [li.text or ""]
         nested = []
         for c in li:
             ct = local(c.tag)
             if ct in ("ol", "ul"):
                 nested.append(c); head.append(c.tail or "")
-            elif ct in ("p",):
-                head.append(inline(c))
-            elif ct in ("table-reference", "image-reference", "callout"):
-                render_block(c, r, indent + "  ")
-                head.append(c.tail or "")
+            elif ct in ("table-reference", "table-reference-variation", "image-reference", "callout"):
+                render_block(c, r, indent + "  "); head.append(c.tail or "")
             else:
                 head.append(inline(c))
         r.lines.append(f"{indent}{label} {clean(''.join(head))}")
         for n in nested:
             render_list(n, depth + 1, r, indent + "  ")
 
-def render_table(tref, r, fallback_num=""):
-    num = child_text(tref, "num") or fallback_num
+def render_table(tref, r, indent=""):
+    num = tref.get("num") or child_text(tref, "num")
     title = child_text(tref, "title")
+    state = tref.get("state") or None
     table = next((c for c in tref if local(c.tag) == "table"), None)
+    label = f"[See Table {num}{' — ' + title if title else ''}{' (' + state + ' variation)' if state else ''}]"
+    r.lines.append(indent + label)
     if table is None:
-        r.lines.append(f"[See Table {num}{' — ' + title if title else ''}]")
         return
     rows = []
-    for tg in table.iter():
-        if local(tg.tag) == "row":
-            cells = [clean(inline(e)) for e in tg if local(e.tag) == "entry"]
+    for tr in table.iter():
+        if local(tr.tag) == "tr":
+            cells = [clean(inline(c)) for c in tr if local(c.tag) in ("td", "th")]
             rows.append(" | ".join(cells))
     notes = [clean(inline(dn)) for dn in tref.iter() if local(dn.tag) == "desc-note"]
     text = "\n".join(rows)
     if notes:
         text += "\n" + "\n".join(f"Note: {n}" for n in notes)
-    r.tables.append((num, title, text))
-    r.lines.append(f"[See Table {num}{' — ' + title if title else ''}]")
+    r.tables.append((num, title, text, tref.get("id"), state))
 
 def render_block(el, r, indent=""):
     t = local(el.tag)
-    if t in ("meta", "sptc", "title", "archive-num", "num"):
+    if t in ("sptc", "title", "num", "img", "col", "clause-variation"):
         return
-    if t == "clause-variation" or t == "specification-variation":
-        v = el.get("variation"); vt = el.get("variation-type", "")
-        if v:
-            r.variations.append(f"{v} {vt}".strip())
-        return
-    if t == "subclause":
-        num = child_text(el, "num")
-        if el.get("variation"):
-            # <subclause outputclass="state-variation" variation="NSW" variation-type="REPLACE">
-            # sits inline after the national subclause it replaces/inserts.
-            vt = (el.get("variation-type") or "varies").lower()
-            r.lines.append(f"{indent}[{el.get('variation')} variation — {vt}s subclause ({num}) below]")
-        parts = []
+    if t in ("subclause", "subclause-variation"):
+        num = el.get("num") or ""
+        first = True
         for c in el:
             ct = local(c.tag)
-            if ct in ("title", "num"):
+            if ct in ("title", "num", "subclause-variation"):
                 continue
-            if ct == "p":
-                parts.append(clean(inline(c)))
-            elif ct in ("ol", "ul"):
+            if ct == "content":
+                parts = []
+                for cc in c:
+                    cct = local(cc.tag)
+                    if cct == "num":
+                        continue
+                    if cct == "p":
+                        parts.append(clean(inline(cc)))
+                    elif cct in ("ol", "ul"):
+                        r.lines.append(f"{indent}({num}) {' '.join(parts)}".rstrip() if first else f"{indent}{' '.join(parts)}".rstrip())
+                        first = False; parts = []
+                        render_list(cc, 0, r, indent + "  ")
+                    else:
+                        if parts:
+                            r.lines.append(f"{indent}({num}) {' '.join(parts)}" if first else indent + " ".join(parts)); first = False; parts = []
+                        render_block(cc, r, indent + "  ")
                 if parts:
-                    r.lines.append(f"{indent}({num}) {' '.join(parts)}"); parts = []
-                    render_list(c, 0, r, indent + "  ")
-                else:
-                    r.lines.append(f"{indent}({num})"); render_list(c, 0, r, indent + "  ")
+                    r.lines.append(f"{indent}({num}) {' '.join(parts)}" if first else indent + " ".join(parts)); first = False
             else:
                 render_block(c, r, indent + "  ")
-        if parts:
-            r.lines.append(f"{indent}({num}) {' '.join(parts)}")
         return
     if t == "p":
-        s = clean(inline(el))
-        if s:
-            r.lines.append(indent + s)
+        s_ = clean(inline(el))
+        if s_:
+            r.lines.append(indent + s_)
+        return
+    if t in ("h2", "h3", "h4"):
+        s_ = clean(inline(el))
+        if s_:
+            r.lines.append(indent + s_ + ":")
         return
     if t in ("ol", "ul"):
         render_list(el, 0, r, indent); return
     if t == "callout":
-        kind = next((c.get("ncc-info-type", "") for c in el if local(c.tag) == "callout-type"), "")
-        label = CALLOUT_LABEL.get(kind, "Note")
+        label = CALLOUT_LABEL.get(el.get("callout-type", ""), "Note")
         body = Rendered()
         for c in el:
-            if local(c.tag) != "callout-type":
-                render_block(c, body, "")
+            render_block(c, body, "")
+        r.tables.extend(body.tables); r.figures.extend(body.figures)
         if body.lines:
             r.lines.append(f"{indent}{label}: " + " ".join(body.lines))
         return
-    if t == "table-reference":
-        render_table(el, r); return
+    if t in ("table-reference", "table-reference-variation"):
+        render_table(el, r, indent); return
     if t == "image-reference":
-        num = child_text(el, "num"); title = child_text(el, "title")
+        num = el.get("num") or child_text(el, "num"); title = child_text(el, "title")
         if num or title:
             r.figures.append((num, title))
             r.lines.append(f"{indent}[See Figure {num}{' — ' + title if title else ''}]")
         return
     if t in ("equation-block",):
         r.lines.append(indent + math_text(el)); return
-    if t in ("section", "intro-part", "glossBody", "desc-note"):
-        for c in el:
-            render_block(c, r, indent)
-        return
-    # unknown container: descend
+    # content, section, desc-note, glossdef, page and anything unknown: descend
     for c in el:
         render_block(c, r, indent)
+
+def excluded_classes(el):
+    """building="Class 1a,Class 1b,…" lists the classes a clause is HIDDEN for
+    (Volume One clauses carry the Class 1/10 set). Inverted into "applies to";
+    no attribute = unknown."""
+    raw = el.get("building") or ""
+    if not raw:
+        return []
+    excl = {x.strip().replace("Class ", "") for x in raw.split(",") if x.strip()}
+    return [c for c in ALL_CLASSES if c not in excl]
 
 # ── slugs / urls ────────────────────────────────────────────────────────────
 
@@ -337,43 +358,191 @@ def clause_url(pub_slug, ctx, xml_id, state=None):
     page = (state and URL_MAP.get((pub_slug, state, num))) or URL_MAP.get((pub_slug, kind, num))
     return f"{page}#{xml_id}" if page else fallback
 
-# ── flattened map walk ──────────────────────────────────────────────────────
+# ── publication walk (v1.2 single document) ────────────────────────────────
 
-def walk_map(el, ctx, refs, glossary):
-    t = local(el.tag)
-    if t == "topicset":
-        ctx = {**ctx, "section_num": el.get("section-num", ""), "section_title": el.get("navtitle", "")}
-    elif t == "part":
-        ctx = {**ctx, "kind": "part", "part_num": child_text(el, "num"), "part_title": child_text(el, "title")}
-    elif t == "specification":
-        ctx = {**ctx, "kind": "specification", "part_num": child_text(el, "num"), "part_title": child_text(el, "title")}
-    elif t == "clause" and el.get("conref"):
-        refs.append((el.get("conref"), el.get("id"), dict(ctx)))
-        return
-    elif t == "abcb-glossentry":
-        glossary.append(el)
-        return
-    for c in el:
-        walk_map(c, ctx, refs, glossary)
+def ancestors(el, parent):
+    while el is not None:
+        yield el
+        el = parent.get(el)
 
-# ── clause file -> chunks ───────────────────────────────────────────────────
+def context_for(el, parent):
+    """section/part/spec context for URL + header from the element's ancestors."""
+    ctx = {}
+    for a in ancestors(el, parent):
+        t = local(a.tag)
+        if t in ("part", "specification") and "part_num" not in ctx:
+            ctx["kind"] = t
+            ctx["part_num"] = a.get("num") or child_text(a, "num")
+            ctx["part_title"] = child_text(a, "title")
+        elif t == "ncc-section" and "section_num" not in ctx:
+            n = a.get("num") or ""
+            ctx["section_num"] = f"Section {n}" if a.get("type") == "section" else n
+            ctx["section_title"] = child_text(a, "title")
+    return ctx
 
-def parse_clause_file(path):
-    root = ET.parse(path).getroot()
-    if local(root.tag) != "clause":
-        # part/spec/other container referenced as a clause — render whatever is there
-        pass
-    # <facet building="Class 1a"/> lists the classes a clause is HIDDEN for (an
-    # exclusion list — Volume One clauses carry Class 1a/1b/10a/10b/10c, which
-    # Volume One doesn't cover). Invert it into "applies to". No facets = unknown.
-    excluded = {f.get("building", "").replace("Class ", "") for f in root.iter() if local(f.tag) == "facet" and f.get("building")}
-    facets = [c for c in ALL_CLASSES if c not in excluded] if excluded else []
-    sptc = child_text(root, "sptc")
-    title = child_text(root, "title")
+def make_chunks(*, pub, standard_id, pub_slug, xml_id, sptc, title, body_r, state, ctx, facets, stats, chunks, prefix_note=None):
+    # composite ids ("<clause id>:NSW") anchor to the clause itself
+    url = clause_url(pub_slug, ctx, xml_id.split(":")[0], state)
+    part_num, part_title = ctx.get("part_num", ""), ctx.get("part_title", "")
+    header = f"{PUB_LABEL[pub]}" + (f", {'Specification' if ctx.get('kind') == 'specification' else 'Part'} {part_num} {part_title}" if part_num else "")
+    if state:
+        header += f" — {state} variation"
+    head_line = f"{sptc} {title}".strip()
+    figure_refs = []
+    seen_f = set()
+    for num, ftitle in body_r.figures:
+        k = norm_num(num) or ftitle
+        if k in seen_f: continue
+        seen_f.add(k); figure_refs.append({"number": norm_num(num), "title": ftitle, "url": url})
+    body_lines = ([prefix_note] if prefix_note else []) + list(body_r.lines)
+    if not body_lines and not sptc:
+        stats["empty"] += 1; return
+    for i, g in enumerate(split_body(body_lines)):
+        content = f"{header}\n{head_line}" + (" (cont.)" if i else "") + f"\n\n{g}"
+        chunks.append({
+            "standard_id": standard_id, "edition": EDITION, "publication": pub, "xml_id": xml_id,
+            "clause_number": sptc or None, "clause_title": title or None,
+            "part_number": part_num or None, "part_title": part_title or None,
+            "content": content, "chunk_index": i, "chunk_type": "text", "state": state,
+            "building_classes": facets, "figure_refs": figure_refs, "source_url": url,
+            "content_hash": hashlib.sha256(content.encode()).hexdigest(),
+            "is_live": True, "needs_legal_review": False,
+        })
+        stats["text"] += 1
+    for (tn, tt, ttxt, tid, tstate) in body_r.tables:
+        st = tstate or state
+        turl = clause_url(pub_slug, ctx, xml_id.split(":")[0], st)
+        content = f"{header if not tstate else header + (' — ' + tstate + ' variation' if not state else '')}\n{head_line}\nTable {tn}{' — ' + tt if tt else ''}\n\n{ttxt}"[:MAX_EMBED_CHARS]
+        chunks.append({
+            "standard_id": standard_id, "edition": EDITION, "publication": pub, "xml_id": tid or f"{xml_id}:tbl{tn}",
+            "clause_number": sptc or None, "clause_title": f"Table {tn}" + (f" — {tt}" if tt else ""),
+            "part_number": part_num or None, "part_title": part_title or None,
+            "content": content, "chunk_index": 0, "chunk_type": "table", "state": st,
+            "building_classes": facets, "figure_refs": [], "source_url": turl,
+            "content_hash": hashlib.sha256(content.encode()).hexdigest(),
+            "is_live": True, "needs_legal_review": False,
+        })
+        stats["table"] += 1
+
+def render_clause_body(clause, include_state=None):
+    """National body = subclauses with state="" (variations skipped). With
+    include_state, only that state's clause/subclause variations are rendered."""
     r = Rendered()
-    for c in root:
-        render_block(c, r, "")
-    return root.get("id"), sptc, title, facets, r
+    for c in clause:
+        t = local(c.tag)
+        if t in ("sptc", "title"):
+            continue
+        if include_state is None:
+            if t in ("clause-variation", "subclause-variation"):
+                continue
+            if t == "subclause" and (c.get("state") or ""):
+                continue
+            render_block(c, r, "")
+        else:
+            if t == "subclause-variation" and c.get("state") == include_state:
+                vt = (c.get("type") or "varies").lower()
+                r.lines.append(f"[{include_state} variation — {vt}s subclause ({c.get('num', '')})]")
+                render_block(c, r, "")   # renders its content like a subclause
+            elif t == "subclause":
+                for sv in c:
+                    if local(sv.tag) == "subclause-variation" and sv.get("state") == include_state:
+                        vt = (sv.get("type") or "varies").lower()
+                        r.lines.append(f"[{include_state} variation — {vt}s subclause ({sv.get('num', '')})]")
+                        render_block(sv, r, "")
+            elif t == "table-reference-variation" and c.get("state") == include_state:
+                render_table(c, r, "")
+    return r
+
+def build_publication(folder, pub, standard_id, pub_slug):
+    path = os.path.join(SOURCE_DIR, folder, "contents.xml")
+    root = ET.parse(path).getroot()
+    parent = {c: p for p in root.iter() for c in p}
+    chunks, stats = [], Counter()
+    glossary = list(root.iter("glossentry"))
+
+    for clause in list(root.iter("clause")) + list(root.iter("standard-clause")):
+        # skip anything inside a state schedule (pointers only) or front matter
+        if any(local(a.tag) == "ncc-section" and a.get("type") == "schedule" for a in ancestors(clause, parent)):
+            continue
+        ctx = context_for(clause, parent)
+        sptc = child_text(clause, "sptc") or clause.get("sptc") or ""
+        title = child_text(clause, "title")
+        facets = excluded_classes(clause)
+        xml_id = clause.get("id")
+        # national text
+        make_chunks(pub=pub, standard_id=standard_id, pub_slug=pub_slug, xml_id=xml_id, sptc=sptc, title=title,
+                    body_r=render_clause_body(clause), state=None, ctx=ctx, facets=facets, stats=stats, chunks=chunks)
+        # whole-clause state variations sitting inside this clause
+        for cv in clause:
+            if local(cv.tag) == "clause-variation" and cv.get("state"):
+                st = cv.get("state"); vt = (cv.get("type") or "").upper()
+                body = Rendered()
+                for c in cv:
+                    if local(c.tag) not in ("sptc", "title"):
+                        render_block(c, body, "")
+                make_chunks(pub=pub, standard_id=standard_id, pub_slug=pub_slug, xml_id=cv.get("id"), sptc=sptc,
+                            title=child_text(cv, "title") or title, body_r=body, state=st, ctx=ctx,
+                            facets=excluded_classes(cv) or facets, stats=stats, chunks=chunks,
+                            prefix_note=f"[{st} variation — {vt.lower() or 'varies'}s clause {sptc} in {st}]")
+                stats["state_clause"] += 1
+        # subclause-level / table variations: one chunk per state
+        states = {c.get("state") for c in clause.iter() if local(c.tag) in ("subclause-variation", "table-reference-variation") and c.get("state")}
+        for st in sorted(states):
+            body = render_clause_body(clause, include_state=st)
+            if not body.lines and not body.tables:
+                continue
+            make_chunks(pub=pub, standard_id=standard_id, pub_slug=pub_slug, xml_id=f"{xml_id}:{st}", sptc=sptc, title=title,
+                        body_r=body, state=st, ctx=ctx, facets=facets, stats=stats, chunks=chunks,
+                        prefix_note=f"[{st} variation to clause {sptc} — read with the national clause]")
+            stats["state_subclause"] += 1
+
+    # whole new/replaced clauses for a state that sit directly under a part/spec
+    for cv in root.iter("clause-variation"):
+        if local(parent[cv].tag) not in ("part", "specification", "subtopic", "spec-topic"):
+            continue
+        if any(local(a.tag) == "ncc-section" and a.get("type") == "schedule" for a in ancestors(cv, parent)):
+            continue
+        st = cv.get("state"); sptc = cv.get("sptc") or child_text(cv, "sptc"); vt = (cv.get("type") or "").upper()
+        body = Rendered()
+        for c in cv:
+            if local(c.tag) not in ("sptc", "title"):
+                render_block(c, body, "")
+        make_chunks(pub=pub, standard_id=standard_id, pub_slug=pub_slug, xml_id=cv.get("id"), sptc=sptc,
+                    title=child_text(cv, "title"), body_r=body, state=st, ctx=context_for(cv, parent),
+                    facets=excluded_classes(cv), stats=stats, chunks=chunks,
+                    prefix_note=f"[{st} variation — {vt.lower() or 'varies'}s clause {sptc} in {st}]")
+        stats["state_clause"] += 1
+
+    return chunks, glossary, stats
+
+def build_glossary(entries):
+    chunks, seen = [], set()
+    for g in entries:
+        gid = g.get("id")
+        if not gid or gid in seen:
+            continue
+        seen.add(gid)
+        term = child_text(g, "glossterm")
+        defs = []
+        for d in g:
+            if local(d.tag) == "glossdef":
+                rr = Rendered(); render_block(d, rr, ""); defs.append(" ".join(rr.lines))
+        body = " ".join(x for x in defs if x).strip()
+        if not term or not body:
+            continue
+        cat = g.get("category") or "glossary"
+        content = f"{PUB_LABEL['glossary']}\n{term}" + (f" ({cat})" if cat != "glossary" else "") + f"\n\n{body}"
+        chunks.append({
+            "standard_id": GLOSSARY_STANDARD_ID, "edition": EDITION, "publication": "glossary", "xml_id": gid,
+            "clause_number": "Schedule 1", "clause_title": term,
+            "part_number": None, "part_title": None,
+            "content": content, "chunk_index": 0, "chunk_type": "glossary", "state": None,
+            "building_classes": [], "figure_refs": [],
+            "source_url": f"{WEB_BASE}/volume-one/1-definitions",
+            "content_hash": hashlib.sha256(content.encode()).hexdigest(),
+            "is_live": True, "needs_legal_review": False,
+        })
+    return chunks
 
 def split_body(body_lines):
     """Group lines into chunks of ~TARGET_CHUNK_CHARS, breaking at subclause boundaries."""
@@ -392,163 +561,6 @@ def split_body(body_lines):
 
 def norm_num(n):
     return re.sub(r"\s*\(.*?\)\s*:?\s*$", "", (n or "").strip()).rstrip(":").strip()
-
-def base_clause(n):
-    """'10.2.19b' -> '10.2.19', 'S23C7d' -> 'S23C7'."""
-    return re.sub(r"[a-z]$", "", norm_num(n))
-
-def load_number_index(xml_dir, prefix):
-    """table-*.xml / image-*.xml -> {base clause number: [(num, title, root)]}"""
-    idx = defaultdict(list)
-    for fn in os.listdir(xml_dir):
-        if not fn.startswith(prefix + "-") or not fn.endswith(".xml"):
-            continue
-        p = os.path.join(xml_dir, fn)
-        if not os.path.isfile(p):
-            continue
-        try:
-            root = ET.parse(p).getroot()
-        except ET.ParseError:
-            continue
-        num = child_text(root, "num"); title = child_text(root, "title")
-        st = STATE_RE.search(fn)
-        idx[(base_clause(num), st.group(1) if st else None)].append((norm_num(num), title, root, fn))
-    return idx
-
-def build_publication(folder, pub, standard_id, pub_slug):
-    xml_dir = os.path.join(SOURCE_DIR, folder, "XMLs")
-    flat = ET.parse(os.path.join(xml_dir, "FlattenedFile.xml")).getroot()
-    refs, glossary = [], []
-    walk_map(flat, {}, refs, glossary)
-    # State REPLACE variations (10-2-1-wet-areas-SA.xml) are only pointed at from
-    # inside the national clause via an unresolvable internal path, never from the
-    # map — so pull in any on-disk sibling named <clause>-<STATE>.xml. INSERT
-    # variations are conref'd from the map directly and dedupe on xml_id.
-    expanded = []
-    for conref, map_id, ctx in refs:
-        conref = conref.replace("ERROR_IN_RESOLVING_URI:", "")
-        expanded.append((conref, map_id, ctx))
-        if conref.endswith(".xml") and not STATE_RE.search(conref):
-            for st in STATES:
-                sib = f"{conref[:-4]}-{st}.xml"
-                if os.path.isfile(os.path.join(xml_dir, sib)):
-                    expanded.append((sib, None, ctx))
-    refs = expanded
-
-    tables_by_clause = load_number_index(xml_dir, "table")
-    images_by_clause = load_number_index(xml_dir, "image")
-    used_tables = set()
-
-    chunks, seen, stats = [], set(), Counter()
-    for conref, map_id, ctx in refs:
-        path = os.path.join(xml_dir, conref)
-        if not os.path.isfile(path):
-            stats["missing_file"] += 1; continue
-        try:
-            xml_id, sptc, title, facets, r = parse_clause_file(path)
-        except ET.ParseError as e:
-            stats["parse_error"] += 1; print(f"  ! parse error {conref}: {e}", file=sys.stderr); continue
-        xml_id = xml_id or map_id
-        if xml_id in seen:
-            stats["dup"] += 1; continue
-        seen.add(xml_id)
-        st = STATE_RE.search(conref)
-        state = st.group(1) if st else None
-        if not sptc and not r.lines:
-            stats["empty"] += 1; continue
-
-        url = clause_url(pub_slug, ctx, xml_id, state)
-        part_num, part_title = ctx.get("part_num", ""), ctx.get("part_title", "")
-        header = f"{PUB_LABEL[pub]}" + (f", {'Specification' if ctx.get('kind') == 'specification' else 'Part'} {part_num} {part_title}" if part_num else "")
-        if state:
-            header += f" — {state} variation"
-        head_line = f"{sptc} {title}".strip()
-
-        # figures: inline refs + files numbered off this clause
-        figs = {}
-        for num, ftitle in r.figures:
-            if num: figs[norm_num(num)] = ftitle
-        for num, ftitle, _root, _fn in images_by_clause.get((sptc, state), []) if sptc else []:
-            figs.setdefault(num, ftitle)
-        figure_refs = [{"number": n, "title": t, "url": url} for n, t in sorted(figs.items())]
-
-        body_lines = list(r.lines)
-        if r.variations:
-            body_lines.append("State variation: " + "; ".join(f"{v} clause applies in that jurisdiction" for v in r.variations))
-        groups = split_body(body_lines)
-        for i, g in enumerate(groups):
-            content = f"{header}\n{head_line}" + (" (cont.)" if i else "") + f"\n\n{g}"
-            chunks.append({
-                "standard_id": standard_id, "edition": EDITION, "publication": pub, "xml_id": xml_id,
-                "clause_number": sptc or None, "clause_title": title or None,
-                "part_number": part_num or None, "part_title": part_title or None,
-                "content": content, "chunk_index": i, "chunk_type": "text", "state": state,
-                "building_classes": facets, "figure_refs": figure_refs, "source_url": url,
-                "content_hash": hashlib.sha256(content.encode()).hexdigest(),
-                "is_live": True, "needs_legal_review": False,
-            })
-            stats["text"] += 1
-
-        # tables: inline in the clause, plus files numbered off this clause
-        table_items = [(n, t, txt, f"{xml_id}:tbl{k}") for k, (n, t, txt) in enumerate(r.tables)]
-        for n, t, root, fn in tables_by_clause.get((sptc, state), []) if sptc else []:
-            if fn in used_tables:
-                continue
-            used_tables.add(fn)
-            rr = Rendered(); render_table(root, rr, n)
-            for (tn, tt, ttxt) in rr.tables:
-                table_items.append((tn, tt, ttxt, root.get("id") or fn))
-        for k, (tn, tt, ttxt, tid) in enumerate(table_items):
-            content = f"{header}\n{head_line}\nTable {tn}{' — ' + tt if tt else ''}\n\n{ttxt}"[:MAX_EMBED_CHARS]
-            chunks.append({
-                "standard_id": standard_id, "edition": EDITION, "publication": pub, "xml_id": tid,
-                "clause_number": sptc or None, "clause_title": f"Table {tn}" + (f" — {tt}" if tt else ""),
-                "part_number": part_num or None, "part_title": part_title or None,
-                "content": content, "chunk_index": 0, "chunk_type": "table", "state": state,
-                "building_classes": facets, "figure_refs": [], "source_url": url,
-                "content_hash": hashlib.sha256(content.encode()).hexdigest(),
-                "is_live": True, "needs_legal_review": False,
-            })
-            stats["table"] += 1
-
-    # Table files that didn't map to a clause of this publication are skipped:
-    # the folder is a superset dump, so they're almost all another
-    # publication's tables (or front matter like "Table 1 List of amendments").
-    stats["table_files_skipped"] = sum(len(v) for v in tables_by_clause.values()) - len(used_tables)
-    return chunks, glossary, stats
-
-def build_glossary(entries):
-    chunks, seen = [], set()
-    for g in entries:
-        gid = g.get("id")
-        if not gid or gid in seen:
-            continue
-        seen.add(gid)
-        term = child_text(g, "glossterm")
-        acr = " / ".join(clean(inline(c)) for c in g.iter() if local(c.tag) in ("glossAcronym", "glossAbbreviation", "glossAlt") and clean(inline(c)))
-        defs = []
-        for d in g:
-            if local(d.tag) == "glossdef":
-                rr = Rendered(); render_block(d, rr, ""); defs.append(" ".join(rr.lines))
-        for d in g.iter():
-            if local(d.tag) == "glossdef-variation" and d.get("variation"):
-                rr = Rendered(); render_block(d, rr, "")
-                if rr.lines: defs.append(f"[{d.get('variation')} variation: {' '.join(rr.lines)}]")
-        body = " ".join(x for x in defs if x).strip()
-        if not term or not body:
-            continue
-        content = f"{PUB_LABEL['glossary']}\n{term}" + (f" ({acr})" if acr else "") + f"\n\n{body}"
-        chunks.append({
-            "standard_id": GLOSSARY_STANDARD_ID, "edition": EDITION, "publication": "glossary", "xml_id": gid,
-            "clause_number": "Schedule 1", "clause_title": term,
-            "part_number": None, "part_title": None,
-            "content": content, "chunk_index": 0, "chunk_type": "glossary", "state": None,
-            "building_classes": [], "figure_refs": [],
-            "source_url": f"{WEB_BASE}/volume-one/1-definitions",
-            "content_hash": hashlib.sha256(content.encode()).hexdigest(),
-            "is_live": True, "needs_legal_review": False,
-        })
-    return chunks
 
 # ── network ─────────────────────────────────────────────────────────────────
 

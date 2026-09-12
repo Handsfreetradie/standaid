@@ -19,7 +19,7 @@ const TABLES: Record<string, string> = { ncc_chunks: "content", clause_guides: "
 
 const BATCH = 50;
 const PARALLEL = 2; // 4 tripped WORKER_RESOURCE_LIMIT on the first full run
-const TIME_BUDGET_MS = 100_000;
+const TIME_BUDGET_MS = 40_000; // 100s tripped WORKER_RESOURCE_LIMIT on full runs; shorter calls, more of them
 const MODEL = "text-embedding-3-small";
 
 const json = (body: unknown, status = 200) =>

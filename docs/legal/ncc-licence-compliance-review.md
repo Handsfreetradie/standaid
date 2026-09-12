@@ -36,9 +36,9 @@
 
 ## 4. Currency — a real gap
 
-Our ingest used dataset **v1.0 (published 5–6 May 2026)**. The ABCB released **v1.1 (22 June 2026)** and **v1.2 (26 June 2026)** with errata corrections (e.g. B1V1(5)(b), J6D5(3)(a)) and asked anyone who "accessed the dataset since May 6, 2026 … [to] download the latest version … and replace any previously saved or integrated data." Not a licence breach, but the ABCB disclaimer ("may not be complete or up-to-date") and our own ToS make currency our problem once we promote the feature.
+Our first ingest used dataset **v1.0 (published 5–6 May 2026)**. The ABCB released **v1.1 (22 June 2026)** and **v1.2 (26 June 2026)** with errata corrections (e.g. B1V1(5)(b), J6D5(3)(a)) and asked anyone who "accessed the dataset since May 6, 2026 … [to] download the latest version … and replace any previously saved or integrated data." Not a licence breach, but the ABCB disclaimer ("may not be complete or up-to-date") and our own ToS make currency our problem once we promote the feature.
 
-**Action:** re-ingest from v1.2 (`scripts/ingest-ncc.py` — note the v1.1+ format consolidates each volume into a single document, so the parser needs adapting), and state the dataset version in the ToS. Until then, marketing copy must not claim "current" or "up to date".
+**Action taken (same day):** re-ingested from dataset **v1.2** (parser rewritten for the single-document format), old rows removed, dataset version stated in the ToS §3A. Currency is now as good as the ABCB's latest release; check data.gov.au for new versions when the NCC is amended.
 
 ## 5. Marketing rules (Australian Consumer Law + licence)
 

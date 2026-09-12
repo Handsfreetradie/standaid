@@ -107,7 +107,8 @@ const Legal = ({ kind }: LegalProps) => {
               </p>
               <p>
                 <strong>What we changed.</strong> The NCC text was taken from the ABCB's machine-readable
-                dataset, split into clauses and reformatted for search, and answers you receive are
+                dataset (NCC 2025 dataset version 1.2, released 18 June 2026), split into clauses and
+                reformatted for search, and answers you receive are
                 AI-generated summaries of that text — they are not the NCC itself. Figures, diagrams
                 and photographs are excluded from the ABCB's licence, so StandAId never reproduces
                 them: answers link you to the relevant clause on the ABCB's website instead. The
