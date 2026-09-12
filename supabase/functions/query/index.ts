@@ -255,7 +255,7 @@ serve(async (req) => {
     const { data: profile } = await supabase.from("profiles").select("*").eq("user_id", userId).single();
     const tier = profile?.subscription_tier || "free"; // least privilege — a missing profile must never grant pro
 
-    // Free: 5/day. Pro/business: 200/day fair-use ceiling (stops a runaway
+    // Free: 3/day (rolling 24h). Pro/business: 200/day fair-use ceiling (stops a runaway
     // client loop or abused account burning unbounded AI spend).
     const maxQueries = tier === "free" ? 3 : 200;
 
