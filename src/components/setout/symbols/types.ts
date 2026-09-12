@@ -27,6 +27,7 @@ export type FittingType =
   | "led_strip"
   // Switches
   | "switch"
+  | "cooktop_isolator"
   // Power
   | "gpo"
   | "tv_point"
@@ -35,6 +36,13 @@ export type FittingType =
   | "nbn_box"
   | "ubo_rhood"
   | "switchboard"
+  | "cooktop"
+  | "oven"
+  | "hot_water_unit"
+  | "spa_pool_heater"
+  | "other_appliance"
+  | "gpo_switch_combo"
+  | "solar_inverter"
   // Data
   | "data"
   | "data_cabinet"
@@ -52,6 +60,7 @@ export type FittingType =
   | "ac_condenser"
   | "ac_head_unit"
   | "cooling_unit"
-  // Ducted vacuum
-  | "vacuum_unit"
-  | "vacuum_outlet";
+  | "heated_towel_rail"
+  | "underfloor_heating_stat"
+  // Network
+  | "wifi_ap";

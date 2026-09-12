@@ -1,5 +1,10 @@
 import type { SetoutSymbolProps } from "./types";
 
+// Same wall-contact convention as every other wall-mount symbol — see
+// WallBattenHolderSymbol. This used to draw its pole off-centre (base at
+// x=7, not the shared anchor's x=12), so rotating it to face a wall at a
+// different angle swung the whole glyph sideways off its mount point.
+// Centred on the anchor here, baseline at y=20.5, body rising above it.
 const PhonePointSymbol = ({ size = 24, className, ...props }: SetoutSymbolProps) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
@@ -14,9 +19,9 @@ const PhonePointSymbol = ({ size = 24, className, ...props }: SetoutSymbolProps)
     className={className}
     {...props}
   >
-    <path d="M7 18.6V3.6" />
-    <path d="M7 4.2 16 7.4 7 10.6Z" />
-    <circle cx="7" cy="20.2" r="1.2" fill="currentColor" stroke="none" />
+    <path d="M9 20.5h6" />
+    <path d="M12 20.5V6" />
+    <path d="M12 6 19 9 12 12Z" />
   </svg>
 );
 

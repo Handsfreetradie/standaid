@@ -8,13 +8,15 @@ import { Badge } from "@/components/ui/badge";
 import CalibrationImportFlow from "@/components/setout/CalibrationImportFlow";
 import DrawWallsFlow from "@/components/setout/DrawWallsFlow";
 import { useCreateSetoutPlan, useDeleteSetoutPlan, useSetoutPlans } from "@/hooks/useSetoutPlans";
-import type { PlanSourceType, SetoutPlan as SetoutPlanRow } from "@/lib/setoutTypes";
+import { usePrimarySetoutCanvases } from "@/hooks/useSetoutCanvases";
+import type { PlanSourceType, SetoutCanvas as SetoutCanvasRow, SetoutPlan as SetoutPlanRow } from "@/lib/setoutTypes";
 
-type ViewState = { kind: "list" } | { kind: "create" } | { kind: "setup"; plan: SetoutPlanRow };
+type ViewState = { kind: "list" } | { kind: "create" } | { kind: "setup"; plan: SetoutPlanRow; canvas: SetoutCanvasRow };
 
 const Setout = () => {
   const navigate = useNavigate();
   const { data: plans, isLoading } = useSetoutPlans();
+  const { data: primaryCanvases } = usePrimarySetoutCanvases();
   const createPlan = useCreateSetoutPlan();
   const deletePlan = useDeleteSetoutPlan();
 
@@ -26,14 +28,15 @@ const Setout = () => {
 
   const handleCreate = async () => {
     if (!name.trim()) return;
-    const plan = await createPlan.mutateAsync({
+    const { plan, canvas } = await createPlan.mutateAsync({
       name: name.trim(),
       job_reference: jobReference.trim() || undefined,
       source_type: sourceType,
     });
     setName("");
     setJobReference("");
-    setView({ kind: "setup", plan });
+    if (canvas) setView({ kind: "setup", plan, canvas });
+    else navigate(`/setout/${plan.id}`); // canvas creation failed — open the job so the tradie can add one from there
   };
 
   const handleDelete = async (id: string) => {
@@ -45,10 +48,10 @@ const Setout = () => {
   if (view.kind === "setup") {
     const onComplete = () => navigate(`/setout/${view.plan.id}`);
     const onBack = () => setView({ kind: "list" });
-    return view.plan.source_type === "import" ? (
-      <CalibrationImportFlow plan={view.plan} onBack={onBack} onComplete={onComplete} />
+    return view.canvas.source_type === "import" ? (
+      <CalibrationImportFlow canvas={view.canvas} planId={view.plan.id} onBack={onBack} onComplete={onComplete} />
     ) : (
-      <DrawWallsFlow plan={view.plan} onBack={onBack} onComplete={onComplete} />
+      <DrawWallsFlow canvas={view.canvas} onBack={onBack} onComplete={onComplete} />
     );
   }
 
@@ -114,15 +117,18 @@ const Setout = () => {
         ) : (
           <div className="space-y-2">
             {plans.map((p) => {
-              // Tracing walls is optional — a plan can be skipped straight
+              // Tracing walls is optional — a canvas can be skipped straight
               // through to placing things on the image. Having the image is
-              // what makes it usable, so that counts as set up too.
-              const isSetUp = p.walls.length > 0 || !!p.background_image_path;
+              // what makes it usable, so that counts as set up too. A job's
+              // "primary" (first) canvas is what setup applies to — anything
+              // added later is added from inside the job itself, already set up.
+              const primaryCanvas = primaryCanvases?.get(p.id);
+              const isSetUp = !primaryCanvas || primaryCanvas.walls.length > 0 || !!primaryCanvas.background_image_path;
               return (
                 <Card
                   key={p.id}
                   className="p-3 flex items-center gap-3 cursor-pointer hover:bg-secondary/50 transition-colors"
-                  onClick={() => (isSetUp ? navigate(`/setout/${p.id}`) : setView({ kind: "setup", plan: p }))}
+                  onClick={() => (isSetUp || !primaryCanvas ? navigate(`/setout/${p.id}`) : setView({ kind: "setup", plan: p, canvas: primaryCanvas }))}
                 >
                   <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 flex-shrink-0">
                     <Zap className="h-4 w-4 text-primary" />

@@ -34,10 +34,9 @@ export { default as SwitchSymbol } from "./SwitchSymbol";
 export { default as ThermostatSymbol } from "./ThermostatSymbol";
 export { default as TvPointSymbol } from "./TvPointSymbol";
 export { default as UboRhoodSymbol } from "./UboRhoodSymbol";
-export { default as VacuumOutletSymbol } from "./VacuumOutletSymbol";
-export { default as VacuumUnitSymbol } from "./VacuumUnitSymbol";
 export { default as WallBattenHolderSymbol } from "./WallBattenHolderSymbol";
 export { default as WallStairLightSymbol } from "./WallStairLightSymbol";
+export { default as WifiApSymbol } from "./WifiApSymbol";
 
 export type { GpoSymbolProps } from "./GpoSymbol";
 export type { DownlightSymbolProps } from "./DownlightSymbol";

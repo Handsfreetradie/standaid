@@ -144,11 +144,24 @@ function dataMaterials(specs: FittingSpecs): MaterialLine[] {
 
 function switchMaterials(fitting: Pick<SetoutFitting, "type" | "specs">): MaterialLine[] {
   const gangCount = gangsFor(fitting).length;
+  const allDimmers = (fitting.specs.dimmerGangs ?? []).filter((i) => i < gangCount);
+  const pushButtonSet = new Set(fitting.specs.pushButtonDimmerGangs ?? []);
+  // Only a standard (rotary/slide) dimmer is physically wider than a plain
+  // switch mech — a push-button dimmer is the same size as an ordinary
+  // switch, so it doesn't need the extra plate position the other kind does.
+  const wideDimmerCount = allDimmers.filter((i) => !pushButtonSet.has(i)).length;
+  const pushButtonDimmerCount = allDimmers.length - wideDimmerCount;
+  const switchCount = gangCount - allDimmers.length;
   const group = groupFor("switch");
-  return [
-    { item: `Switch plate, ${gangCount}-gang`, qty: 1, unit: "ea", group },
-    { item: "Switch mech", qty: gangCount, unit: "ea", group },
-  ];
+  // A "3-gang" plate with one standard dimmer among them needs a 4-gang
+  // plate to actually fit everything, even though it only has 3 switch
+  // positions — a push-button dimmer doesn't add to this at all.
+  const platePositions = gangCount + wideDimmerCount;
+  const lines: MaterialLine[] = [{ item: `Switch plate, ${platePositions}-gang`, qty: 1, unit: "ea", group }];
+  if (switchCount > 0) lines.push({ item: "Switch mech", qty: switchCount, unit: "ea", group });
+  if (wideDimmerCount > 0) lines.push({ item: "Dimmer mech", qty: wideDimmerCount, unit: "ea", group });
+  if (pushButtonDimmerCount > 0) lines.push({ item: "Dimmer mech, push-button", qty: pushButtonDimmerCount, unit: "ea", group });
+  return lines;
 }
 
 function downlightMaterials(specs: FittingSpecs): MaterialLine[] {
@@ -259,6 +272,23 @@ export const BASE_MATERIALS_BY_TYPE: Record<TableFittingType, BaseLine[]> = {
   nbn_box: [{ item: "NBN connection box (NTD)", qty: 1, unit: "ea" }], // TODO: confirm — supplied by NBN Co, sparky usually just provides conduit/power
   ubo_rhood: [{ item: "UBO/RHOOD enclosure", qty: 1, unit: "ea" }], // TODO: confirm — check local distributor requirements
   switchboard: [{ item: "Switchboard enclosure", qty: 1, unit: "ea" }], // TODO: confirm — pole count/size varies too much for a fixed list
+  gpo_switch_combo: [
+    { item: "Double GPO + switch combo plate (25XA)", qty: 1, unit: "ea" },
+    { item: "GPO + switch combo mech", qty: 1, unit: "ea" },
+  ],
+  // No isolating-switch line here — cooktop_isolator is now placed as its
+  // own symbol wherever the isolator actually is, rather than assumed at
+  // the cooktop's own position (see cooktop_isolator below).
+  cooktop: [],
+  cooktop_isolator: [{ item: "Cooktop isolating switch, with indicator", qty: 1, unit: "ea" }],
+  oven: [{ item: "Isolating switch, oven", qty: 1, unit: "ea" }], // TODO: confirm — appliance itself is customer/kitchen-supplier supplied
+  hot_water_unit: [{ item: "Isolating switch, hot water system", qty: 1, unit: "ea" }], // TODO: confirm — appliance itself is plumber-supplied
+  spa_pool_heater: [{ item: "Isolating switch, spa/pool heater", qty: 1, unit: "ea" }], // TODO: confirm — heater itself is pool-installer supplied; check RCD requirements too
+  other_appliance: [{ item: "Isolating switch, appliance", qty: 1, unit: "ea" }], // TODO: confirm — a generic catch-all, check what this one actually needs
+  solar_inverter: [
+    { item: "AC isolator switch, solar inverter", qty: 1, unit: "ea" },
+    { item: "DC isolator switch, solar inverter", qty: 1, unit: "ea" },
+  ], // TODO: confirm — inverter itself is solar-installer supplied
 
   // Data
   data_cabinet: [{ item: "Data cabinet / patch panel enclosure", qty: 1, unit: "ea" }], // TODO: confirm — size/port count varies per job
@@ -282,12 +312,16 @@ export const BASE_MATERIALS_BY_TYPE: Record<TableFittingType, BaseLine[]> = {
   ac_condenser: [{ item: "AC isolator switch", qty: 1, unit: "ea" }], // TODO: confirm — condenser itself is HVAC-supplied, sparky provides the isolator
   ac_head_unit: [{ item: "AC head unit", qty: 1, unit: "ea" }], // TODO: confirm — usually supplied by HVAC contractor
   cooling_unit: [{ item: "Cooling unit", qty: 1, unit: "ea" }], // TODO: confirm — usually supplied by HVAC contractor
+  heated_towel_rail: [{ item: "Isolating switch, heated towel rail", qty: 1, unit: "ea" }], // TODO: confirm — rail itself is bathroom-supplier supplied
+  underfloor_heating_stat: [
+    { item: "Underfloor heating thermostat/controller", qty: 1, unit: "ea" },
+    { item: "Floor sensor probe", qty: 1, unit: "ea" }, // TODO: confirm — heating mat/cable itself is tiler/installer-supplied
+  ],
 
-  // Ducted vacuum
-  vacuum_unit: [{ item: "Ducted vacuum power unit", qty: 1, unit: "ea" }], // TODO: confirm — usually supplied by the vacuum installer
-  vacuum_outlet: [
-    { item: "Ducted vacuum outlet", qty: 1, unit: "ea" },
-    { item: "Vacuum outlet plate", qty: 1, unit: "ea" },
+  // Network
+  wifi_ap: [
+    { item: "WiFi access point", qty: 1, unit: "ea" }, // TODO: confirm — often supplied by the network/IT installer, not the sparky
+    { item: "Data outlet (PoE run to AP)", qty: 1, unit: "ea" },
   ],
 };
 

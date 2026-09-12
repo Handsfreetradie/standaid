@@ -1,4 +1,4 @@
-import { ArrowRight, Cable, Plus, X } from "lucide-react";
+import { ArrowRight, Cable, Plus, Sun, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,10 @@ interface SwitchLinksPanelProps {
   onSelectGang: (gangIndex: number) => void;
   onAddGang: (switchFitting: SetoutFitting) => void;
   onRemoveGang: (switchFitting: SetoutFitting, gangIndex: number) => void;
+  // Cycles a gang through plain switch -> dimmer -> push-button dimmer ->
+  // back to plain switch. Only the plain (wide) dimmer takes an extra plate
+  // position — see switchMaterials in setoutMaterials.ts.
+  onCycleDimmer: (switchFitting: SetoutFitting, gangIndex: number) => void;
 }
 
 export default function SwitchLinksPanel({
@@ -23,6 +27,7 @@ export default function SwitchLinksPanel({
   onSelectGang,
   onAddGang,
   onRemoveGang,
+  onCycleDimmer,
 }: SwitchLinksPanelProps) {
   const switches = fittings.filter((f) => f.type === "switch");
 
@@ -49,6 +54,8 @@ export default function SwitchLinksPanel({
             <div className="space-y-1.5">
               {gangs.map((gang, gangIndex) => {
                 const isActiveGang = isActiveSwitch && gangIndex === activeGangIndex;
+                const isDimmer = (sw.specs.dimmerGangs ?? []).includes(gangIndex);
+                const isPushButton = isDimmer && (sw.specs.pushButtonDimmerGangs ?? []).includes(gangIndex);
                 // A gang only ever targets lights now — an older model let a
                 // gang chain on to another switch's id to mark a 2-way run;
                 // any leftover switch ids from that (pre-automatic-detection)
@@ -111,11 +118,34 @@ export default function SwitchLinksPanel({
                         );
                       })
                     )}
+                    <Button
+                      variant={isDimmer ? "default" : "ghost"}
+                      size="sm"
+                      className={cn(
+                        "h-5 px-1.5 text-[10px] gap-1 flex-shrink-0",
+                        gangs.length === 1 && "ml-auto",
+                        !isDimmer && "text-muted-foreground"
+                      )}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onCycleDimmer(sw, gangIndex);
+                      }}
+                      title={
+                        isPushButton
+                          ? "Push-button dimmer — same size as a normal switch, tap for plain switch"
+                          : isDimmer
+                            ? "Standard dimmer — wider than a normal switch, adds an extra plate position. Tap for push-button instead"
+                            : "Tap to mark this gang as a dimmer"
+                      }
+                    >
+                      <Sun className="h-3 w-3" />
+                      {isPushButton ? "Dimmer (push)" : "Dimmer"}
+                    </Button>
                     {gangs.length > 1 && (
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-5 w-5 ml-auto text-muted-foreground hover:text-destructive flex-shrink-0"
+                        className="h-5 w-5 text-muted-foreground hover:text-destructive flex-shrink-0"
                         onClick={(e) => {
                           e.stopPropagation();
                           onRemoveGang(sw, gangIndex);

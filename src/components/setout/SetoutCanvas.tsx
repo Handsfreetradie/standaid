@@ -2,8 +2,8 @@ import { useRef, useState, useCallback, useMemo, useEffect } from "react";
 import { GripHorizontal, Minus, Plus, MousePointer2, Camera } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatMm } from "@/lib/units";
-import { measurementRefId, DEFAULT_TWIN_SPACING_MM, type MeasurementLock } from "@/lib/setoutTypes";
-import { pathLength, pathMidpoint } from "@/lib/setoutPathGeometry";
+import { measurementRefId, DEFAULT_TWIN_SPACING_MM, DEFAULT_WIFI_RANGE_M, type MeasurementLock } from "@/lib/setoutTypes";
+import { pathLength, pathMidpoint, pathToSvgD } from "@/lib/setoutPathGeometry";
 import { FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
 import {
   colorForCircuit,
@@ -15,6 +15,7 @@ import {
   runGroupFittingIds,
   DEFAULT_WALL_THICKNESS,
   type Point,
+  type PathPoint,
   type SetoutCircuit,
   type SetoutFitting,
   type SetoutPhotoPoint,
@@ -30,6 +31,7 @@ import {
   isNearFirstPoint,
   lightPoolRadius,
   poolsSignificantlyOverlap,
+  downlightLampPositions,
   closestPointOnWall,
   snapToNearestWall,
   alignToExistingPoints,
@@ -91,13 +93,22 @@ export type SetoutCanvasMode =
   | "pick-measurement-ref"
   | "place-photo-points"
   | "link-data-cabinet"
-  | "draw-led-strip";
+  | "draw-led-strip"
+  | "measure";
 
 interface SetoutCanvasProps {
   // The LED strip run currently being traced. Held by the parent for the same
   // reason sketchPoints is — undo and the "finish run" button live up there.
-  stripDraft?: Point[];
-  onStripPointAdd?: (point: Point) => void;
+  stripDraft?: PathPoint[];
+  // curveControl, when present, is the Bézier control point for the segment
+  // arriving at `point` from the previous one — see curveMode below.
+  onStripPointAdd?: (point: Point, curveControl?: Point) => void;
+  // The ad-hoc tape-measure chain currently being walked — ephemeral, same
+  // ownership split as stripDraft (held by the parent for undo/clear), but
+  // never becomes a fitting: it's just a ruler for reading a distance off
+  // the plan (e.g. a hallway run), not something that gets saved.
+  measureDraft?: Point[];
+  onMeasurePointAdd?: (point: Point) => void;
   backgroundImage?: BackgroundImage;
   backgroundTile?: BackgroundTile | null;
   // Fires once the view stops moving, so the owner can re-render the plan for
@@ -113,8 +124,8 @@ interface SetoutCanvasProps {
   openings?: WallOpening[];
   fittings?: SetoutFitting[];
   mode: SetoutCanvasMode;
-  sketchPoints?: Point[];
-  onSketchPointAdd?: (point: Point) => void;
+  sketchPoints?: PathPoint[];
+  onSketchPointAdd?: (point: Point, curveControl?: Point) => void;
   // Drops the most recently added sketch point. Used to retract the point a
   // double-tap-to-zoom placed on its way in — see handleBackgroundPointerDown.
   onSketchPointUndo?: () => void;
@@ -136,8 +147,16 @@ interface SetoutCanvasProps {
   // point — see onInteriorWallChainEnd.
   interiorWallDraftStart?: Point | null;
   onInteriorWallDraftPointAdd?: (point: Point) => void;
-  onInteriorWallSegmentAdd?: (start: Point, end: Point) => void;
+  onInteriorWallSegmentAdd?: (start: Point, end: Point, curveControl?: Point) => void;
   onInteriorWallChainEnd?: () => void;
+  // One-shot curve mode: while true, the NEXT tap in sketch-walls,
+  // sketch-interior-wall or draw-led-strip is captured as a Bézier control
+  // point (bypassing every snap) instead of adding a corner; the tap after
+  // that is the destination corner, tagged with that control point. Fires
+  // onCurveControlCaptured once the control tap lands so the parent can
+  // flip its own toggle back off — this is deliberately not sticky.
+  curveMode?: boolean;
+  onCurveControlCaptured?: () => void;
   // Interior walls default to square (horizontal/vertical off the start
   // point) same as the perimeter's snapWalls — a tradie's rough second tap
   // gets straightened automatically. Set false to let a wall land exactly
@@ -157,6 +176,11 @@ interface SetoutCanvasProps {
   // it (via nearestWallAndOffset) — the parent turns that into a
   // WallOpening with whatever kind/width is currently selected.
   onOpeningPlace?: (wallId: string, offset: number) => void;
+  // A wall the opening tap actually landed on that turned out to be curved
+  // — openings aren't supported on curved segments this pass (see
+  // curveMode below), so the caller can toast an explanation instead of
+  // the tap silently doing nothing.
+  onOpeningPlaceOnCurveBlocked?: () => void;
   // "place-opening" mode: dragging an already-placed door/window slides it
   // along its own wall — the parent persists the new offset, clamped to the
   // wall's length here since this component owns the wall geometry.
@@ -204,10 +228,19 @@ interface SetoutCanvasProps {
   selectedFittingId?: string | null;
   onFittingSelect?: (fittingId: string | null) => void;
   layerVisibility?: LayerVisibility;
+  // This job's ceiling height, in metres — the fallback for a downlight's
+  // coverage-pool radius when it has no mounting height of its own (every
+  // downlight placed before that field existed). See PlanDefaults.
+  ceilingHeightDefaultM?: number;
   linkActiveSwitchId?: string | null;
   linkActiveGangIndex?: number;
   onSwitchTap?: (switchId: string | null) => void;
   onLinkTargetTap?: (fittingId: string) => void;
+  // Shows every switch-to-light run in red, not just the one currently
+  // being edited — a "check the wiring" toggle for when a tradie wants to
+  // verify the whole layout rather than muted lines everywhere but the
+  // active gang.
+  highlightSwitchLinks?: boolean;
   // Double-tap/double-click a switch to open its menu — reports
   // the raw client (screen) coordinates so the parent can anchor a
   // position-controlled menu right where the tradie tapped, rather than
@@ -229,9 +262,35 @@ interface SetoutCanvasProps {
   // opens it for viewing/editing (onPhotoPointTap) — same division as
   // fittings' select-vs-place split.
   photoPoints?: SetoutPhotoPoint[];
-  onPhotoPointPlace?: (point: Point) => void;
+  // clientX/clientY (screen space) let the caller anchor a "take photo or
+  // upload 360°" choice menu right where the tap happened, same convention
+  // as onSwitchDoubleTap.
+  onPhotoPointPlace?: (point: Point, clientX: number, clientY: number) => void;
   onPhotoPointTap?: (photoPointId: string) => void;
   className?: string;
+}
+
+// A wall stroke, straight or curved. A curved wall never has an opening cut
+// into it (openings are blocked on curved segments — see
+// onOpeningPlaceOnCurveBlocked), so `seg` is always the whole wall in that
+// case; rendered as a real quadratic-Bézier <path> rather than sampling it
+// into a polyline, so SVG hit-tests the actual curve geometry natively.
+interface WallStrokeProps {
+  seg: { from: Point; to: Point };
+  curveControl?: Point;
+  stroke: string;
+  strokeWidth: number;
+  strokeOpacity?: number;
+  strokeLinecap?: "round" | "square" | "butt";
+  vectorEffect?: "non-scaling-stroke";
+  pointerEvents?: React.CSSProperties["pointerEvents"];
+}
+
+function WallStroke({ seg, curveControl, ...strokeProps }: WallStrokeProps) {
+  if (curveControl) {
+    return <path d={`M ${seg.from.x} ${seg.from.y} Q ${curveControl.x} ${curveControl.y} ${seg.to.x} ${seg.to.y}`} fill="none" {...strokeProps} />;
+  }
+  return <line x1={seg.from.x} y1={seg.from.y} x2={seg.to.x} y2={seg.to.y} {...strokeProps} />;
 }
 
 function initialViewBox(backgroundImage?: BackgroundImage, walls?: WallSegment[]): ViewBox {
@@ -263,6 +322,8 @@ export default function SetoutCanvas({
   mode,
   stripDraft = [],
   onStripPointAdd,
+  measureDraft = [],
+  onMeasurePointAdd,
   sketchPoints = [],
   onSketchPointAdd,
   onSketchPointUndo,
@@ -274,9 +335,12 @@ export default function SetoutCanvas({
   onInteriorWallSegmentAdd,
   onInteriorWallChainEnd,
   snapInteriorWalls = true,
+  curveMode = false,
+  onCurveControlCaptured,
   onWallTap,
   selectedEraseWallId = null,
   onOpeningPlace,
+  onOpeningPlaceOnCurveBlocked,
   onOpeningDrag,
   onMeasurementRefPick,
   snapWalls = false,
@@ -292,11 +356,13 @@ export default function SetoutCanvas({
   selectedFittingId,
   onFittingSelect,
   layerVisibility,
+  ceilingHeightDefaultM,
   linkActiveSwitchId,
   linkActiveGangIndex = 0,
   onSwitchTap,
   onLinkTargetTap,
   onSwitchDoubleTap,
+  highlightSwitchLinks = false,
   linkActiveCabinetId,
   onCabinetTap,
   onDataLinkTargetTap,
@@ -519,6 +585,14 @@ export default function SetoutCanvas({
   // tradie can see what they're about to snap to before committing.
   const [edgeSnapPreview, setEdgeSnapPreview] = useState<Point | null>(null);
 
+  // Captured once a curve-mode control-point tap lands, held until the very
+  // next tap (the destination corner) consumes it. State rather than a ref
+  // so the captured point renders as a marker in the meantime.
+  const [pendingCurveControl, setPendingCurveControl] = useState<Point | null>(null);
+  useEffect(() => {
+    setPendingCurveControl(null);
+  }, [mode]);
+
   // How near the halfway point between two fittings a tap has to be to take
   // it. Generous in screen terms, because it's a point in open space with
   // nothing drawn through it — unlike a wall, there's no line to aim along.
@@ -607,8 +681,23 @@ export default function SetoutCanvas({
   // dragging has to pan the plan, and that can't be told apart from a tap
   // until the pointer is released.
   const commitBackgroundTap = useCallback(
-    (clientX: number, clientY: number) => {
+    (clientX: number, clientY: number, bypassSnap = false) => {
       const scene = sceneFromClient(clientX, clientY);
+
+      // Curve mode's control-point tap: captured raw, no snapping at all —
+      // the whole point of it is to bulge away from the plan's own line
+      // work, so pulling it back onto that line work would defeat it. Held
+      // until the very next tap (the destination corner) consumes it.
+      if (
+        curveMode &&
+        !pendingCurveControl &&
+        (mode === "sketch-walls" || mode === "sketch-interior-wall" || mode === "draw-led-strip")
+      ) {
+        setPendingCurveControl(scene);
+        onCurveControlCaptured?.();
+        return;
+      }
+
       if (mode === "sketch-walls") {
         // Zooming in is how you read a detailed plan, and double-tap is how
         // you zoom — but pointerdown fires before touchstart, so by the time
@@ -636,15 +725,29 @@ export default function SetoutCanvas({
         const last = sketchPoints[sketchPoints.length - 1];
         const onEdge = snapToPlanEdge(scene);
         const point = onEdge ?? (snapWalls && last ? snapOrthogonal(last, scene) : scene);
-        onSketchPointAdd?.(point);
+        onSketchPointAdd?.(point, pendingCurveControl ?? undefined);
+        if (pendingCurveControl) setPendingCurveControl(null);
       } else if (mode === "draw-led-strip") {
         // Snap to the plan's line work and square up to the previous point the
         // same way a traced wall does — a strip almost always runs along a
         // cupboard or a wall, so freehand angles are nearly always a misread
-        // tap rather than what the tradie meant.
+        // tap rather than what the tradie meant. Shift bypasses this, same as
+        // it bypasses snap on a fitting drag, for the rare point that
+        // genuinely isn't on the plan's line work.
         const last = stripDraft[stripDraft.length - 1];
-        const onEdge = snapToPlanEdge(scene);
-        onStripPointAdd?.(onEdge ?? (snapWalls && last ? snapOrthogonal(last, scene) : scene));
+        const onEdge = bypassSnap ? null : snapToPlanEdge(scene);
+        onStripPointAdd?.(
+          onEdge ?? (!bypassSnap && snapWalls && last ? snapOrthogonal(last, scene) : scene),
+          pendingCurveControl ?? undefined
+        );
+        if (pendingCurveControl) setPendingCurveControl(null);
+      } else if (mode === "measure") {
+        // Same snap/square-up (and shift bypass) as the LED strip trace above
+        // — a hallway or a run between two walls is almost always along the
+        // plan's own line work, so this reads a tap the same forgiving way.
+        const last = measureDraft[measureDraft.length - 1];
+        const onEdge = bypassSnap ? null : snapToPlanEdge(scene);
+        onMeasurePointAdd?.(onEdge ?? (!bypassSnap && snapWalls && last ? snapOrthogonal(last, scene) : scene));
       } else if (mode === "calibrate") {
         if (calibratePoints.length < 2) onCalibratePointAdd?.(scene);
       } else if (mode === "sketch-interior-wall") {
@@ -663,11 +766,18 @@ export default function SetoutCanvas({
         } else {
           const onEdge = snapToPlanEdge(scene);
           const end = onEdge ?? (snapInteriorWalls ? snapOrthogonal(interiorWallDraftStart, scene) : scene);
-          onInteriorWallSegmentAdd?.(interiorWallDraftStart, end);
+          onInteriorWallSegmentAdd?.(interiorWallDraftStart, end, pendingCurveControl ?? undefined);
+          if (pendingCurveControl) setPendingCurveControl(null);
         }
       } else if (mode === "place-opening") {
         const result = nearestWallAndOffset(scene, walls);
-        if (result) onOpeningPlace?.(result.wall.id, result.offset);
+        if (result) {
+          if (result.wall.curveControl) {
+            onOpeningPlaceOnCurveBlocked?.();
+          } else {
+            onOpeningPlace?.(result.wall.id, result.offset);
+          }
+        }
       } else if (mode === "pick-measurement-ref") {
         // Background tap = pick a wall or opening edge, but only if the tap
         // actually landed close to one — walls/openings aren't labelled on
@@ -745,8 +855,12 @@ export default function SetoutCanvas({
         // A wall-mounted fitting goes on a wall. With walls traced that's the
         // traced geometry; with tracing skipped the plan's own line work is
         // all there is, and its FACE is what a tape measures to.
+        // Shift bypasses all of this at placement time too, same as it does
+        // for an already-placed fitting being dragged.
         let point: Point;
-        if (isSingleWallFitting(selectedFittingType)) {
+        if (bypassSnap) {
+          point = scene;
+        } else if (isSingleWallFitting(selectedFittingType)) {
           point = walls.length > 0 ? snapToNearestWall(scene, walls, openings) : (snapToPlanEdge(scene) ?? scene);
         } else {
           const ceilingPoints = fittings.filter((f) => !isSingleWallFitting(f.type)).map((f) => f.position);
@@ -765,7 +879,7 @@ export default function SetoutCanvas({
       } else if (mode === "link-data-cabinet") {
         onCabinetTap?.(null);
       } else if (mode === "place-photo-points") {
-        onPhotoPointPlace?.(scene);
+        onPhotoPointPlace?.(scene, clientX, clientY);
       }
     },
     [
@@ -788,7 +902,11 @@ export default function SetoutCanvas({
       onInteriorWallSegmentAdd,
       onInteriorWallChainEnd,
       snapInteriorWalls,
+      curveMode,
+      pendingCurveControl,
+      onCurveControlCaptured,
       onOpeningPlace,
+      onOpeningPlaceOnCurveBlocked,
       onMeasurementRefPick,
       onPickPlanMeasurementRef,
       onMeasurementPickCancel,
@@ -802,6 +920,8 @@ export default function SetoutCanvas({
       walls,
       openings,
       fittings,
+      measureDraft,
+      onMeasurePointAdd,
     ]
   );
 
@@ -833,7 +953,12 @@ export default function SetoutCanvas({
         const dy = (e.clientY - clientY) * scale;
         const raw = { x: origin.x + dx, y: origin.y + dy };
         let position = raw;
-        if (isSingleWallFitting(type)) {
+        // Shift bypasses every placement assist (wall snap, align-to-points)
+        // for exactly this drag — the tradie's own judgement wins when the
+        // snap logic is fighting a position they actually want.
+        if (e.shiftKey) {
+          setAlignGuides(null);
+        } else if (isSingleWallFitting(type)) {
           // Pass dragOrigin to allow snapping to different walls during drag
           position = snapToNearestWall(raw, walls, openings, origin);
           setAlignGuides(null);
@@ -853,7 +978,10 @@ export default function SetoutCanvas({
         setOpeningDragPreview({ id: openingId, offset });
       } else if (mode === "place-fittings" && selectedFittingType && !isSingleWallFitting(selectedFittingType)) {
         // Show the halfway point being aimed at, and the two fittings it sits
-        // between, before anything is committed.
+        // between, before anything is committed. This doubles as the main
+        // visual reference for where the pointer is while placing a ceiling
+        // fitting, so it stays visible even while Shift is held — only the
+        // actual placement (commitBackgroundTap) skips the snap on tap.
         const scene = sceneFromClient(e.clientX, e.clientY);
         const ceilingPoints = fittings.filter((f) => !isSingleWallFitting(f.type)).map((f) => f.position);
         const mid = findMidpointSnap(scene, ceilingPoints, midpointTolerance());
@@ -874,7 +1002,14 @@ export default function SetoutCanvas({
 
   const endDrag = useCallback(() => {
     if (dragState.current && dragPreview) {
-      onFittingDrag?.(dragState.current.fittingId, dragPreview.position);
+      // A plain tap-to-select never moved the pointer, so the preview is
+      // still exactly the fitting's starting position (pointermove is what
+      // updates it — see handlePointerMove above). Feeding that through as a
+      // move anyway made SetoutPlan's handleFittingDrag re-run the wall-mount
+      // auto-rotate on every select, which can silently flip a fitting to
+      // face a different nearby wall without it ever being touched.
+      const moved = dragPreview.position.x !== dragState.current.origin.x || dragPreview.position.y !== dragState.current.origin.y;
+      if (moved) onFittingDrag?.(dragState.current.fittingId, dragPreview.position);
     }
     if (openingDragState.current && openingDragPreview) {
       onOpeningDrag?.(openingDragState.current.openingId, openingDragPreview.offset);
@@ -894,7 +1029,7 @@ export default function SetoutCanvas({
         const travelled = Math.hypot(e.clientX - pending.clientX, e.clientY - pending.clientY);
         // Barely moved: the tradie meant to place something here. Moved: they
         // were dragging the plan around, so leave the canvas alone.
-        if (travelled <= TAP_SLOP_PX) commitBackgroundTap(pending.clientX, pending.clientY);
+        if (travelled <= TAP_SLOP_PX) commitBackgroundTap(pending.clientX, pending.clientY, e.shiftKey);
       }
       endPan();
       endDrag();
@@ -1059,16 +1194,50 @@ export default function SetoutCanvas({
   const lightPools = useMemo(() => {
     if (!layerVisibility?.coverage) return [];
     const downlights = fittings.filter((f) => f.type === "downlight");
-    return downlights.map((f) => {
+    // A twin downlight is two real lamps, each throwing its own pool from its
+    // own offset position — not one pool centred on the fixture (see
+    // downlightLampPositions). Flattened here so overlap is checked lamp
+    // against lamp, not fixture against fixture.
+    const lampPools = downlights.flatMap((f) => {
       const pos = dragPreview?.id === f.id ? dragPreview.position : f.position;
-      const radius = lightPoolRadius(f.specs);
-      const overlapsAnother = downlights.some((other) => {
-        if (other.id === f.id) return false;
-        const otherPos = dragPreview?.id === other.id ? dragPreview.position : other.position;
-        return poolsSignificantlyOverlap(pos, radius, otherPos, lightPoolRadius(other.specs));
-      });
-      return { id: f.id, position: pos, radius, overlapsAnother };
+      // A downlight placed before ceiling height was a real per-fitting spec
+      // has no mountingHeight of its own — fall back to this job's ceiling
+      // height default rather than the hardcoded 2.4m inside lightPoolRadius,
+      // so an existing downlight's circle tracks a ceiling-height default
+      // the tradie sets after the fact just like a newly placed one would.
+      const specs = f.specs.mountingHeight != null ? f.specs : { ...f.specs, mountingHeight: ceilingHeightDefaultM };
+      const radius = lightPoolRadius(specs);
+      return downlightLampPositions({ position: pos, specs: f.specs }).map((lampPosition, i) => ({
+        id: `${f.id}-${i}`,
+        fittingId: f.id,
+        position: lampPosition,
+        radius,
+      }));
     });
+    return lampPools.map((pool) => {
+      // A twin's own two lamps sit deliberately close together — that's not
+      // a placement mistake, so only another fixture's lamp can trigger the
+      // overlap warning, never a fixture's own sibling lamp.
+      const overlapsAnother = lampPools.some(
+        (other) => other.fittingId !== pool.fittingId && poolsSignificantlyOverlap(pool.position, pool.radius, other.position, other.radius)
+      );
+      return { ...pool, overlapsAnother };
+    });
+  }, [fittings, layerVisibility?.coverage, dragPreview, ceilingHeightDefaultM]);
+
+  // Same overlay toggle as the downlight light pools, since it's the same
+  // "how far does this actually reach" concept — but unlike a light pool,
+  // two APs' circles overlapping is normal (that's roaming coverage, not a
+  // mistake), so this deliberately has no overlap-warning styling.
+  const wifiPools = useMemo(() => {
+    if (!layerVisibility?.coverage) return [];
+    return fittings
+      .filter((f) => f.type === "wifi_ap")
+      .map((f) => ({
+        id: f.id,
+        position: dragPreview?.id === f.id ? dragPreview.position : f.position,
+        radius: f.specs.wifiRangeM ?? DEFAULT_WIFI_RANGE_M,
+      }));
   }, [fittings, layerVisibility?.coverage, dragPreview]);
 
   // Each gang of a switch plate is its own loop-in chain, not a star — the
@@ -1317,7 +1486,21 @@ export default function SetoutCanvas({
     return () => window.clearTimeout(id);
   }, [viewBox, onViewSettled]);
 
-  const iconScale = (ICON_SCREEN_PX * px2scene()) / 24;
+  // Icons are drawn at a constant SCREEN size (ICON_SCREEN_PX) so they don't
+  // vanish when the tradie zooms in on detail. Zoomed the other way — out
+  // far enough to see a whole house — that "constant on screen" becomes huge
+  // in plan terms: icons overlap each other, and a wall-mounted symbol's
+  // offset into the room (offsetSymbolIntoRoom, a fixed few cm — real wall
+  // thickness, not something that can just be made bigger) is dwarfed by an
+  // icon many times that size, so it visually drifts off its wall. Capping
+  // the icon's real-world footprint lets it keep its constant screen size at
+  // normal zoom (where that cap is never reached) but shrink like everything
+  // else on the plan once zoomed out past MAX_ICON_SCENE_M. A real GPO/switch
+  // plate is roughly 100mm; 200mm keeps the drafting convention of drawing
+  // symbols oversized for legibility without growing so far past the wall
+  // offset that it visibly floats off the wall.
+  const MAX_ICON_SCENE_M = 0.2;
+  const iconScale = Math.min(ICON_SCREEN_PX * px2scene(), MAX_ICON_SCENE_M) / 24;
   const cursorClass = panMode || mode === "view" ? "cursor-grab active:cursor-grabbing" : "cursor-crosshair";
 
   return (
@@ -1399,11 +1582,9 @@ export default function SetoutCanvas({
                       // onWallTap), so being generous with the margin costs
                       // nothing — a mis-tap between two close walls just
                       // selects the wrong one, easy to correct.
-                      <line
-                        x1={seg.from.x}
-                        y1={seg.from.y}
-                        x2={seg.to.x}
-                        y2={seg.to.y}
+                      <WallStroke
+                        seg={seg}
+                        curveControl={wall.curveControl}
                         stroke="transparent"
                         strokeWidth={wallThickness.interior + 90 * px2scene()}
                         vectorEffect="non-scaling-stroke"
@@ -1416,11 +1597,9 @@ export default function SetoutCanvas({
                       // "interior") plus a small fixed on-screen margin so
                       // it still reads as a glow around the wall rather than
                       // being swallowed by the solid line drawn on top.
-                      <line
-                        x1={seg.from.x}
-                        y1={seg.from.y}
-                        x2={seg.to.x}
-                        y2={seg.to.y}
+                      <WallStroke
+                        seg={seg}
+                        curveControl={wall.curveControl}
                         stroke="currentColor"
                         strokeOpacity={0.35}
                         strokeWidth={wallThickness.interior + 14 * px2scene()}
@@ -1429,11 +1608,9 @@ export default function SetoutCanvas({
                         pointerEvents="none"
                       />
                     )}
-                    <line
-                      x1={seg.from.x}
-                      y1={seg.from.y}
-                      x2={seg.to.x}
-                      y2={seg.to.y}
+                    <WallStroke
+                      seg={seg}
+                      curveControl={wall.curveControl}
                       stroke="currentColor"
                       strokeWidth={wall.kind === "interior" ? wallThickness.interior : wallThickness.exterior}
                       strokeLinecap="square"
@@ -1549,8 +1726,8 @@ export default function SetoutCanvas({
 
         {sketchPoints.length > 0 && (
           <g className="text-primary">
-            <polyline
-              points={sketchPoints.map((p) => `${p.x},${p.y}`).join(" ")}
+            <path
+              d={pathToSvgD(sketchPoints)}
               fill="none"
               stroke="currentColor"
               strokeWidth={2}
@@ -1570,6 +1747,21 @@ export default function SetoutCanvas({
               />
             ))}
           </g>
+        )}
+
+        {pendingCurveControl && (
+          // Distinct colour from the plain corner dots — this is the
+          // captured curve control point, waiting on the next tap (the
+          // destination corner) to consume it.
+          <circle
+            cx={pendingCurveControl.x}
+            cy={pendingCurveControl.y}
+            r={CORNER_MARKER_PX * px2scene()}
+            className="fill-amber-500"
+            stroke="hsl(var(--background))"
+            strokeWidth={1.5}
+            vectorEffect="non-scaling-stroke"
+          />
         )}
 
         {midpointGuide && (
@@ -1677,6 +1869,28 @@ export default function SetoutCanvas({
           </g>
         )}
 
+        {/* A different colour (accent, not primary) and a longer dash than a
+            light pool, so the two overlays read apart at a glance — and no
+            overlap-warning styling, since two APs' circles overlapping is
+            normal roaming coverage, not a placement mistake like a doubled-up
+            downlight. */}
+        {wifiPools.length > 0 && (
+          <g>
+            {wifiPools.map((pool) => (
+              <circle
+                key={pool.id}
+                cx={pool.position.x}
+                cy={pool.position.y}
+                r={pool.radius}
+                className="fill-accent/10 stroke-accent/60"
+                strokeWidth={1}
+                strokeDasharray="0.3 0.2"
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
+          </g>
+        )}
+
         {switchLinks.length > 0 && (
           <g>
             {switchLinks.map((link) => {
@@ -1695,15 +1909,20 @@ export default function SetoutCanvas({
               const cx = (link.switchPos.x + link.targetPos.x) / 2 + nx * bow;
               const cy = (link.switchPos.y + link.targetPos.y) / 2 + ny * bow;
               const fontSize = 10 * px2scene();
+              // highlightSwitchLinks is the "check the wiring" toggle — every
+              // run shows in red (the same styling the actively-edited gang
+              // already gets), not just the one gang is currently being
+              // worked on.
+              const highlighted = link.active || highlightSwitchLinks;
               return (
                 <g key={link.key}>
                   <path
                     d={`M ${link.switchPos.x} ${link.switchPos.y} Q ${cx} ${cy} ${link.targetPos.x} ${link.targetPos.y}`}
                     fill="none"
-                    className={link.active ? "text-primary" : "text-muted-foreground"}
+                    className={highlighted ? "text-primary" : "text-muted-foreground"}
                     stroke="currentColor"
-                    strokeOpacity={link.active ? 0.8 : 0.35}
-                    strokeWidth={link.active ? 1.5 : 1}
+                    strokeOpacity={highlighted ? 0.8 : 0.35}
+                    strokeWidth={highlighted ? 1.5 : 1}
                     strokeDasharray="0.12 0.08"
                     vectorEffect="non-scaling-stroke"
                   />
@@ -1715,7 +1934,7 @@ export default function SetoutCanvas({
                       textAnchor="middle"
                       stroke="hsl(var(--background))"
                       strokeWidth={fontSize * 0.28}
-                      className={link.active ? "text-primary" : "text-muted-foreground"}
+                      className={highlighted ? "text-primary" : "text-muted-foreground"}
                       fill="currentColor"
                       paintOrder="stroke"
                     >
@@ -1857,17 +2076,19 @@ export default function SetoutCanvas({
           .filter((f) => f.type === "led_strip" && (f.specs.path?.length ?? 0) >= 2)
           .map((f) => {
             const path = f.specs.path!;
-            const points = path.map((pt) => `${pt.x},${pt.y}`).join(" ");
+            const d = pathToSvgD(path);
             const selected = selectedFittingId === f.id;
             const mid = pathMidpoint(path);
             const lengthMm = Math.round(pathLength(path) * 1000);
             const circuitColor = colorForCircuit(circuits, f.circuit_id);
             return (
               <g key={`strip-${f.id}`}>
-                {/* A wide transparent line under the visible one: a 4px strip is
-                    almost impossible to hit with a gloved finger. */}
-                <polyline
-                  points={points}
+                {/* A wide transparent stroke under the visible one: a 4px strip is
+                    almost impossible to hit with a gloved finger. Rendered as a
+                    real <path> (not a sampled polyline) so a curved run's actual
+                    curve geometry is what SVG paints and hit-tests. */}
+                <path
+                  d={d}
                   fill="none"
                   stroke="transparent"
                   strokeWidth={16}
@@ -1878,13 +2099,18 @@ export default function SetoutCanvas({
                   onPointerDown={(e) => handleFittingPointerDown(e, f)}
                   style={{ cursor: "pointer" }}
                 />
-                <polyline
-                  points={points}
+                <path
+                  d={d}
                   fill="none"
                   className="text-primary"
                   stroke={selected ? "hsl(var(--primary))" : circuitColor ?? "currentColor"}
-                  strokeWidth={selected ? 6 : 4}
-                  vectorEffect="non-scaling-stroke"
+                  // A real physical width (a typical LED aluminium channel,
+                  // ~15mm) rather than non-scaling-stroke — same convention
+                  // as the wall lines (strokeWidth={wallThickness...} below),
+                  // so the run shrinks with the rest of the plan when zoomed
+                  // out instead of staying a constant on-screen thickness
+                  // that reads as disproportionately fat at house scale.
+                  strokeWidth={selected ? 0.022 : 0.015}
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   pointerEvents="none"
@@ -1908,8 +2134,8 @@ export default function SetoutCanvas({
         {/* The run being drawn right now, before it's saved. */}
         {stripDraft.length > 0 && (
           <g pointerEvents="none">
-            <polyline
-              points={stripDraft.map((pt) => `${pt.x},${pt.y}`).join(" ")}
+            <path
+              d={pathToSvgD(stripDraft)}
               fill="none"
               className="text-primary"
               stroke="currentColor"
@@ -1922,6 +2148,48 @@ export default function SetoutCanvas({
             {stripDraft.map((pt, i) => (
               <circle key={i} cx={pt.x} cy={pt.y} r={iconScale * 3} className="text-primary" fill="currentColor" />
             ))}
+          </g>
+        )}
+
+        {/* An ad-hoc tape measure — never saved, just a running readout of
+            each leg while the tradie walks it out (e.g. down a hallway). A
+            distinct colour (accent, not primary) so it doesn't read as an
+            LED strip mid-trace. */}
+        {measureDraft.length > 0 && (
+          <g pointerEvents="none">
+            <polyline
+              points={measureDraft.map((pt) => `${pt.x},${pt.y}`).join(" ")}
+              fill="none"
+              className="text-accent-foreground"
+              stroke="currentColor"
+              strokeWidth={4}
+              strokeDasharray="6 4"
+              vectorEffect="non-scaling-stroke"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            {measureDraft.map((pt, i) => (
+              <circle key={i} cx={pt.x} cy={pt.y} r={iconScale * 3} className="text-accent-foreground" fill="currentColor" />
+            ))}
+            {measureDraft.slice(1).map((pt, i) => {
+              const prev = measureDraft[i];
+              const mid = { x: (prev.x + pt.x) / 2, y: (prev.y + pt.y) / 2 };
+              const legMm = Math.round(distance(prev, pt) * 1000);
+              return (
+                <text
+                  key={i}
+                  x={mid.x}
+                  y={mid.y - iconScale * 6}
+                  textAnchor="middle"
+                  fontSize={iconScale * 9}
+                  fontWeight="600"
+                  className="text-accent-foreground"
+                  fill="currentColor"
+                >
+                  {legMm}mm
+                </text>
+              );
+            })}
           </g>
         )}
 

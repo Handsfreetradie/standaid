@@ -1,4 +1,4 @@
-import { distance, isSingleWallFitting, type Point, type WallSegment, type WallOpening, type FittingSpecs, type MeasurementLock, type MeasurementRef, type SetoutPhotoPoint, type SetoutPhotoGallery, type WallThickness, type SetoutFitting } from "./setoutTypes";
+import { distance, isSingleWallFitting, DEFAULT_TWIN_SPACING_MM, type Point, type PathPoint, type WallSegment, type WallOpening, type FittingSpecs, type MeasurementLock, type MeasurementRef, type SetoutPhotoPoint, type SetoutPhotoGallery, type WallThickness, type SetoutFitting } from "./setoutTypes";
 import type { FittingType } from "@/components/setout/symbols";
 
 let wallIdCounter = 0;
@@ -35,17 +35,63 @@ export function snapOrthogonal(prev: Point, raw: Point): Point {
 // already referencing a wallId (a WallOpening, a measurement lock) doesn't
 // silently orphan itself the next time this runs. Only breaks if the corner
 // count/order itself changes between placing something and saving.
-export function polygonToWalls(points: Point[]): WallSegment[] {
+export function polygonToWalls(points: PathPoint[]): WallSegment[] {
   if (points.length < 2) return [];
-  return points.map((start, i) => ({
-    id: `ext-${i}`,
-    start,
-    end: points[(i + 1) % points.length],
-    kind: "exterior" as const,
-  }));
+  return points.map((start, i) => {
+    const end = points[(i + 1) % points.length];
+    return {
+      id: `ext-${i}`,
+      start,
+      end,
+      kind: "exterior" as const,
+      curveControl: end.curveControl,
+    };
+  });
+}
+
+// Quadratic Bézier point at t in [0,1] (start -> control -> end).
+export function quadraticBezierPoint(p0: Point, c: Point, p1: Point, t: number): Point {
+  const mt = 1 - t;
+  return {
+    x: mt * mt * p0.x + 2 * mt * t * c.x + t * t * p1.x,
+    y: mt * mt * p0.y + 2 * mt * t * c.y + t * t * p1.y,
+  };
+}
+
+// Arc length of a quadratic Bézier has no closed form — approximated by
+// sampling a dense polyline instead. 24 samples is plenty accurate at
+// residential curve scales (a few metres), and this is only ever computed
+// on demand, never stored.
+export function quadraticBezierLength(p0: Point, c: Point, p1: Point, samples = 24): number {
+  let total = 0;
+  let prev = p0;
+  for (let i = 1; i <= samples; i++) {
+    const next = quadraticBezierPoint(p0, c, p1, i / samples);
+    total += distance(prev, next);
+    prev = next;
+  }
+  return total;
+}
+
+// Samples a curved wall into straight sub-segments so every straight-line
+// helper below (nearest-point, offset-along, perpendicular-foot) can run
+// against it unchanged, rather than solving exact nearest-point-on-bezier
+// (a cubic). Not stored — computed fresh whenever needed. A straight wall
+// is returned as itself, so this is a safe no-op call site for every wall.
+export function curveSubSegments(wall: WallSegment, samples = 16): WallSegment[] {
+  if (!wall.curveControl) return [wall];
+  const segments: WallSegment[] = [];
+  let prev = wall.start;
+  for (let i = 1; i <= samples; i++) {
+    const next = i === samples ? wall.end : quadraticBezierPoint(wall.start, wall.curveControl, wall.end, i / samples);
+    segments.push({ id: `${wall.id}-sub-${i}`, start: prev, end: next, kind: wall.kind });
+    prev = next;
+  }
+  return segments;
 }
 
 export function wallLength(wall: WallSegment): number {
+  if (wall.curveControl) return quadraticBezierLength(wall.start, wall.curveControl, wall.end);
   return distance(wall.start, wall.end);
 }
 
@@ -97,21 +143,29 @@ export const DEFAULT_SWITCH_HEIGHT = 1.2;
 // the same height field, not a strict standard for every one of these.
 const DEFAULT_HEIGHT_BY_TYPE: Partial<Record<FittingType, number>> = {
   gpo: DEFAULT_GPO_HEIGHT,
+  gpo_switch_combo: DEFAULT_GPO_HEIGHT,
   switch: DEFAULT_SWITCH_HEIGHT,
+  cooktop_isolator: DEFAULT_SWITCH_HEIGHT,
   tv_point: 0.3,
   phone_point: 0.3,
   data: 0.3,
   data_cabinet: 0.3,
   nbn_box: 0.3,
   ubo_rhood: 0.3,
-  vacuum_outlet: 0.3,
   wall_stair_light: 0.3,
   meter_box: 1.5,
   switchboard: 1.5,
   thermostat: 1.5,
+  hot_water_unit: 1.5,
+  spa_pool_heater: 1.5,
+  cooktop: 1.2,
+  oven: 0.9,
   wall_batten_holder: 2.0,
   ac_head_unit: 2.1,
   external_light: 2.1,
+  heated_towel_rail: 1.0,
+  underfloor_heating_stat: 1.5,
+  solar_inverter: 1.6,
 };
 
 export function defaultHeightForType(type: FittingType): number | null {
@@ -130,6 +184,23 @@ export function lightPoolRadius(specs: FittingSpecs): number {
   return height * Math.tan(halfAngleRad);
 }
 
+// A twin downlight is two actual lamps, offset either side of the fitting's
+// placed position along whatever direction it's rotated to (see the twin
+// glyph render in SetoutCanvas, which offsets the same way in icon-local
+// space before the same rotation is applied) — so its real floor coverage is
+// two overlapping pools, not one pool centred on the fixture. A plain
+// downlight is just the one lamp at its own position.
+export function downlightLampPositions(fitting: Pick<SetoutFitting, "position" | "specs">): Point[] {
+  if (!fitting.specs.twin) return [fitting.position];
+  const spacingM = (fitting.specs.twinSpacingMm ?? DEFAULT_TWIN_SPACING_MM) / 1000;
+  const rotationRad = (fitting.specs.rotation ?? 0) * (Math.PI / 180);
+  const halfOffset = { x: (spacingM / 2) * Math.cos(rotationRad), y: (spacingM / 2) * Math.sin(rotationRad) };
+  return [
+    { x: fitting.position.x + halfOffset.x, y: fitting.position.y + halfOffset.y },
+    { x: fitting.position.x - halfOffset.x, y: fitting.position.y - halfOffset.y },
+  ];
+}
+
 // Two light pools count as "significantly" overlapping (worth flagging as
 // possibly doubled-up) once their circles overlap by more than this fraction
 // of their combined radii — i.e. distance between centres is less than this
@@ -141,10 +212,7 @@ export function poolsSignificantlyOverlap(centreA: Point, radiusA: number, centr
   return d < (radiusA + radiusB) * OVERLAP_WARNING_FACTOR;
 }
 
-// Closest point to `p` on the finite wall segment (not the infinite line
-// through it) — a fitting near a corner should measure off the wall's actual
-// end, not a point that would fall past it.
-export function closestPointOnWall(p: Point, wall: WallSegment): Point {
+function closestPointOnStraightSegment(p: Point, wall: Pick<WallSegment, "start" | "end">): Point {
   const dx = wall.end.x - wall.start.x;
   const dy = wall.end.y - wall.start.y;
   const lengthSq = dx * dx + dy * dy;
@@ -152,6 +220,26 @@ export function closestPointOnWall(p: Point, wall: WallSegment): Point {
   let t = ((p.x - wall.start.x) * dx + (p.y - wall.start.y) * dy) / lengthSq;
   t = Math.max(0, Math.min(1, t));
   return { x: wall.start.x + t * dx, y: wall.start.y + t * dy };
+}
+
+// Closest point to `p` on the finite wall segment (not the infinite line
+// through it) — a fitting near a corner should measure off the wall's actual
+// end, not a point that would fall past it. Curved walls are sampled into
+// straight sub-segments first (see curveSubSegments) and the best result
+// kept.
+export function closestPointOnWall(p: Point, wall: WallSegment): Point {
+  if (!wall.curveControl) return closestPointOnStraightSegment(p, wall);
+  let best = wall.start;
+  let bestDist = Infinity;
+  for (const seg of curveSubSegments(wall)) {
+    const candidate = closestPointOnStraightSegment(p, seg);
+    const d = distance(p, candidate);
+    if (d < bestDist) {
+      bestDist = d;
+      best = candidate;
+    }
+  }
+  return best;
 }
 
 export function perpendicularDistanceToWall(p: Point, wall: WallSegment): number {
@@ -163,7 +251,7 @@ export function perpendicularDistanceToWall(p: Point, wall: WallSegment): number
 // end from one that just landed at 0/length. This is how a door/window
 // opening's {offset, width} get derived from two raw AI/tap points, and how
 // "does this point fall inside an opening" gets checked in snapToNearestWall.
-export function projectPointOntoWall(p: Point, wall: WallSegment): number {
+function projectPointOntoStraightSegment(p: Point, wall: Pick<WallSegment, "start" | "end">): number {
   const dx = wall.end.x - wall.start.x;
   const dy = wall.end.y - wall.start.y;
   const len = Math.hypot(dx, dy) || 1;
@@ -171,10 +259,47 @@ export function projectPointOntoWall(p: Point, wall: WallSegment): number {
   return t * len;
 }
 
+// Scalar distance along the wall (from wall.start) to p's perpendicular
+// foot. For a curved wall this is an arc-length offset: the sub-segment
+// with the closest foot is found first, then every earlier sub-segment's
+// own length is added on so the result is still "metres from wall.start",
+// same convention pointAtOffset expects back.
+export function projectPointOntoWall(p: Point, wall: WallSegment): number {
+  if (!wall.curveControl) return projectPointOntoStraightSegment(p, wall);
+  let bestOffset = 0;
+  let bestDist = Infinity;
+  let cumulative = 0;
+  for (const seg of curveSubSegments(wall)) {
+    const segLen = distance(seg.start, seg.end);
+    const localT = segLen === 0 ? 0 : Math.max(0, Math.min(segLen, projectPointOntoStraightSegment(p, seg))) / segLen;
+    const candidate = { x: seg.start.x + (seg.end.x - seg.start.x) * localT, y: seg.start.y + (seg.end.y - seg.start.y) * localT };
+    const d = distance(p, candidate);
+    if (d < bestDist) {
+      bestDist = d;
+      bestOffset = cumulative + localT * segLen;
+    }
+    cumulative += segLen;
+  }
+  return bestOffset;
+}
+
 export function pointAtOffset(wall: WallSegment, offset: number): Point {
   const len = wallLength(wall) || 1;
-  const t = Math.max(0, Math.min(1, offset / len));
-  return { x: wall.start.x + (wall.end.x - wall.start.x) * t, y: wall.start.y + (wall.end.y - wall.start.y) * t };
+  const clamped = Math.max(0, Math.min(len, offset));
+  if (!wall.curveControl) {
+    const t = clamped / len;
+    return { x: wall.start.x + (wall.end.x - wall.start.x) * t, y: wall.start.y + (wall.end.y - wall.start.y) * t };
+  }
+  let remaining = clamped;
+  for (const seg of curveSubSegments(wall)) {
+    const segLen = distance(seg.start, seg.end);
+    if (remaining <= segLen || segLen === 0) {
+      const t = segLen === 0 ? 0 : remaining / segLen;
+      return { x: seg.start.x + (seg.end.x - seg.start.x) * t, y: seg.start.y + (seg.end.y - seg.start.y) * t };
+    }
+    remaining -= segLen;
+  }
+  return wall.end;
 }
 
 // Clearance kept from a door/window opening's edge when a fitting snaps
@@ -189,12 +314,23 @@ const OPENING_CLEARANCE_METRES = 0.1;
 // wrong for a measurement lock: that clamped distance is a diagonal to a
 // corner, not a 90° reading, and must not be offered as one.
 function hasPerpendicularFoot(p: Point, wall: WallSegment): boolean {
-  const dx = wall.end.x - wall.start.x;
-  const dy = wall.end.y - wall.start.y;
-  const lengthSq = dx * dx + dy * dy;
-  if (lengthSq === 0) return false;
-  const t = ((p.x - wall.start.x) * dx + (p.y - wall.start.y) * dy) / lengthSq;
-  return t >= 0 && t <= 1;
+  const segments = wall.curveControl ? curveSubSegments(wall) : [wall];
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const dx = seg.end.x - seg.start.x;
+    const dy = seg.end.y - seg.start.y;
+    const lengthSq = dx * dx + dy * dy;
+    if (lengthSq === 0) continue;
+    const t = ((p.x - seg.start.x) * dx + (p.y - seg.start.y) * dy) / lengthSq;
+    if (t < 0 || t > 1) continue;
+    // Only the wall's own two outer ends (first sub-segment's start, last
+    // sub-segment's end) count as "off the end" — a foot landing mid-curve,
+    // even right at a sub-segment boundary, is still a genuine foot.
+    if (t <= 0 && i === 0) continue;
+    if (t >= 1 && i === segments.length - 1) continue;
+    return true;
+  }
+  return false;
 }
 
 // Rough "middle of the room" reference point (average of all wall
@@ -207,7 +343,7 @@ export function wallsCentroid(walls: WallSegment[]): Point | null {
   return { x: sum.x / points.length, y: sum.y / points.length };
 }
 
-function nearestMountWall(p: Point, walls: WallSegment[]): WallSegment | null {
+export function nearestMountWall(p: Point, walls: WallSegment[]): WallSegment | null {
   if (walls.length === 0) return null;
   const candidates = walls.filter((wall) => hasPerpendicularFoot(p, wall));
   const pool = candidates.length > 0 ? candidates : walls;
@@ -281,35 +417,17 @@ export function offsetSymbolIntoRoom(position: Point, walls: WallSegment[], wall
   if (!wall) return position;
   const thickness = wall.kind === "interior" ? (wallThickness?.interior ?? 0.05) : (wallThickness?.exterior ?? 0.06);
   const offsetMetres = thickness * 0.6;
-
-  const dx = wall.end.x - wall.start.x;
-  const dy = wall.end.y - wall.start.y;
-  const len = Math.hypot(dx, dy) || 1;
-  const n1 = { x: -dy / len, y: dx / len };
-  const n2 = { x: dy / len, y: -dx / len };
-
-  // Find the closest point on the wall to determine which side we're on
   const closest = closestPointOnWall(position, wall);
-  const toPosition = { x: position.x - closest.x, y: position.y - closest.y };
-
-  // Pick the normal that points in the direction we're already offset
-  const d1 = toPosition.x * n1.x + toPosition.y * n1.y;
-  const d2 = toPosition.x * n2.x + toPosition.y * n2.y;
-  const normal = d2 > d1 ? n2 : n1;
-
-  // Calculate the current offset distance from the wall
-  const currentDist = Math.hypot(toPosition.x, toPosition.y);
-
-  // If already offset (within half offset), maintain the current side and just adjust to the correct distance
-  if (currentDist > offsetMetres * 0.5) {
-    return position;
-  }
-
-  // Otherwise apply the full offset
-  return {
-    x: closest.x + normal.x * offsetMetres,
-    y: closest.y + normal.y * offsetMetres,
-  };
+  // Which side of the wall the room is actually on — the same test the
+  // auto-rotation uses (roomFacingNormal), not a "which way is this position
+  // already offset" guess. A wall-mounted fitting's stored position always
+  // sits exactly on the wall centreline, both on placement and after every
+  // drag (see snapToNearestWall) — so that guess had nothing real to compare
+  // against, and its tie-break always resolved to the same fixed side of the
+  // wall regardless of where the room actually was, on every single
+  // wall-mounted fitting in the app.
+  const normal = roomFacingNormal(wall, closest, wallsCentroid(walls));
+  return { x: closest.x + normal.x * offsetMetres, y: closest.y + normal.y * offsetMetres };
 }
 
 // Snaps a point onto the nearest wall — used for GPOs, switches, and other

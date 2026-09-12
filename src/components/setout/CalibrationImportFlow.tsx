@@ -9,8 +9,8 @@ import { Switch } from "@/components/ui/switch";
 import SetoutCanvas, { type BackgroundTile } from "./SetoutCanvas";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { useUpdateSetoutPlanGeometry } from "@/hooks/useSetoutPlans";
-import { distance, type Point, type SetoutPlan, type WallOpening, type WallSegment } from "@/lib/setoutTypes";
+import { useUpdateSetoutCanvasGeometry } from "@/hooks/useSetoutCanvases";
+import { distance, type PathPoint, type Point, type SetoutCanvas as SetoutCanvasRow, type WallOpening, type WallSegment } from "@/lib/setoutTypes";
 import { applyWallLengths, nextOpeningId, nextWallId, polygonToWalls, wallLength } from "@/lib/setoutGeometry";
 import { detectPlanEdges, type PlanEdges } from "@/lib/edgeDetection";
 import { extractPlanLines, PlanVectorIndex, type PdfPageForVector } from "@/lib/planVector";
@@ -69,25 +69,35 @@ function loadImageFile(file: File): Promise<RasterSource> {
 type Step = "select-file" | "loading" | "calibrate" | "trace-walls" | "adjust-lengths";
 
 interface CalibrationImportFlowProps {
-  plan: SetoutPlan;
+  canvas: SetoutCanvasRow;
+  planId: string;
   onBack: () => void;
   onComplete: () => void;
 }
 
-export default function CalibrationImportFlow({ plan, onBack, onComplete }: CalibrationImportFlowProps) {
+export default function CalibrationImportFlow({ canvas, planId, onBack, onComplete }: CalibrationImportFlowProps) {
   const { user } = useAuth();
   const [step, setStep] = useState<Step>("select-file");
   const [raster, setRaster] = useState<RasterSource | null>(null);
   const [calibPoints, setCalibPoints] = useState<Point[]>([]);
   const [realDistance, setRealDistance] = useState("");
   const [pixelsPerMetre, setPixelsPerMetre] = useState<number | null>(null);
-  const [sketchPoints, setSketchPoints] = useState<Point[]>([]);
+  const [sketchPoints, setSketchPoints] = useState<PathPoint[]>([]);
   const [perimeterFinalized, setPerimeterFinalized] = useState(false);
   const [lengths, setLengths] = useState<string[]>([]);
   const [interiorWalls, setInteriorWalls] = useState<WallSegment[]>([]);
   const [wallOpenings, setWallOpenings] = useState<WallOpening[]>([]);
   const [wallTool, setWallTool] = useState<"perimeter" | "interior" | "opening" | "erase">("perimeter");
   const [straightInteriorWalls, setStraightInteriorWalls] = useState(true);
+  // Perimeter's own version of the interior-wall "keep straight" switch
+  // below — previously hardcoded on with no toggle, so a diagonal exterior
+  // wall genuinely couldn't be drawn at all.
+  const [squarePerimeterWalls, setSquarePerimeterWalls] = useState(true);
+  // One-shot: the NEXT tap in whichever point-chain tool is active (perimeter
+  // or interior) is captured as a curve's control point instead of a corner.
+  // Reset whenever the tool changes so it can't linger into an unrelated tool.
+  const [curveMode, setCurveMode] = useState(false);
+  useEffect(() => setCurveMode(false), [wallTool]);
   const [selectedEraseWallId, setSelectedEraseWallId] = useState<string | null>(null);
   const [interiorDraftStart, setInteriorDraftStart] = useState<Point | null>(null);
   const [openingKind, setOpeningKind] = useState<"door" | "window" | "sliding_door">("door");
@@ -115,7 +125,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
   // moved on gets dropped instead of painting a stale region.
   const tileRequestRef = useRef(0);
   const fileRef = useRef<HTMLInputElement>(null);
-  const saveGeometry = useUpdateSetoutPlanGeometry(plan.id);
+  const saveGeometry = useUpdateSetoutCanvasGeometry(canvas.id, planId);
 
   useEffect(() => {
     return () => {
@@ -250,7 +260,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
     try {
       const blob = await (await fetch(source.href)).blob();
       const ext = source.mimeType === "image/jpeg" ? "jpg" : "png";
-      const folder = `${user.id}/${plan.id}/${crypto.randomUUID()}`;
+      const folder = `${user.id}/${planId}/${crypto.randomUUID()}`;
       const path = `${folder}.${ext}`;
       const { error } = await supabase.storage
         .from("setout-plan-uploads")
@@ -343,6 +353,16 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
   const proceedToLengthAdjustment = () => {
     if (sketchPoints.length < 3) return;
     const walls = polygonToWalls(sketchPoints);
+    // A curved wall's shape is the actual bulge as drawn — typing a
+    // tape-measure length and rebuilding a straight-line corner position
+    // from it has no sound meaning once a segment isn't straight, so skip
+    // this precision step entirely for a shape with any curve in it and
+    // save exactly as traced (same call finishTrace's "Save without
+    // adjusting" path already makes).
+    if (walls.some((w) => w.curveControl)) {
+      void finishTrace(sketchPoints);
+      return;
+    }
     setLengths(walls.map((w) => mmValue(wallLength(w))));
     setStep("adjust-lengths");
   };
@@ -557,6 +577,26 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
           </div>
         )}
 
+        {wallTool === "perimeter" && (
+          <div className="flex items-center gap-2 mb-3">
+            <Switch id="square-perimeter-walls" checked={squarePerimeterWalls} onCheckedChange={setSquarePerimeterWalls} />
+            <Label htmlFor="square-perimeter-walls" className="text-xs font-normal text-muted-foreground">
+              Keep walls straight (90°) — turn off to draw an angled wall
+            </Label>
+          </div>
+        )}
+
+        {(wallTool === "perimeter" || wallTool === "interior") && (
+          <div className="flex items-center gap-2 mb-3">
+            <Button size="sm" variant={curveMode ? "default" : "outline"} onClick={() => setCurveMode((v) => !v)}>
+              Curve
+            </Button>
+            <Label className="text-xs font-normal text-muted-foreground">
+              {curveMode ? "Tap where the wall should bulge to, then the corner it ends at." : "Curve the next wall segment instead of a straight one."}
+            </Label>
+          </div>
+        )}
+
         {(wallTool === "perimeter" || wallTool === "interior") && (
           <div className="flex items-center gap-2 mb-3">
             <Switch id="snap-to-plan" checked={snapEnabled} onCheckedChange={setSnapEnabled} />
@@ -592,22 +632,24 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
           <SetoutCanvas
             backgroundImage={backgroundImage}
             walls={previewWalls}
-            wallThickness={plan.wall_thickness}
+            wallThickness={canvas.wall_thickness}
             openings={wallOpenings}
             mode={canvasMode}
             sketchPoints={sketchPoints}
-            onSketchPointAdd={(p) => setSketchPoints((prev) => [...prev, p])}
+            onSketchPointAdd={(p, curveControl) => setSketchPoints((prev) => [...prev, curveControl ? { ...p, curveControl } : p])}
             onSketchPointUndo={() => setSketchPoints((prev) => prev.slice(0, -1))}
             backgroundTile={tile}
             onViewSettled={handleTraceViewSettled}
             onSketchClose={proceedToLengthAdjustment}
-            snapWalls={wallTool === "perimeter"}
+            snapWalls={wallTool === "perimeter" && squarePerimeterWalls}
             snapToPlan={snapToPlan}
             interiorWallDraftStart={interiorDraftStart}
             onInteriorWallDraftPointAdd={setInteriorDraftStart}
             snapInteriorWalls={straightInteriorWalls}
-            onInteriorWallSegmentAdd={(start, end) => {
-              setInteriorWalls((prev) => [...prev, { id: nextWallId(), start, end, kind: "interior" }]);
+            curveMode={curveMode}
+            onCurveControlCaptured={() => setCurveMode(false)}
+            onInteriorWallSegmentAdd={(start, end, curveControl) => {
+              setInteriorWalls((prev) => [...prev, { id: nextWallId(), start, end, kind: "interior", curveControl }]);
               // Continue the chain from this segment's end rather than
               // resetting — the next tap starts a new segment from here,
               // finishing only once the tradie double-taps/double-clicks.
@@ -615,6 +657,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
             }}
             onInteriorWallChainEnd={() => setInteriorDraftStart(null)}
             onOpeningPlace={handleOpeningPlace}
+            onOpeningPlaceOnCurveBlocked={() => toast.error("Openings can't be placed on a curved wall — cut it into a straight section instead.")}
             onOpeningDrag={(openingId, offset) =>
               setWallOpenings((prev) => prev.map((o) => (o.id === openingId ? { ...o, offset } : o)))
             }
@@ -780,7 +823,7 @@ export default function CalibrationImportFlow({ plan, onBack, onComplete }: Cali
         </p>
 
         <div className="flex-1 min-h-[420px] mb-4">
-          <SetoutCanvas backgroundImage={backgroundImage} walls={previewWalls} wallThickness={plan.wall_thickness} mode="view" />
+          <SetoutCanvas backgroundImage={backgroundImage} walls={previewWalls} wallThickness={canvas.wall_thickness} mode="view" />
         </div>
 
         <div className="grid grid-cols-2 gap-3 mb-6 max-h-48 overflow-y-auto">

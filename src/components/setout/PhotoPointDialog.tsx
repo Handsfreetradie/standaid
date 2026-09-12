@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2, Trash2, ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import Panorama360Viewer from "@/components/setout/Panorama360Viewer";
 import { cn } from "@/lib/utils";
+import type { PhotoPointType } from "@/lib/setoutTypes";
 
 const DIAL_SIZE = 120;
 const DIAL_RADIUS = DIAL_SIZE / 2;
@@ -96,6 +98,9 @@ interface PhotoPointDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   photoUrl: string | null;
+  // "360" gets Pannellum's drag-to-look-around viewer instead of the flat
+  // zoom/pan image — see Panorama360Viewer.
+  photoType?: PhotoPointType;
   loadingPhoto?: boolean;
   directionDegrees: number | null;
   onDirectionChange: (degrees: number) => void;
@@ -111,6 +116,7 @@ export default function PhotoPointDialog({
   open,
   onOpenChange,
   photoUrl,
+  photoType = "flat",
   loadingPhoto,
   directionDegrees,
   onDirectionChange,
@@ -183,19 +189,27 @@ export default function PhotoPointDialog({
             Site photo {photoCount > 1 && `(${currentPhotoIndex + 1} of ${photoCount})`}
           </DialogTitle>
         </DialogHeader>
-        {/* High-res image viewer with zoom/pan */}
+        {/* High-res image viewer with zoom/pan, or Pannellum's own
+            drag-to-look-around viewer for a 360 photo — a 360 handles its
+            own drag/wheel/zoom internally, so none of that wiring applies
+            to it (it would just fight Pannellum's own event handling). */}
         <div
           ref={containerRef}
-          className="rounded-lg overflow-hidden bg-muted flex items-center justify-center flex-1 relative cursor-grab active:cursor-grabbing"
-          onWheel={handleWheel}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
+          className={cn(
+            "rounded-lg overflow-hidden bg-muted flex items-center justify-center flex-1 relative",
+            photoType !== "360" && "cursor-grab active:cursor-grabbing"
+          )}
+          onWheel={photoType === "360" ? undefined : handleWheel}
+          onPointerDown={photoType === "360" ? undefined : handlePointerDown}
+          onPointerMove={photoType === "360" ? undefined : handlePointerMove}
+          onPointerUp={photoType === "360" ? undefined : handlePointerUp}
+          onPointerCancel={photoType === "360" ? undefined : handlePointerUp}
           style={{ minHeight: "400px" }}
         >
           {loadingPhoto || !photoUrl ? (
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          ) : photoType === "360" ? (
+            <Panorama360Viewer imageUrl={photoUrl} />
           ) : (
             <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
               <img
@@ -213,8 +227,8 @@ export default function PhotoPointDialog({
               />
             </div>
           )}
-          {/* Zoom controls */}
-          {!loadingPhoto && photoUrl && (
+          {/* Zoom controls — the 360 viewer has its own built-in controls */}
+          {!loadingPhoto && photoUrl && photoType !== "360" && (
             <div className="absolute top-3 right-3 flex gap-1">
               <Button
                 size="sm"

@@ -6,23 +6,35 @@ import { createElement } from "react";
 import { FITTING_LABELS, FITTING_SYMBOLS } from "@/components/setout/symbols";
 import type { FittingType } from "@/components/setout/symbols";
 import { aggregateMaterials } from "@/lib/setoutMaterials";
+import { calculateMaximumDemand } from "@/lib/setoutMaximumDemand";
+import { calculateSolarVoltageRise } from "@/lib/setoutSolarVoltageRise";
+import { loadImageSize } from "@/lib/auditReport";
 import {
   CATEGORY_FOR_TYPE,
   FITTING_CATEGORY_ORDER,
   colorForCircuit,
-  gangsFor,
+  distance,
   isSingleWallFitting,
   symbolExtraPropsFor,
-  wayCountForTarget,
   LAYER_LABELS,
   type Point,
-  type MeasurementRef,
   type SetoutCircuit,
   type SetoutFitting,
+  type SetoutLoadItem,
   type SetoutPlan,
+  type SetoutCanvas,
 } from "@/lib/setoutTypes";
-import { wallLength, pointAtOffset, wallsCentroid, roomFacingNormal } from "@/lib/setoutGeometry";
-import { formatMm } from "@/lib/units";
+import { wallLength, pointAtOffset, wallsCentroid, roomFacingNormal, nearestMountWall, closestPointOnWall } from "@/lib/setoutGeometry";
+
+/** The tradie's business branding — printed on the switchboard legend so the
+ * sheet stuck inside the switchboard door identifies who wired it. */
+export interface ReportBusiness {
+  name?: string | null;
+  licenceNumber?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  logoBase64?: string | null; // data URL
+}
 
 const PAGE_W = 210; // A4 mm
 const PAGE_H = 297;
@@ -36,6 +48,41 @@ export interface PlanImage {
   dataUrl: string;
   width: number;
   height: number;
+}
+
+// A one-line summary appended to a circuit's row description in the
+// switchboard legend when a "Solar inverter" fitting is assigned to it —
+// the legend table itself is generic/type-agnostic (any circuit prints
+// label/breaker/points served the same way), so this is the one place solar
+// needs its own text rather than a structural change. Solar specs live on
+// the inverter fitting itself (set in the palette panel), not the circuit —
+// same source of truth MaximumDemandPanel's Solar section reads from, cable
+// run length included (straight-line distance to the nearest switchboard).
+function solarCircuitDetail(circuit: SetoutCircuit, fittings: SetoutFitting[]): string | null {
+  const inverter = fittings.find((f) => f.circuit_id === circuit.id && f.type === "solar_inverter");
+  if (!inverter) return null;
+  const specs = inverter.specs;
+  const board = fittings
+    .filter((f) => f.type === "switchboard")
+    .reduce<{ f: SetoutFitting; d: number } | null>((best, f) => {
+      const d = distance(inverter.position, f.position);
+      return !best || d < best.d ? { f, d } : best;
+    }, null);
+  if ((specs.inverterSystemType ?? "ac") !== "ac" || !specs.inverterCableMaterial || !specs.inverterCableCsaMm2 || !board || !specs.inverterOutputAmps) {
+    return "Solar inverter";
+  }
+  const rise = calculateSolarVoltageRise({
+    material: specs.inverterCableMaterial,
+    cableCsaMm2: specs.inverterCableCsaMm2,
+    systemType: "ac",
+    phase: specs.inverterPhase,
+    runLengthM: board.d,
+    currentAmps: specs.inverterOutputAmps,
+    supplyVoltage: specs.inverterPhase === "three" ? 400 : 230,
+  });
+  const base = `Solar: ${specs.inverterOutputAmps}A, ${specs.inverterCableCsaMm2}mm² ${specs.inverterCableMaterial}, ${board.d.toFixed(1)}m run`;
+  if (!rise) return base;
+  return `${base} — ${rise.pass ? "PASS" : "FAIL"} (${rise.voltageRisePercent.toFixed(1)}% rise)`;
 }
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -67,6 +114,7 @@ async function drawFittingSymbol(
   color: string,
   svg2pdf: Svg2Pdf,
   renderToStaticMarkup: RenderToStaticMarkup,
+  sizeMm: number = SYMBOL_SIZE_MM,
 ): Promise<void> {
   const Icon = FITTING_SYMBOLS[fitting.type];
   if (!Icon) return;
@@ -90,10 +138,10 @@ async function drawFittingSymbol(
     svgEl.appendChild(g);
   }
   await svg2pdf(svgEl, doc, {
-    x: pagePos.x - (anchorX / 24) * SYMBOL_SIZE_MM,
-    y: pagePos.y - (anchorY / 24) * SYMBOL_SIZE_MM,
-    width: SYMBOL_SIZE_MM,
-    height: SYMBOL_SIZE_MM,
+    x: pagePos.x - (anchorX / 24) * sizeMm,
+    y: pagePos.y - (anchorY / 24) * sizeMm,
+    width: sizeMm,
+    height: sizeMm,
   });
 }
 
@@ -119,14 +167,22 @@ const CODE_PREFIX: Record<FittingType, string> = {
   led_strip: "LED",
   // Switches
   switch: "SW",
+  cooktop_isolator: "ISO",
   // Power
   gpo: "GPO",
+  gpo_switch_combo: "25XA",
   tv_point: "TV",
   phone_point: "TEL",
   meter_box: "MB",
   nbn_box: "NBN",
   ubo_rhood: "UBO",
   switchboard: "MSB",
+  cooktop: "CT",
+  oven: "OV",
+  hot_water_unit: "HWU",
+  spa_pool_heater: "SPA",
+  other_appliance: "APPL",
+  solar_inverter: "SOLAR",
   // Data
   data: "DATA",
   data_cabinet: "DC",
@@ -144,13 +200,17 @@ const CODE_PREFIX: Record<FittingType, string> = {
   ac_condenser: "ACC",
   ac_head_unit: "ACH",
   cooling_unit: "CU",
-  // Ducted vacuum
-  vacuum_unit: "DV",
-  vacuum_outlet: "DVO",
+  heated_towel_rail: "HTR",
+  underfloor_heating_stat: "UFH",
+  // Network
+  wifi_ap: "AP",
 };
 
 // Numbers fittings per-type in array order, e.g. first downlight = "DL1".
-function buildFittingCodes(fittings: SetoutFitting[]): Map<string, string> {
+// Exported so the on-screen switchboard legend preview shows the exact same
+// codes the PDF export prints — one shared source of numbering, not two
+// copies that could drift apart.
+export function buildFittingCodes(fittings: SetoutFitting[]): Map<string, string> {
   const counters: Partial<Record<FittingType, number>> = {};
   const codes = new Map<string, string>();
   for (const f of fittings) {
@@ -186,14 +246,14 @@ function drawPageHeader(doc: jsPDF, plan: SetoutPlan, sectionTitle: string): num
 async function drawPlanPage(
   doc: jsPDF,
   plan: SetoutPlan,
+  canvas: SetoutCanvas,
   fittings: SetoutFitting[],
   circuits: SetoutCircuit[],
-  codes: Map<string, string>,
   svg2pdf: Svg2Pdf,
   renderToStaticMarkup: RenderToStaticMarkup,
   planImage?: PlanImage,
 ): Promise<void> {
-  let y = drawPageHeader(doc, plan, "Marked-up plan");
+  let y = drawPageHeader(doc, plan, `Marked-up plan — ${canvas.name}`);
 
   doc.setFontSize(8);
   doc.setTextColor(150, 110, 0);
@@ -204,15 +264,16 @@ async function drawPlanPage(
   doc.text(disclaimerLines, MARGIN, y);
   y += disclaimerLines.length * 3.6 + 4;
 
-  // Legend height depends on fitting count (plus one header row per
-  // category group actually in use) so the plan drawing gets the rest of
-  // the page rather than a fixed, often-wasted, split.
-  const usedCategories = new Set(fittings.map((f) => CATEGORY_FOR_TYPE[f.type]));
-  const legendRows = Math.max(fittings.length, 1) + usedCategories.size;
-  const legendH = 10 + legendRows * 3.6;
+  // The plan drawing always gets a fixed, generous share of the page,
+  // regardless of fitting count — a job with a lot of fittings (and so a
+  // long legend) spills the legend onto extra pages instead of squeezing the
+  // plan drawing down to nothing to make room for it. A previous version
+  // sized this off the legend's own row count, which went negative once the
+  // legend needed more room than the whole page had, collapsing the legend
+  // text up on top of the header instead of paginating.
   const planTop = y;
-  const planBottom = PAGE_H - MARGIN - legendH - 4;
-  const planAreaH = Math.max(planBottom - planTop, 20);
+  const planAreaH = Math.max((PAGE_H - MARGIN - planTop) * 0.55, 80);
+  const planBottom = planTop + planAreaH;
   const planAreaW = CONTENT_W;
 
   // What the page has to cover. Walls are no longer the only possibility:
@@ -221,12 +282,12 @@ async function drawPlanPage(
   // plan is. Sizing from the walls alone meant such a plan exported as a
   // single line of text and nothing else.
   const xs = [
-    ...plan.walls.flatMap((w) => [w.start.x, w.end.x]),
+    ...canvas.walls.flatMap((w) => [w.start.x, w.end.x]),
     ...fittings.map((f) => f.position.x),
     ...(planImage ? [0, planImage.width] : []),
   ];
   const ys = [
-    ...plan.walls.flatMap((w) => [w.start.y, w.end.y]),
+    ...canvas.walls.flatMap((w) => [w.start.y, w.end.y]),
     ...fittings.map((f) => f.position.y),
     ...(planImage ? [0, planImage.height] : []),
   ];
@@ -261,16 +322,16 @@ async function drawPlanPage(
       }
     }
 
-    const centroid = wallsCentroid(plan.walls);
-    for (const wall of plan.walls) {
-      const wallOpenings = (plan.openings ?? []).filter((o) => o.wallId === wall.id).sort((a, b) => a.offset - b.offset);
+    const centroid = wallsCentroid(canvas.walls);
+    for (const wall of canvas.walls) {
+      const wallOpenings = (canvas.openings ?? []).filter((o) => o.wallId === wall.id).sort((a, b) => a.offset - b.offset);
       const len = wallLength(wall);
       doc.setDrawColor(60);
       // Real thickness (metres) converted through the page's plan scale, so
       // a wall reads true-to-scale on the printed page — same value the
       // on-screen canvas draws with (see SetoutCanvas.tsx), just floored so
       // a very tight scale doesn't shrink the line into invisibility.
-      const thicknessMetres = wall.kind === "interior" ? plan.wall_thickness.interior : plan.wall_thickness.exterior;
+      const thicknessMetres = wall.kind === "interior" ? canvas.wall_thickness.interior : canvas.wall_thickness.exterior;
       doc.setLineWidth(Math.max(thicknessMetres * scale, 0.15));
       let cursor = 0;
       for (const o of wallOpenings) {
@@ -329,26 +390,39 @@ async function drawPlanPage(
       }
     }
 
+    // Each fitting draws its real symbol shape, coloured by circuit — no
+    // code label and no measurement callout alongside it (those were the
+    // main sources of clutter on a dense job; the shape on its own is a lot
+    // more compact). What each shape means is in the symbol legend below.
+    // Drawn at half the legend's icon size — full-size symbols overlap
+    // heavily once a room has several fittings close together.
+    const PLAN_SYMBOL_SIZE_MM = SYMBOL_SIZE_MM / 2;
     for (const f of fittings) {
-      const p = toPage(f.position);
-      const code = codes.get(f.id) ?? "?";
-      const color = colorForCircuit(circuits, f.circuit_id) ?? UNASSIGNED_SYMBOL_COLOR;
-      await drawFittingSymbol(doc, f, p, color, svg2pdf, renderToStaticMarkup);
-
-      doc.setFontSize(6.5);
-      const [r, g, b] = hexToRgb(color);
-      doc.setTextColor(r, g, b);
-      doc.text(code, p.x + 3, p.y - 1.2);
-
-      if (f.measurement_lock) {
-        doc.setFontSize(5.5);
-        doc.setTextColor(100);
-        const { refA, refB } = f.measurement_lock;
-        const label = refB
-          ? `${formatMm(refA.distance)} / ${formatMm(refB.distance)}`
-          : `${formatMm(refA.distance)}${f.specs.mountingHeight != null ? ` @ ${formatMm(f.specs.mountingHeight)}` : ""}`;
-        doc.text(label, p.x + 2, p.y + 2.2);
+      // A wall-mounted fitting's stored position sits exactly on the wall
+      // centreline (see snapToNearestWall) — offset into the room, same
+      // direction as SetoutCanvas.tsx uses on screen (offsetSymbolIntoRoom),
+      // but computed in PAGE mm here rather than reusing that function's
+      // scene-unit offset directly. A whole-house plan gets compressed onto
+      // one A4 sheet at a very tight scale, so a fixed scene-unit offset
+      // (tuned for an interactive on-screen zoom level) can end up smaller
+      // on the page than the wall's own rendered stroke width plus the
+      // icon's own footprint — leaving the icon still clipping the wall.
+      // Doing the offset arithmetic in page space guarantees the icon
+      // actually clears the wall's drawn thickness regardless of scale.
+      let p = toPage(f.position);
+      if (isSingleWallFitting(f.type)) {
+        const wall = nearestMountWall(f.position, canvas.walls);
+        if (wall) {
+          const wallOnPage = toPage(closestPointOnWall(f.position, wall));
+          const normal = roomFacingNormal(wall, closestPointOnWall(f.position, wall), centroid);
+          const thicknessMetres = wall.kind === "interior" ? canvas.wall_thickness.interior : canvas.wall_thickness.exterior;
+          const wallStrokePageMm = Math.max(thicknessMetres * scale, 0.15);
+          const clearanceMm = wallStrokePageMm / 2 + PLAN_SYMBOL_SIZE_MM / 2 + 0.3;
+          p = { x: wallOnPage.x + normal.x * clearanceMm, y: wallOnPage.y + normal.y * clearanceMm };
+        }
       }
+      const color = colorForCircuit(circuits, f.circuit_id) ?? UNASSIGNED_SYMBOL_COLOR;
+      await drawFittingSymbol(doc, f, p, color, svg2pdf, renderToStaticMarkup, PLAN_SYMBOL_SIZE_MM);
     }
   }
 
@@ -358,9 +432,25 @@ async function drawPlanPage(
   ly += 5;
   doc.setFontSize(9);
   doc.setTextColor(20);
-  doc.text("Legend", MARGIN, ly);
+  doc.text("Symbol legend", MARGIN, ly);
   ly += 4;
   doc.setFontSize(7);
+
+  // One row per distinct TYPE actually used (not per fitting) — a job with
+  // 23 GPOs needs one "GPO" row showing what its marker means, not 23
+  // identical ones. Shows the real icon glyph, since the plan itself now
+  // just marks each point with a plain circle-and-cross rather than a
+  // distinct shape per type (see the marker-drawing loop above).
+  const ensureLegendSpace = (needed: number) => {
+    if (ly + needed > PAGE_H - MARGIN) {
+      doc.addPage();
+      ly = MARGIN;
+    }
+  };
+
+  const LEGEND_ICON_MM = 4;
+  const LEGEND_ROW_H = 5.5;
+
   if (fittings.length === 0) {
     doc.setTextColor(120);
     doc.text("No fittings placed yet.", MARGIN, ly);
@@ -368,191 +458,140 @@ async function drawPlanPage(
     for (const category of FITTING_CATEGORY_ORDER) {
       const inGroup = fittings.filter((f) => CATEGORY_FOR_TYPE[f.type] === category);
       if (inGroup.length === 0) continue;
+
+      const byType = new Map<FittingType, SetoutFitting[]>();
+      for (const f of inGroup) {
+        const list = byType.get(f.type) ?? [];
+        list.push(f);
+        byType.set(f.type, list);
+      }
+
+      ensureLegendSpace(3.6 + LEGEND_ROW_H);
       doc.setFontSize(7);
       doc.setTextColor(20);
       doc.text(LAYER_LABELS[category], MARGIN, ly);
       ly += 3.6;
-      doc.setTextColor(60);
-      for (const f of inGroup) {
-        const code = codes.get(f.id) ?? "?";
-        const status = f.status === "confirmed" ? " (confirmed)" : "";
-        doc.text(`${code} — ${FITTING_LABELS[f.type]}${status}`, MARGIN + 3, ly);
-        ly += 3.6;
+
+      for (const [type, ofType] of byType) {
+        ensureLegendSpace(LEGEND_ROW_H);
+        // Drawn upright and in a neutral colour regardless of how any
+        // particular instance sits on the plan or which circuit it's on —
+        // this row represents the type, not one specific fitting.
+        const representative = { ...ofType[0], specs: { ...ofType[0].specs, rotation: 0 } };
+        await drawFittingSymbol(
+          doc,
+          representative,
+          { x: MARGIN + 3 + LEGEND_ICON_MM / 2, y: ly + LEGEND_ROW_H / 2 + 1 },
+          "#1a1a1a",
+          svg2pdf,
+          renderToStaticMarkup,
+        );
+        doc.setFontSize(7.5);
+        doc.setTextColor(60);
+        const count = ofType.length;
+        doc.text(
+          `${FITTING_LABELS[type]}${count > 1 ? ` (×${count})` : ""}`,
+          MARGIN + 3 + LEGEND_ICON_MM + 3,
+          ly + LEGEND_ROW_H / 2 + 1,
+        );
+        ly += LEGEND_ROW_H;
       }
     }
-  }
-}
-
-function drawMeasurementPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting[], codes: Map<string, string>): void {
-  let y = drawPageHeader(doc, plan, "Measurement list");
-  const ensureSpace = (needed: number) => {
-    if (y + needed > PAGE_H - MARGIN) {
-      doc.addPage();
-      y = MARGIN;
-    }
-  };
-
-  const locked = fittings.filter((f) => f.measurement_lock);
-  if (locked.length === 0) {
-    doc.setFontSize(10);
-    doc.setTextColor(120);
-    doc.text("No wall-locked measurements yet.", MARGIN, y + 4);
-    return;
-  }
-
-  // Same "Wall N" convention as MeasurementListPanel.tsx (1-based array index).
-  const wallLabel = (wallId: string) => {
-    const idx = plan.walls.findIndex((w) => w.id === wallId);
-    return idx === -1 ? "Wall" : `Wall ${idx + 1}`;
-  };
-  const refLabel = (ref: MeasurementRef) => {
-    if (ref.kind === "wall") return wallLabel(ref.wallId);
-    if (ref.kind === "opening") return "an opening";
-    if (ref.kind === "stroke") return "the plan";
-    const target = fittings.find((f) => f.id === ref.fittingId);
-    return target ? codes.get(target.id) ?? FITTING_LABELS[target.type] : "another fitting";
-  };
-
-  doc.setFontSize(9);
-  doc.setTextColor(20);
-  doc.text("Code", MARGIN, y);
-  doc.text("Type", MARGIN + 22, y);
-  doc.text("Measurements", MARGIN + 70, y);
-  y += 2;
-  doc.setDrawColor(220);
-  doc.line(MARGIN, y, PAGE_W - MARGIN, y);
-  y += 5;
-
-  for (const f of locked) {
-    const lock = f.measurement_lock!;
-    const measureText = lock.refB
-      ? `${refLabel(lock.refA)}: ${formatMm(lock.refA.distance)}, ${refLabel(lock.refB)}: ${formatMm(lock.refB.distance)}`
-      : `${refLabel(lock.refA)}: ${formatMm(lock.refA.distance)}${f.specs.mountingHeight != null ? `, Height: ${formatMm(f.specs.mountingHeight)}` : ""}`;
-    const lines = doc.splitTextToSize(measureText, CONTENT_W - 70);
-    ensureSpace(Math.max(5, lines.length * 4));
-
-    doc.setFontSize(9);
-    doc.setTextColor(40);
-    doc.text(codes.get(f.id) ?? "?", MARGIN, y);
-    doc.text(FITTING_LABELS[f.type], MARGIN + 22, y);
-    doc.text(lines, MARGIN + 70, y);
-    y += Math.max(5, lines.length * 4);
-  }
-}
-
-function drawCableRunPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting[], codes: Map<string, string>): void {
-  let y = drawPageHeader(doc, plan, "Cable-run / switch & data order list");
-  const ensureSpace = (needed: number) => {
-    if (y + needed > PAGE_H - MARGIN) {
-      doc.addPage();
-      y = MARGIN;
-    }
-  };
-
-  const switches = fittings.filter((f) => f.type === "switch");
-  const cabinets = fittings.filter((f) => f.type === "data_cabinet");
-
-  if (switches.length === 0 && cabinets.length === 0) {
-    doc.setFontSize(10);
-    doc.setTextColor(120);
-    doc.text("No switches or data cabinets placed yet.", MARGIN, y + 4);
-    return;
-  }
-
-  for (const sw of switches) {
-    const gangs = gangsFor(sw);
-    ensureSpace(6);
-    doc.setFontSize(10);
-    doc.setTextColor(20);
-    doc.text(`${codes.get(sw.id) ?? "?"}${gangs.length > 1 ? ` (${gangs.length} switches)` : ""}`, MARGIN, y);
-    y += 5;
-
-    doc.setFontSize(9);
-    doc.setTextColor(60);
-    gangs.forEach((gang, gangIndex) => {
-      const gangLabel = gangs.length > 1 ? `Switch ${gangIndex + 1}: ` : "";
-      // Each gang is a loop-in chain in tap order (switch -> first light ->
-      // second light -> ...), not a set of separate home-runs — same
-      // topology as SetoutCanvas.tsx's switchLinks and SwitchLinksPanel.tsx.
-      // A leftover switch id from the older chain-based model (a gang only
-      // ever targets lights now) is dropped rather than printed, so "empty"
-      // is judged after that filter, not on the raw gang array.
-      const parts = gang
-        .map((id) => fittings.find((f) => f.id === id))
-        .filter((f): f is SetoutFitting => !!f && f.type !== "switch")
-        .map((target) => {
-          const code = codes.get(target.id) ?? "?";
-          const ways = wayCountForTarget(target.id, switches);
-          return ways > 1 ? `${code} (${ways}-way)` : code;
-        });
-      if (parts.length === 0) {
-        ensureSpace(5);
-        doc.text(`${gangLabel}Not linked to anything yet`, MARGIN + 4, y);
-        y += 5;
-        return;
-      }
-      const lines = doc.splitTextToSize(`${gangLabel}${codes.get(sw.id) ?? "?"} -> ${parts.join(" -> ")}`, CONTENT_W - 4);
-      ensureSpace(lines.length * 4.2);
-      doc.text(lines, MARGIN + 4, y);
-      y += lines.length * 4.2;
-    });
-    y += 3;
-  }
-
-  // Data cabling is always a home run, never a loop-in chain — one line per
-  // point rather than gang rows.
-  for (const cabinet of cabinets) {
-    ensureSpace(6);
-    doc.setFontSize(10);
-    doc.setTextColor(20);
-    doc.text(codes.get(cabinet.id) ?? "?", MARGIN, y);
-    y += 5;
-
-    doc.setFontSize(9);
-    doc.setTextColor(60);
-    const points = fittings.filter((f) => f.type === "data" && f.specs.dataCabinetId === cabinet.id);
-    if (points.length === 0) {
-      ensureSpace(5);
-      doc.text("Not linked to anything yet", MARGIN + 4, y);
-      y += 5;
-    } else {
-      for (const point of points) {
-        const lines = doc.splitTextToSize(`${codes.get(cabinet.id) ?? "?"} -> ${codes.get(point.id) ?? "?"}`, CONTENT_W - 4);
-        ensureSpace(lines.length * 4.2);
-        doc.text(lines, MARGIN + 4, y);
-        y += lines.length * 4.2;
-      }
-    }
-    y += 3;
   }
 }
 
 // A proper ruled circuit schedule / switchboard directory card — the AU
 // trade convention — rather than a plain text list: Circuit | Breaker |
 // Points served columns, a colour swatch per row matching that circuit's
-// on-screen colour (colorForCircuit), shaded header, banded rows.
-function drawSwitchboardPage(
+// on-screen colour (colorForCircuit), shaded header, banded rows. This is
+// the page meant to be printed and stuck inside the switchboard door, so it
+// carries its own business-branded header (not drawPageHeader's plain title)
+// and a frame border on every page, rather than the working-document look
+// the other report pages have.
+async function drawSwitchboardPage(
   doc: jsPDF,
   plan: SetoutPlan,
   fittings: SetoutFitting[],
   circuits: SetoutCircuit[],
   codes: Map<string, string>,
-): void {
-  let y = drawPageHeader(doc, plan, "Switchboard legend");
+  business: ReportBusiness,
+  reportUrl?: string,
+): Promise<void> {
+  const FRAME_INSET = 4;
+  const drawPageFrame = () => {
+    doc.setDrawColor(20);
+    doc.setLineWidth(0.6);
+    doc.rect(MARGIN - FRAME_INSET, MARGIN - FRAME_INSET, CONTENT_W + FRAME_INSET * 2, PAGE_H - (MARGIN - FRAME_INSET) * 2);
+  };
+  drawPageFrame();
+
+  let y = MARGIN;
+
+  // ── Header: logo + business info (same convention as auditReport.ts) ──
+  let headerBottom = y;
+  if (business.logoBase64) {
+    try {
+      const { w, h } = await loadImageSize(business.logoBase64);
+      const logoH = 16;
+      const logoW = Math.min(40, (w / h) * logoH);
+      doc.addImage(business.logoBase64, "JPEG", MARGIN, y, logoW, logoH);
+      headerBottom = Math.max(headerBottom, y + logoH);
+    } catch {
+      // Logo failed to embed — the legend still prints without it.
+    }
+  }
+  const businessLines = [
+    business.name,
+    business.licenceNumber ? `Licence No. ${business.licenceNumber}` : null,
+    business.phone ? `Ph: ${business.phone}` : null,
+    business.email || null,
+  ].filter(Boolean) as string[];
+  if (businessLines.length) {
+    doc.setFontSize(9);
+    doc.setTextColor(80);
+    businessLines.forEach((line, i) => doc.text(line, PAGE_W - MARGIN, y + 4 + i * 4.5, { align: "right" }));
+    headerBottom = Math.max(headerBottom, y + 4 + businessLines.length * 4.5);
+  }
+  y = headerBottom + 4;
+
+  doc.setFontSize(15);
+  doc.setTextColor(20);
+  doc.text("Switchboard legend", MARGIN, y);
+  y += 6;
+  doc.setFontSize(10);
+  doc.setTextColor(90);
+  doc.text(plan.name || "Rough-in setout plan", MARGIN, y);
+  y += 5;
+  if (plan.job_reference) {
+    doc.setFontSize(9);
+    doc.setTextColor(120);
+    doc.text(`Job ref: ${plan.job_reference}`, MARGIN, y);
+    y += 5;
+  }
+  doc.setFontSize(7.5);
+  doc.setTextColor(140);
+  doc.text(`Printed ${new Date().toLocaleDateString("en-AU")}`, MARGIN, y);
+  y += 4;
+  doc.setDrawColor(20);
+  doc.setLineWidth(0.4);
+  doc.line(MARGIN, y, PAGE_W - MARGIN, y);
+  y += 6;
 
   const unassigned = fittings.filter((f) => !f.circuit_id);
-  if (circuits.length === 0 && unassigned.length === 0) {
-    doc.setFontSize(10);
-    doc.setTextColor(120);
-    doc.text("No circuits set up yet.", MARGIN, y + 4);
-    return;
-  }
 
+  // A real switchboard has a fixed number of pole/breaker positions — the
+  // legend should mirror that physical layout so a spare way reads as "not
+  // used yet", not as a row that got left off the sheet. 18 covers a typical
+  // domestic board; a job with more circuits than that just keeps going.
+  const MIN_CIRCUIT_SPOTS = 18;
+
+  const colNoW = 8;
   const colSwatchW = 6;
-  const colCircuitW = 48;
+  const colCircuitW = 44;
   const colBreakerW = 20;
-  const colPointsW = CONTENT_W - colSwatchW - colCircuitW - colBreakerW;
-  const xSwatch = MARGIN;
+  const colPointsW = CONTENT_W - colNoW - colSwatchW - colCircuitW - colBreakerW;
+  const xNo = MARGIN;
+  const xSwatch = xNo + colNoW;
   const xCircuit = xSwatch + colSwatchW + 2;
   const xBreaker = xCircuit + colCircuitW;
   const xPoints = xBreaker + colBreakerW;
@@ -562,6 +601,7 @@ function drawSwitchboardPage(
     doc.rect(MARGIN, y, CONTENT_W, 7, "F");
     doc.setFontSize(8.5);
     doc.setTextColor(60);
+    doc.text("No.", xNo + colNoW / 2, y + 5, { align: "center" });
     doc.text("Circuit", xCircuit, y + 5);
     doc.text("Breaker", xBreaker, y + 5);
     doc.text("Points served", xPoints, y + 5);
@@ -571,6 +611,7 @@ function drawSwitchboardPage(
   const ensureSpace = (needed: number) => {
     if (y + needed > PAGE_H - MARGIN) {
       doc.addPage();
+      drawPageFrame();
       y = MARGIN;
       drawHeaderRow();
     }
@@ -579,9 +620,10 @@ function drawSwitchboardPage(
   drawHeaderRow();
 
   let rowIndex = 0;
-  const drawRow = (label: string, breaker: string, pointsText: string, description: string | null, color: string | null) => {
+  const drawRow = (label: string, breaker: string, pointsText: string, description: string | null, color: string | null, blank = false) => {
+    const spotNumber = rowIndex + 1;
     doc.setFontSize(8.5);
-    const pointsLines: string[] = doc.splitTextToSize(pointsText || "—", colPointsW - 2);
+    const pointsLines: string[] = blank ? [""] : doc.splitTextToSize(pointsText || "—", colPointsW - 2);
     const descLines: string[] = description ? doc.splitTextToSize(description, colCircuitW + colBreakerW - 2) : [];
     const bodyLines = Math.max(pointsLines.length, 1 + descLines.length);
     const rowH = Math.max(7, bodyLines * 4 + 2);
@@ -593,13 +635,19 @@ function drawSwitchboardPage(
       doc.rect(MARGIN, y, CONTENT_W, rowH, "F");
     }
 
-    if (color) {
-      const [r, g, b] = hexToRgb(color);
-      doc.setFillColor(r, g, b);
-    } else {
-      doc.setFillColor(200, 200, 200);
+    doc.setFontSize(8.5);
+    doc.setTextColor(blank ? 180 : 60);
+    doc.text(String(spotNumber).padStart(2, "0"), xNo + colNoW / 2, y + rowH / 2 + 1.2, { align: "center" });
+
+    if (!blank) {
+      if (color) {
+        const [r, g, b] = hexToRgb(color);
+        doc.setFillColor(r, g, b);
+      } else {
+        doc.setFillColor(200, 200, 200);
+      }
+      doc.circle(xSwatch + colSwatchW / 2, y + rowH / 2, 1.8, "F");
     }
-    doc.circle(xSwatch + colSwatchW / 2, y + rowH / 2, 1.8, "F");
 
     doc.setFontSize(9);
     doc.setTextColor(20);
@@ -612,12 +660,13 @@ function drawSwitchboardPage(
 
     doc.setFontSize(8.5);
     doc.setTextColor(60);
-    doc.text(breaker || "—", xBreaker, y + 4.5);
+    doc.text(breaker || (blank ? "" : "—"), xBreaker, y + 4.5);
     doc.text(pointsLines, xPoints, y + 4.5);
 
     doc.setDrawColor(225);
     doc.setLineWidth(0.15);
     doc.line(MARGIN, y + rowH, MARGIN + CONTENT_W, y + rowH);
+    doc.line(xSwatch - 1, y, xSwatch - 1, y + rowH);
     doc.line(xCircuit - 2, y, xCircuit - 2, y + rowH);
     doc.line(xBreaker - 2, y, xBreaker - 2, y + rowH);
     doc.line(xPoints - 2, y, xPoints - 2, y + rowH);
@@ -629,12 +678,63 @@ function drawSwitchboardPage(
   for (const c of circuits) {
     const assigned = fittings.filter((f) => f.circuit_id === c.id);
     const pointsText = assigned.length === 0 ? "None assigned" : assigned.map((f) => codes.get(f.id) ?? "?").join(", ");
-    drawRow(c.label, c.breaker_rating || "—", pointsText, c.description || null, colorForCircuit(circuits, c.id));
+    const description = [c.description, solarCircuitDetail(c, fittings)].filter(Boolean).join(" — ") || null;
+    drawRow(c.label, c.breaker_rating || "—", pointsText, description, colorForCircuit(circuits, c.id));
   }
 
   if (unassigned.length > 0) {
     const pointsText = unassigned.map((f) => codes.get(f.id) ?? "?").join(", ");
     drawRow("Unassigned", "—", pointsText, null, null);
+  }
+
+  while (rowIndex < MIN_CIRCUIT_SPOTS) {
+    drawRow("", "", "", null, null, true);
+  }
+
+  if (fittings.some((f) => f.type === "solar_inverter")) {
+    ensureSpace(8);
+    doc.setFontSize(7);
+    doc.setTextColor(130);
+    const solarDisclaimerLines = doc.splitTextToSize(
+      "Solar circuit voltage rise estimated to AS/NZS 4777.1's 2% inverter-output limit, using AS/NZS 3008.1.1 cable figures — advisory only, verify against the datasheet and DNSP requirements before final cable selection.",
+      CONTENT_W
+    );
+    doc.text(solarDisclaimerLines, MARGIN, y + 4);
+    y += solarDisclaimerLines.length * 3.2 + 4;
+  }
+
+  // A scannable link to this same report (plan, materials, demand and
+  // circuits together), so whoever's at the board later (an electrician on
+  // a service call, not necessarily whoever printed this) can pull the
+  // whole thing up without needing to be logged into the app. Deliberately
+  // not run through ensureSpace — that helper re-draws the circuit table's
+  // header row on overflow, which would be wrong for this block.
+  if (reportUrl) {
+    const qrSize = 22;
+    if (y + qrSize + 8 > PAGE_H - MARGIN) {
+      doc.addPage();
+      drawPageFrame();
+      y = MARGIN;
+    }
+    y += 4;
+    doc.setDrawColor(220);
+    doc.setLineWidth(0.2);
+    doc.line(MARGIN, y, MARGIN + CONTENT_W, y);
+    y += 5;
+    try {
+      const QRCode = await import("qrcode");
+      const qrDataUrl = await QRCode.toDataURL(reportUrl, { margin: 0, width: 256 });
+      doc.addImage(qrDataUrl, "PNG", MARGIN, y, qrSize, qrSize);
+      doc.setFontSize(9.5);
+      doc.setTextColor(20);
+      doc.text("Scan for the full plan & circuit report", MARGIN + qrSize + 4, y + qrSize / 2 - 3);
+      doc.setFontSize(7.5);
+      doc.setTextColor(120);
+      const urlLines = doc.splitTextToSize(reportUrl, CONTENT_W - qrSize - 6);
+      doc.text(urlLines, MARGIN + qrSize + 4, y + qrSize / 2 + 2);
+    } catch (err) {
+      console.error("[setoutReport] Could not generate the report QR code:", err);
+    }
   }
 }
 
@@ -706,27 +806,145 @@ function drawMaterialsPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting
   );
 }
 
+// Comes after the materials list and before the switchboard legend — the
+// board's main switch/consumer main size needs the demand total settled
+// before the legend's breaker sizing makes sense.
+function drawMaximumDemandPage(
+  doc: jsPDF,
+  plan: SetoutPlan,
+  fittings: SetoutFitting[],
+  loadItems: Pick<SetoutLoadItem, "load_group" | "rating_w" | "quantity">[],
+): void {
+  let y = drawPageHeader(doc, plan, "Maximum demand");
+  const ensureSpace = (needed: number) => {
+    if (y + needed > PAGE_H - MARGIN) {
+      doc.addPage();
+      y = MARGIN;
+    }
+  };
+
+  const result = calculateMaximumDemand(fittings, loadItems, plan.plan_defaults?.supplyPhase);
+  const contributing = result.groups.filter((g) => g.amps > 0);
+
+  if (contributing.length === 0) {
+    doc.setFontSize(10);
+    doc.setTextColor(120);
+    doc.text("Nothing to assess yet — place some fittings or add a load first.", MARGIN, y + 4);
+    return;
+  }
+
+  const AMPS_X = PAGE_W - MARGIN - 20;
+  doc.setFontSize(8.5);
+  doc.setTextColor(60);
+  doc.text("Load group", MARGIN, y);
+  doc.text("Demand", AMPS_X, y, { align: "right" });
+  y += 2;
+  doc.setDrawColor(220);
+  doc.line(MARGIN, y, PAGE_W - MARGIN, y);
+  y += 5;
+
+  for (const group of contributing) {
+    const detail = group.points !== undefined ? `${group.points.toFixed(1)} points` : group.connectedW ? `${group.connectedW.toFixed(0)} W connected` : null;
+    const labelLines = doc.splitTextToSize(group.label, CONTENT_W - 30);
+    ensureSpace(Math.max(9, labelLines.length * 4 + (detail ? 3.4 : 0)));
+    doc.setFontSize(9);
+    doc.setTextColor(30);
+    doc.text(labelLines, MARGIN, y);
+    doc.text(`${group.amps.toFixed(1)} A`, AMPS_X, y, { align: "right" });
+    y += labelLines.length * 4;
+    if (detail) {
+      doc.setFontSize(7.5);
+      doc.setTextColor(130);
+      doc.text(`${detail} · ${group.clauseRef}`, MARGIN, y);
+      y += 3.4;
+    }
+    y += 2.5;
+  }
+
+  ensureSpace(16);
+  doc.setDrawColor(20);
+  doc.setLineWidth(0.4);
+  doc.line(MARGIN, y, PAGE_W - MARGIN, y);
+  y += 6;
+  doc.setFontSize(12);
+  doc.setTextColor(20);
+  doc.text(result.supplyPhase === "three" ? "Total maximum demand (per line)" : "Total maximum demand", MARGIN, y);
+  doc.text(`${result.totalAmps.toFixed(1)} A`, AMPS_X, y, { align: "right" });
+  y += 5;
+  doc.setFontSize(8.5);
+  doc.setTextColor(100);
+  doc.text(
+    result.supplyPhase === "three"
+      ? `≈ ${result.totalKva.toFixed(1)} kVA at 400 V three-phase`
+      : `≈ ${result.totalKva.toFixed(1)} kVA at 230 V single-phase`,
+    MARGIN,
+    y,
+  );
+  y += 8;
+
+  doc.setFontSize(7.5);
+  doc.setTextColor(150, 110, 0);
+  const disclaimerLines = doc.splitTextToSize(
+    `Assessed to AS/NZS 3000:2018 Appendix C, domestic installation (Table C1), ${result.supplyPhase}-phase supply — advisory only, verify before sizing consumer mains or the main switch.` +
+      (result.supplyPhase === "three" ? " Assumes the load is evenly balanced across all three phases." : ""),
+    CONTENT_W,
+  );
+  ensureSpace(disclaimerLines.length * 3.6);
+  doc.text(disclaimerLines, MARGIN, y);
+}
+
 export async function generateSetoutReportPdf(opts: {
   plan: SetoutPlan;
+  /** Every drawing surface in this job (one per floor/area) — one plan page
+   * gets drawn per canvas, in order. */
+  canvases: SetoutCanvas[];
   fittings: SetoutFitting[];
   circuits: SetoutCircuit[];
-  /** The imported drawing, so the marked-up page shows what was marked up. */
-  planImage?: PlanImage;
+  loadItems?: SetoutLoadItem[];
+  /** Each canvas's own imported drawing (if it has one), keyed by canvas id,
+   * so that canvas's plan page shows what was marked up on it. */
+  planImages?: Map<string, PlanImage>;
+  /** Printed on the switchboard legend's header. */
+  business?: ReportBusiness;
+  /** Where this same PDF was uploaded — QR-coded on the switchboard legend
+   * so anyone at the board can scan straight to the whole report (plan,
+   * materials, demand and circuits together), not just the bare plan. No QR
+   * is drawn without this, since there'd be nothing for it to point at. */
+  reportUrl?: string;
 }): Promise<jsPDF> {
-  const { plan, fittings, circuits, planImage } = opts;
+  const { plan, canvases, fittings, circuits, loadItems = [], planImages, business = {}, reportUrl } = opts;
   const [{ svg2pdf }, { renderToStaticMarkup }] = await Promise.all([import("svg2pdf.js"), import("react-dom/server")]);
   const doc = new jsPDF({ unit: "mm", format: "a4" });
+  // Assigned once across every canvas's fittings combined, so two floors'
+  // fittings never collide on the same code (e.g. two "L1" downlights).
   const codes = buildFittingCodes(fittings);
 
-  await drawPlanPage(doc, plan, fittings, circuits, codes, svg2pdf, renderToStaticMarkup, planImage);
-  doc.addPage();
-  drawMeasurementPage(doc, plan, fittings, codes);
-  doc.addPage();
-  drawCableRunPage(doc, plan, fittings, codes);
-  doc.addPage();
-  drawSwitchboardPage(doc, plan, fittings, circuits, codes);
-  doc.addPage();
+  // One PDF, in the order it gets used on site: the marked-up plan (one page
+  // per floor/area), what to order, what it all adds up to for board sizing,
+  // then the legend that gets cut out and stuck in the switchboard door.
+  // Materials/demand/switchboard cover every canvas's fittings together —
+  // one switchboard serves the whole job, not one per floor. All of it
+  // together — the legend's QR code links back to this exact file, so
+  // scanning it at the board shows the plan and the circuit breakdown, not
+  // just a bare drawing.
+  for (const canvas of canvases) {
+    await drawPlanPage(
+      doc,
+      plan,
+      canvas,
+      fittings.filter((f) => f.canvas_id === canvas.id),
+      circuits,
+      svg2pdf,
+      renderToStaticMarkup,
+      planImages?.get(canvas.id),
+    );
+    doc.addPage();
+  }
   drawMaterialsPage(doc, plan, fittings);
+  doc.addPage();
+  drawMaximumDemandPage(doc, plan, fittings, loadItems);
+  doc.addPage();
+  await drawSwitchboardPage(doc, plan, fittings, circuits, codes, business, reportUrl);
 
   const pageCount = doc.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {

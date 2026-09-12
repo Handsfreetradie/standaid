@@ -6,18 +6,20 @@ export interface DataOutletSymbolProps extends SetoutSymbolProps {
 
 const round = (n: number) => Math.round(n * 100) / 100;
 
-// Same apex-triangle glyph as the single-port outlet, scaled down and
-// repeated evenly along the baseline so multi-port outlets stay legible
-// and inside x=3..21 with no overlap between triangles.
+// AS/NZS convention draws a data/telecoms outlet as a downward-pointing
+// triangle — apex touching the wall, base away from it — the opposite of
+// what this used to draw (apex at the wall side, pointing away). Same
+// scaled-down, evenly-repeated glyph for multi-port outlets as before, just
+// flipped to match.
 const portTrianglePath = (cx: number, halfBase: number, height: number) => {
-  const apexY = round(20 - height);
-  return `M${round(cx)} ${apexY} ${round(cx + halfBase)} 20h${round(-2 * halfBase)}Z`;
+  const baseY = round(20 - height);
+  return `M${round(cx)} 20 ${round(cx + halfBase)} ${baseY}H${round(cx - halfBase)}Z`;
 };
 
 const DataOutletSymbol = ({ size = 24, ports = 1, className, ...props }: DataOutletSymbolProps) => {
   const triangles: string[] = [];
   if (ports <= 1) {
-    triangles.push("M12 7.5 18.5 20h-13Z");
+    triangles.push("M12 20 18.5 7.5H5.5Z");
   } else {
     const slotWidth = 18 / ports;
     const halfBase = slotWidth * 0.38;

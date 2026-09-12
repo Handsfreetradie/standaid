@@ -44,7 +44,7 @@ const CONTENT_W = PAGE_W - MARGIN * 2;
 
 // Only used to size an embedded image without distorting it (jsPDF needs
 // explicit dimensions and can't measure the source itself).
-function loadImageSize(dataUrl: string): Promise<{ w: number; h: number }> {
+export function loadImageSize(dataUrl: string): Promise<{ w: number; h: number }> {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => resolve({ w: img.naturalWidth || 1, h: img.naturalHeight || 1 });

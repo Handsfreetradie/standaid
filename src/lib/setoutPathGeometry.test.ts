@@ -8,7 +8,7 @@ import {
   pathBounds,
   pathAngleAt,
 } from "./setoutPathGeometry";
-import type { Point } from "./setoutTypes";
+import type { PathPoint, Point } from "./setoutTypes";
 
 // A 3-4-5 right triangle run: 3m along +x, then 4m along +y. Hypotenuse would
 // be 5m but the RUN follows the two legs, so total length is 3 + 4 = 7m —
@@ -49,6 +49,19 @@ describe("pathLength", () => {
   it("ignores coincident consecutive points (zero-length segments)", () => {
     const withDup: Point[] = [{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 5, y: 0 }];
     expect(pathLength(withDup)).toBeCloseTo(5, 9);
+  });
+
+  // Same worked-by-hand curve as setoutGeometry.test.ts's quadraticBezierLength
+  // case ((0,0) -> control (1,1) -> (2,0), arc length ~2.2955871506) — a run
+  // with one curved segment (LED strip path shape) followed by one straight
+  // segment of 3m should total curve-length + 3, not chord-length (2) + 3.
+  it("is curve-aware for a run with a curveControl on one point", () => {
+    const runWithCurve: PathPoint[] = [
+      { x: 0, y: 0 },
+      { x: 2, y: 0, curveControl: { x: 1, y: 1 } },
+      { x: 5, y: 0 },
+    ];
+    expect(pathLength(runWithCurve)).toBeCloseTo(2.2955871506 + 3, 3);
   });
 });
 

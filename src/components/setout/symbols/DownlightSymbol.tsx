@@ -1,14 +1,15 @@
 import type { SetoutSymbolProps } from "./types";
 
 export interface DownlightSymbolProps extends SetoutSymbolProps {
-  sizeMm?: 50 | 70 | 90;
+  sizeMm?: 50 | 70 | 90 | 100;
   twin?: boolean;
   twinSpacingRatio?: number;
 }
 
-// Radius scales with the real fitting diameter (90/70/50mm) so the three
-// sizes read apart at a glance, matching how a drafted legend shows them.
-const RADIUS_FOR_SIZE_MM: Record<50 | 70 | 90, number> = { 90: 7, 70: 5.5, 50: 4 };
+// Radius scales with the real fitting diameter (100/90/70/50mm) so the sizes
+// read apart at a glance, matching how a drafted legend shows them. 100mm is
+// the older-style "can" downlight — the biggest of the four.
+const RADIUS_FOR_SIZE_MM: Record<50 | 70 | 90 | 100, number> = { 100: 8, 90: 7, 70: 5.5, 50: 4 };
 
 const DownlightSymbol = ({
   size = 24,

@@ -1,19 +1,22 @@
-import { distance, type Point, type WallSegment } from "./setoutTypes";
+import { distance, type Point, type PathPoint, type WallSegment } from "./setoutTypes";
 import { closestPointOnWall, perpendicularDistanceToWall, pointAtOffset, wallLength } from "./setoutGeometry";
 
 // The per-wall helpers in setoutGeometry.ts (closestPointOnWall,
 // perpendicularDistanceToWall, pointAtOffset, wallLength) only ever touch a
-// WallSegment's `start`/`end` — never `id` or `kind` — so a run's segment can
-// borrow all of that point-on-segment maths by wrapping it in a throwaway
-// WallSegment instead of reimplementing projection/clamping here.
-function asSegment(a: Point, b: Point): WallSegment {
-  return { id: "", start: a, end: b };
+// WallSegment's `start`/`end`/`curveControl` — never `id` or `kind` — so a
+// run's segment can borrow all of that point-on-segment maths by wrapping it
+// in a throwaway WallSegment instead of reimplementing projection/clamping
+// here. `b`'s curveControl (the control point for the segment ARRIVING at
+// b) carries straight through, so every helper below is curve-aware for
+// free — a plain Point for `b` (no curveControl) behaves exactly as before.
+function asSegment(a: Point, b: PathPoint): WallSegment {
+  return { id: "", start: a, end: b, curveControl: b.curveControl };
 }
 
 // Total run length in metres, summing every segment. Zero-length (coincident
 // consecutive points) segments simply contribute 0 — no division happens
 // here, so a run mid-draw with a just-placed duplicate point is safe.
-export function pathLength(path: Point[]): number {
+export function pathLength(path: PathPoint[]): number {
   let total = 0;
   for (let i = 0; i < path.length - 1; i++) {
     total += wallLength(asSegment(path[i], path[i + 1]));
@@ -23,7 +26,7 @@ export function pathLength(path: Point[]): number {
 
 // The point that sits `distance` metres along the run from its start.
 // Clamps to the start/end rather than extrapolating past either.
-export function pointAtDistanceAlongPath(path: Point[], distanceAlong: number): Point {
+export function pointAtDistanceAlongPath(path: PathPoint[], distanceAlong: number): Point {
   // Nothing to anchor to yet — a run being drawn point-by-point can briefly
   // be empty. Returning the origin rather than throwing keeps the canvas
   // rendering (or not rendering) rather than crashing mid-draw.
@@ -55,13 +58,13 @@ export function pointAtDistanceAlongPath(path: Point[], distanceAlong: number): 
 // the vertices) — used to place the length label on the plan. An L-shaped
 // run's label should sit on the corner it turns at, not floating off to one
 // side of the average of its 3 vertices.
-export function pathMidpoint(path: Point[]): Point {
+export function pathMidpoint(path: PathPoint[]): Point {
   return pointAtDistanceAlongPath(path, pathLength(path) / 2);
 }
 
 // Shortest distance in metres from an arbitrary point to the run. This is
 // what hit-testing a tap on the canvas uses.
-export function distanceToPath(point: Point, path: Point[]): number {
+export function distanceToPath(point: Point, path: PathPoint[]): number {
   // No run to be near — Infinity reads as "not close" to every caller
   // (hit-testing, snapping) without them needing a special empty-path check.
   if (path.length === 0) return Infinity;
@@ -77,7 +80,7 @@ export function distanceToPath(point: Point, path: Point[]): number {
 
 // The closest point ON the run to an arbitrary point, plus how far along the
 // run it sits. Used to snap and to re-point measurements at a run.
-export function closestPointOnPath(point: Point, path: Point[]): { point: Point; distanceAlong: number } {
+export function closestPointOnPath(point: Point, path: PathPoint[]): { point: Point; distanceAlong: number } {
   if (path.length === 0) return { point: { x: 0, y: 0 }, distanceAlong: 0 };
   if (path.length === 1) return { point: path[0], distanceAlong: 0 };
 
@@ -106,7 +109,7 @@ export function closestPointOnPath(point: Point, path: Point[]): { point: Point;
 }
 
 // Axis-aligned bounds, for fitting the view and for export page layout.
-export function pathBounds(path: Point[]): { minX: number; minY: number; maxX: number; maxY: number } {
+export function pathBounds(path: PathPoint[]): { minX: number; minY: number; maxX: number; maxY: number } {
   // A degenerate zero-size box at the origin rather than +/-Infinity — a
   // caller that naively unions this into a running bounds accumulator
   // doesn't get poisoned by an infinity it forgot to guard against.
@@ -125,6 +128,21 @@ export function pathBounds(path: Point[]): { minX: number; minY: number; maxX: n
   return { minX, minY, maxX, maxY };
 }
 
+// Builds an SVG path `d` string for a run: a plain `L` for a straight
+// segment, a quadratic `Q` for one carrying a curveControl (the control
+// point for the segment ARRIVING at that point). Lets SVG paint and
+// hit-test (`pointerEvents="stroke"`) the actual curve geometry natively,
+// rather than sampling it into a straight-line polyline first.
+export function pathToSvgD(path: PathPoint[]): string {
+  if (path.length === 0) return "";
+  let d = `M ${path[0].x} ${path[0].y}`;
+  for (let i = 1; i < path.length; i++) {
+    const p = path[i];
+    d += p.curveControl ? ` Q ${p.curveControl.x} ${p.curveControl.y} ${p.x} ${p.y}` : ` L ${p.x} ${p.y}`;
+  }
+  return d;
+}
+
 // Degrees clockwise from plan "up" for a bare direction vector — the same
 // atan2(dx, -dy) convention used for wall-mount rotation elsewhere in this
 // app (see rotationFacingRoom in setoutGeometry.ts). Not imported from
@@ -139,7 +157,7 @@ function vectorAngleDegrees(dx: number, dy: number): number {
 // The direction of the run at a given distance along it, in degrees clockwise
 // from plan "up". Used to orient the strip symbol and its label so text runs
 // along the strip.
-export function pathAngleAt(path: Point[], distanceAlong: number): number {
+export function pathAngleAt(path: PathPoint[], distanceAlong: number): number {
   // Fewer than 2 points means no direction exists yet — default to "up"
   // rather than throwing; the symbol just won't be rotated until the run
   // has an actual second point.

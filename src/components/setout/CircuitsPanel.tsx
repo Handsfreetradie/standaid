@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Loader2, Plus, Trash2, Pencil, Check, X, Zap } from "lucide-react";
+import { Loader2, Plus, Trash2, Pencil, Check, X, Zap, ChevronUp, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import {
   useCreateSetoutCircuit,
   useUpdateSetoutCircuit,
   useDeleteSetoutCircuit,
+  useReorderSetoutCircuit,
   useAssignFittingCircuit,
 } from "@/hooks/useSetoutCircuits";
 import { colorForCircuit, type SetoutCircuit } from "@/lib/setoutTypes";
@@ -28,6 +29,7 @@ export default function CircuitsPanel({ planId }: CircuitsPanelProps) {
   const createCircuit = useCreateSetoutCircuit(planId);
   const updateCircuit = useUpdateSetoutCircuit(planId);
   const deleteCircuit = useDeleteSetoutCircuit(planId);
+  const reorderCircuit = useReorderSetoutCircuit(planId);
   const assignFitting = useAssignFittingCircuit(planId);
 
   const [showAddForm, setShowAddForm] = useState(false);
@@ -105,6 +107,17 @@ export default function CircuitsPanel({ planId }: CircuitsPanelProps) {
     }
   };
 
+  // This order is what the switchboard legend prints in — moving a circuit
+  // here is how a tradie matches the legend to the actual pole layout on
+  // the board.
+  const handleReorder = async (circuitId: string, direction: "up" | "down") => {
+    try {
+      await reorderCircuit.mutateAsync({ circuitId, direction });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not reorder the circuit");
+    }
+  };
+
   const unassignedFittings = fittings.filter((f) => !f.circuit_id);
   const fittingsByCircuit = (circuitId: string) => fittings.filter((f) => f.circuit_id === circuitId);
 
@@ -155,7 +168,7 @@ export default function CircuitsPanel({ planId }: CircuitsPanelProps) {
           <p className="text-xs text-muted-foreground py-3">No circuits yet. Add one to start building the switchboard legend.</p>
         ) : (
           <div className="space-y-2">
-            {circuits.map((circuit) => {
+            {circuits.map((circuit, index) => {
               const isEditing = editingId === circuit.id;
               return (
                 <Card key={circuit.id} className="p-3 rounded-xl">
@@ -209,6 +222,26 @@ export default function CircuitsPanel({ planId }: CircuitsPanelProps) {
                           size="icon"
                           variant="ghost"
                           className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                          onClick={() => handleReorder(circuit.id, "up")}
+                          disabled={index === 0 || reorderCircuit.isPending}
+                          title="Move up"
+                        >
+                          <ChevronUp className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                          onClick={() => handleReorder(circuit.id, "down")}
+                          disabled={index === circuits.length - 1 || reorderCircuit.isPending}
+                          title="Move down"
+                        >
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
                           onClick={() => startEdit(circuit)}
                         >
                           <Pencil className="h-3.5 w-3.5" />
@@ -245,45 +278,119 @@ export default function CircuitsPanel({ planId }: CircuitsPanelProps) {
           <p className="text-xs text-muted-foreground py-3">Add a circuit above to start generating the legend.</p>
         ) : (
           <div className="space-y-2">
-            {circuits.map((circuit) => {
+            {circuits.map((circuit, index) => {
               const assigned = fittingsByCircuit(circuit.id);
               const color = colorForCircuit(circuits, circuit.id);
+              const isEditing = editingId === circuit.id;
               return (
                 <Card key={circuit.id} className="p-3 rounded-xl">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <p className="text-sm font-semibold text-foreground flex items-center gap-2">
-                      <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color ?? undefined }} />
-                      {circuit.label}
-                    </p>
-                    <div className="flex items-center gap-2">
-                      {circuit.breaker_rating && (
-                        <span className="text-[10px] font-medium text-primary bg-primary/10 rounded px-1.5 py-0.5">
-                          {circuit.breaker_rating}
-                        </span>
-                      )}
-                      <span className="text-xs text-muted-foreground">
-                        {assigned.length} point{assigned.length === 1 ? "" : "s"}
-                      </span>
+                  {isEditing ? (
+                    // Same edit state/handlers as the Circuits list above —
+                    // editing from either place keeps them in sync, so a
+                    // tradie checking the legend doesn't need to scroll back
+                    // up to fix a label or breaker rating.
+                    <div className="space-y-2">
+                      <Input value={editLabel} onChange={(e) => setEditLabel(e.target.value)} placeholder="Circuit label" />
+                      <Input
+                        value={editDescription}
+                        onChange={(e) => setEditDescription(e.target.value)}
+                        placeholder="Description (optional)"
+                      />
+                      <Input
+                        value={editBreaker}
+                        onChange={(e) => setEditBreaker(e.target.value)}
+                        placeholder="Breaker rating (optional)"
+                      />
+                      <div className="flex items-center gap-1">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                          onClick={() => handleReorder(circuit.id, "up")}
+                          disabled={index === 0 || reorderCircuit.isPending}
+                          title="Move up"
+                        >
+                          <ChevronUp className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                          onClick={() => handleReorder(circuit.id, "down")}
+                          disabled={index === circuits.length - 1 || reorderCircuit.isPending}
+                          title="Move down"
+                        >
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={() => handleDelete(circuit.id)}
+                          disabled={deletingId === circuit.id}
+                        >
+                          {deletingId === circuit.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                        <div className="flex-1" />
+                        <Button variant="ghost" size="sm" className="gap-1.5" onClick={cancelEdit}>
+                          <X className="h-3.5 w-3.5" /> Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="gap-1.5"
+                          disabled={!editLabel.trim() || updateCircuit.isPending}
+                          onClick={saveEdit}
+                        >
+                          {updateCircuit.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                          Save
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                  {assigned.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No points assigned</p>
                   ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {assigned.map((fitting) => {
-                        const Icon = FITTING_SYMBOLS[fitting.type];
-                        return (
-                          <span
-                            key={fitting.id}
-                            className="inline-flex items-center gap-1 rounded-md border px-1.5 py-1 text-[11px] text-foreground"
-                            style={color ? { borderColor: `${color}66`, backgroundColor: `${color}14` } : undefined}
-                          >
-                            <Icon size={14} strokeWidth={1.5} style={color ? { color } : undefined} className={color ? undefined : "text-primary"} />
-                            {FITTING_LABELS[fitting.type]}
-                          </span>
-                        );
-                      })}
-                    </div>
+                    <>
+                      <button type="button" className="w-full text-left" onClick={() => startEdit(circuit)}>
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <p className="text-sm font-semibold text-foreground flex items-center gap-2 min-w-0">
+                            <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color ?? undefined }} />
+                            <span className="truncate">{circuit.label}</span>
+                          </p>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {circuit.breaker_rating && (
+                              <span className="text-[10px] font-medium text-primary bg-primary/10 rounded px-1.5 py-0.5">
+                                {circuit.breaker_rating}
+                              </span>
+                            )}
+                            <span className="text-xs text-muted-foreground">
+                              {assigned.length} point{assigned.length === 1 ? "" : "s"}
+                            </span>
+                            <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                          </div>
+                        </div>
+                      </button>
+                      {assigned.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">No points assigned</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {assigned.map((fitting) => {
+                            const Icon = FITTING_SYMBOLS[fitting.type];
+                            return (
+                              <span
+                                key={fitting.id}
+                                className="inline-flex items-center gap-1 rounded-md border px-1.5 py-1 text-[11px] text-foreground"
+                                style={color ? { borderColor: `${color}66`, backgroundColor: `${color}14` } : undefined}
+                              >
+                                <Icon size={14} strokeWidth={1.5} style={color ? { color } : undefined} className={color ? undefined : "text-primary"} />
+                                {FITTING_LABELS[fitting.type]}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
                   )}
                 </Card>
               );

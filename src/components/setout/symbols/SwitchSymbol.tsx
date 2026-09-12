@@ -2,11 +2,15 @@ import type { SetoutSymbolProps } from "./types";
 
 export interface SwitchSymbolProps extends SetoutSymbolProps {
   gangCount?: 1 | 2 | 3 | 4;
+  // True if ANY gang on this plate is a dimmer (standard or push-button) —
+  // a single small "D" marks the whole symbol rather than trying to show
+  // which specific gang, since that's not legible at this size anyway.
+  hasDimmer?: boolean;
 }
 
 // One flick-mark per gang, evenly spaced along the shared plate baseline —
 // a 2-gang switch draws two independent toggle marks side by side, etc.
-const SwitchSymbol = ({ size = 24, gangCount = 1, className, ...props }: SwitchSymbolProps) => {
+const SwitchSymbol = ({ size = 24, gangCount = 1, hasDimmer = false, className, ...props }: SwitchSymbolProps) => {
   const spacing = 18 / (gangCount + 1);
   const positions = Array.from({ length: gangCount }, (_, i) => 3 + spacing * (i + 1));
 
@@ -32,6 +36,11 @@ const SwitchSymbol = ({ size = 24, gangCount = 1, className, ...props }: SwitchS
           <path d={`M${x + 1} 15.7 L${x + 5} 10.5`} />
         </g>
       ))}
+      {hasDimmer && (
+        <text x="12" y="7" textAnchor="middle" fontSize="6" fontWeight="700" fill="currentColor" stroke="none">
+          D
+        </text>
+      )}
     </svg>
   );
 };

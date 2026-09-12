@@ -6,17 +6,14 @@ import {
   DEFAULT_WALL_THICKNESS,
   type SetoutFitting,
   type SetoutPhotoPoint,
+  type PhotoPointType,
   type SetoutPlan,
-  type WallSegment,
-  type ScaleCalibration,
+  type SetoutCanvas,
   type PlanSourceType,
   type Point,
   type FittingCategory,
-  type LayerVisibility,
   type FittingSpecs,
   type MeasurementLock,
-  type WallOpening,
-  type WallThickness,
   type PlanDefaults,
   CATEGORY_FOR_TYPE,
   gangsFor,
@@ -98,10 +95,16 @@ export function useCreateSetoutPhotoPoint(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (input: { position: Point; storage_path: string }) => {
+    mutationFn: async (input: { canvas_id: string; position: Point; storage_path: string; photo_type?: PhotoPointType }) => {
       const { data, error } = await sb
         .from("setout_photo_points")
-        .insert({ plan_id: planId, position: input.position, storage_path: input.storage_path })
+        .insert({
+          plan_id: planId,
+          canvas_id: input.canvas_id,
+          position: input.position,
+          storage_path: input.storage_path,
+          photo_type: input.photo_type ?? "flat",
+        })
         .select()
         .single();
       if (error) throw error;
@@ -149,6 +152,12 @@ export function useDeleteSetoutPhotoPoint(planId: string) {
   });
 }
 
+// Creates the job row plus its first canvas ("Ground Floor") in one go — a
+// job always needs at least one drawing surface to be usable. Not atomic
+// (the JS client has no cross-table transaction), so a canvas-insert failure
+// after a successful plan-insert is caught and the plan is still returned
+// with canvas: null rather than throwing — the caller can retry creating a
+// canvas onto an existing plan rather than being left with nothing at all.
 export function useCreateSetoutPlan() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -156,98 +165,41 @@ export function useCreateSetoutPlan() {
   return useMutation({
     mutationFn: async (input: { name: string; job_reference?: string; source_type: PlanSourceType }) => {
       if (!user) throw new Error("Not signed in");
-      const { data, error } = await sb
+      const { data: plan, error } = await sb
         .from("setout_plans")
         .insert({
           user_id: user.id,
           name: input.name,
           job_reference: input.job_reference || null,
           source_type: input.source_type,
-          walls: [],
-          layer_visibility: DEFAULT_LAYER_VISIBILITY,
-          wall_thickness: DEFAULT_WALL_THICKNESS,
         })
         .select()
         .single();
       if (error) throw error;
-      return data as SetoutPlan;
+
+      let canvas: SetoutCanvas | null = null;
+      try {
+        const { data: canvasData, error: canvasError } = await sb
+          .from("setout_canvases")
+          .insert({
+            plan_id: plan.id,
+            name: "Ground Floor",
+            sort_order: 0,
+            source_type: input.source_type,
+            walls: [],
+            layer_visibility: DEFAULT_LAYER_VISIBILITY,
+            wall_thickness: DEFAULT_WALL_THICKNESS,
+          })
+          .select()
+          .single();
+        if (canvasError) throw canvasError;
+        canvas = canvasData as SetoutCanvas;
+      } catch (canvasError) {
+        console.error("Failed to create the plan's first canvas", canvasError);
+      }
+      return { plan: plan as SetoutPlan, canvas };
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["setout_plans"] });
-    },
-  });
-}
-
-export function useUpdateSetoutPlanGeometry(planId: string) {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async (input: {
-      walls: WallSegment[];
-      scale_calibration: ScaleCalibration | null;
-      openings?: WallOpening[];
-      background_image_path?: string;
-      background_image_content_type?: string;
-      source_file_path?: string;
-      source_file_content_type?: string;
-    }) => {
-      // background_image_path/content_type are only ever set once, at
-      // initial import save (CalibrationImportFlow.tsx) — later geometry-
-      // only saves (e.g. EditWallsFlow.tsx) don't pass them, and must not
-      // wipe out an already-saved reference image, so they're only
-      // included in the update when actually provided.
-      const update: Record<string, unknown> = { walls: input.walls, scale_calibration: input.scale_calibration, openings: input.openings ?? [] };
-      if (input.background_image_path !== undefined) update.background_image_path = input.background_image_path;
-      if (input.background_image_content_type !== undefined) update.background_image_content_type = input.background_image_content_type;
-      if (input.source_file_path !== undefined) update.source_file_path = input.source_file_path;
-      if (input.source_file_content_type !== undefined) update.source_file_content_type = input.source_file_content_type;
-      const { data, error } = await sb
-        .from("setout_plans")
-        .update(update)
-        .eq("id", planId)
-        .select()
-        .single();
-      if (error) throw error;
-      return data as SetoutPlan;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["setout_plan", planId] });
-      queryClient.invalidateQueries({ queryKey: ["setout_plans"] });
-    },
-  });
-}
-
-export function useUpdateSetoutPlanLayerVisibility(planId: string) {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async (layerVisibility: LayerVisibility) => {
-      const { error } = await sb
-        .from("setout_plans")
-        .update({ layer_visibility: layerVisibility })
-        .eq("id", planId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["setout_plan", planId] });
-      queryClient.invalidateQueries({ queryKey: ["setout_plans"] });
-    },
-  });
-}
-
-export function useUpdateSetoutPlanWallThickness(planId: string) {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async (wallThickness: WallThickness) => {
-      const { error } = await sb
-        .from("setout_plans")
-        .update({ wall_thickness: wallThickness })
-        .eq("id", planId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["setout_plan", planId] });
       queryClient.invalidateQueries({ queryKey: ["setout_plans"] });
     },
   });
@@ -309,12 +261,13 @@ export function useCreateSetoutFitting(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (input: { type: FittingType; position: Point; measurement_lock?: MeasurementLock | null; specs?: FittingSpecs }) => {
+    mutationFn: async (input: { canvas_id: string; type: FittingType; position: Point; measurement_lock?: MeasurementLock | null; specs?: FittingSpecs }) => {
       const category: FittingCategory = CATEGORY_FOR_TYPE[input.type];
       const { data, error } = await sb
         .from("setout_fittings")
         .insert({
           plan_id: planId,
+          canvas_id: input.canvas_id,
           type: input.type,
           position: input.position,
           category,
@@ -339,10 +292,11 @@ export function useCreateSetoutFittingsBulk(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (inputs: { type: FittingType; position: Point; measurement_lock?: MeasurementLock | null; specs?: FittingSpecs }[]) => {
+    mutationFn: async (inputs: { canvas_id: string; type: FittingType; position: Point; measurement_lock?: MeasurementLock | null; specs?: FittingSpecs }[]) => {
       if (inputs.length === 0) return [] as SetoutFitting[];
       const rows = inputs.map((input) => ({
         plan_id: planId,
+        canvas_id: input.canvas_id,
         type: input.type,
         position: input.position,
         category: CATEGORY_FOR_TYPE[input.type],
@@ -371,6 +325,7 @@ export function useRestoreSetoutFitting(planId: string) {
       const { error } = await sb.from("setout_fittings").insert({
         id: fitting.id,
         plan_id: fitting.plan_id,
+        canvas_id: fitting.canvas_id,
         type: fitting.type,
         position: fitting.position,
         category: fitting.category,

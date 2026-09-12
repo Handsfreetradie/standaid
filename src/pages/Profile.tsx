@@ -91,6 +91,8 @@ const Profile = () => {
   const [editStates, setEditStates] = useState<string[]>([]);
   const [editBusinessName, setEditBusinessName] = useState("");
   const [editLicenceNumber, setEditLicenceNumber] = useState("");
+  const [editBusinessPhone, setEditBusinessPhone] = useState("");
+  const [editBusinessEmail, setEditBusinessEmail] = useState("");
   const [logoPath, setLogoPath] = useState<string | null>(null);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [uploadingLogo, setUploadingLogo] = useState(false);
@@ -107,6 +109,8 @@ const Profile = () => {
     setEditStates(Array.isArray(p.states) ? p.states : []);
     setEditBusinessName(p.business_name || "");
     setEditLicenceNumber(p.licence_number || "");
+    setEditBusinessPhone(p.business_phone || "");
+    setEditBusinessEmail(p.business_email || "");
     setLogoPath(p.logo_storage_path || null);
   }, [profile]);
 
@@ -156,6 +160,8 @@ const Profile = () => {
           states: editStates,
           business_name: editBusinessName.trim() || null,
           licence_number: editLicenceNumber.trim() || null,
+          business_phone: editBusinessPhone.trim() || null,
+          business_email: editBusinessEmail.trim() || null,
           logo_storage_path: logoPath,
         })
         .eq("user_id", user.id);
@@ -617,7 +623,7 @@ const Profile = () => {
                         </div>
                       </div>
                       <Separator />
-                      <p className="text-xs font-semibold text-foreground -mb-1">Used on Site Audit reports</p>
+                      <p className="text-xs font-semibold text-foreground -mb-1">Used on Site Audit and Rough-In reports</p>
                       <div>
                         <Label className="text-xs">Business name</Label>
                         <Input
@@ -634,6 +640,24 @@ const Profile = () => {
                           placeholder="e.g. EC 123456"
                           value={editLicenceNumber}
                           onChange={(e) => setEditLicenceNumber(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Phone number</Label>
+                        <Input
+                          className="h-11 mt-1"
+                          placeholder="e.g. 0412 345 678"
+                          value={editBusinessPhone}
+                          onChange={(e) => setEditBusinessPhone(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Email</Label>
+                        <Input
+                          className="h-11 mt-1"
+                          placeholder={`Falls back to ${user?.email || "your account email"} if left blank`}
+                          value={editBusinessEmail}
+                          onChange={(e) => setEditBusinessEmail(e.target.value)}
                         />
                       </div>
                       <div>

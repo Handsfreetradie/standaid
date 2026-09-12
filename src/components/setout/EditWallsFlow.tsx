@@ -7,8 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import SetoutCanvas from "./SetoutCanvas";
 import { supabase } from "@/integrations/supabase/client";
-import { useUpdateSetoutPlanGeometry } from "@/hooks/useSetoutPlans";
-import { distance, type Point, type SetoutPlan, type WallOpening, type WallSegment } from "@/lib/setoutTypes";
+import { useUpdateSetoutCanvasGeometry } from "@/hooks/useSetoutCanvases";
+import { distance, type Point, type SetoutCanvas as SetoutCanvasRow, type WallOpening, type WallSegment } from "@/lib/setoutTypes";
 import { nextOpeningId, nextWallId, wallLength } from "@/lib/setoutGeometry";
 
 // Standard Australian residential door/window widths — used as the default
@@ -17,16 +17,16 @@ const DEFAULT_DOOR_WIDTH = 0.82;
 const DEFAULT_WINDOW_WIDTH = 1.2;
 
 interface EditWallsFlowProps {
-  plan: SetoutPlan;
+  canvas: SetoutCanvasRow;
   onClose: () => void;
 }
 
-// A lightweight touch-up tool for a plan that already has its exterior
+// A lightweight touch-up tool for a canvas that already has its exterior
 // perimeter saved — add internal walls or doors/windows the import missed
 // (AI or manual) without re-running the whole calibrate/trace flow. Fixing
 // the exterior perimeter itself isn't in scope here — that needs its own
 // scale reference, which this tool doesn't have; re-import for that.
-export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
+export default function EditWallsFlow({ canvas: plan, onClose }: EditWallsFlowProps) {
   const [interiorWalls, setInteriorWalls] = useState<WallSegment[]>(plan.walls.filter((w) => w.kind === "interior"));
   const [openings, setOpenings] = useState<WallOpening[]>(plan.openings ?? []);
   const [tool, setTool] = useState<"interior" | "opening" | "erase">("interior");
@@ -34,7 +34,7 @@ export default function EditWallsFlow({ plan, onClose }: EditWallsFlowProps) {
   const [selectedEraseWallId, setSelectedEraseWallId] = useState<string | null>(null);
   const [openingKind, setOpeningKind] = useState<"door" | "window" | "sliding_door">("door");
   const [draftStart, setDraftStart] = useState<Point | null>(null);
-  const saveGeometry = useUpdateSetoutPlanGeometry(plan.id);
+  const saveGeometry = useUpdateSetoutCanvasGeometry(plan.id, plan.plan_id);
 
   // The originally-uploaded plan raster, shown behind the walls being
   // edited — same signed-URL + natural-dimension lookup as the main
