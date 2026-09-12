@@ -93,6 +93,28 @@ const Legal = ({ kind }: LegalProps) => {
               </p>
             </Section>
 
+            <Section title="3A. National Construction Code content">
+              <p>
+                StandAId includes the text of the National Construction Code (NCC) 2025 — Volumes
+                One, Two and Three, the ABCB Housing Provisions and the Livable Housing Design
+                Standard — for every account, without any upload. The National Construction Code
+                2025 was provided by the Australian Building Codes Board under the CC BY 4.0
+                licence. Figures, diagrams and photographs are not included in that licence, so
+                StandAId never reproduces them: answers link you to the relevant clause on the
+                ABCB's website instead.
+              </p>
+              <p>
+                StandAId is an independent product. It is not published, endorsed, sponsored or
+                approved by the Australian Building Codes Board, the Commonwealth, or any State or
+                Territory. NCC content in StandAId may not be complete or up to date — always
+                confirm against the current edition at{" "}
+                <a href="https://ncc.abcb.gov.au" target="_blank" rel="noopener noreferrer" className="text-primary underline">
+                  ncc.abcb.gov.au
+                </a>{" "}
+                before relying on it.
+              </p>
+            </Section>
+
             <Section title="4. Your account">
               <p>
                 Keep your login details secure — you're responsible for activity on your account.

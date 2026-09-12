@@ -2,6 +2,28 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildStaticSystemPrompt, buildContextSystemBlock, promptVersionSource, type TradeType } from "./system-prompt.ts";
 import { detectTrade, standardTradeFromCode } from "./trade-detection.ts";
+
+// Marks rows from the shared NCC index so downstream code (context labels,
+// citations, gating) can tell them from the user's own uploads.
+const tagNcc = (rows: any[]) => rows.map((r: any) => ({ ...r, source: "ncc", is_normative: true }));
+
+// State/territory named in the question, for NCC state variations. Without a
+// per-profile state (not stored yet) this is the only signal we have; null
+// means national clauses only.
+const STATE_PATTERNS: Array<[RegExp, string]> = [
+  [/\bWA\b/, "WA"], [/\bwestern australia\b/i, "WA"],
+  [/\bNSW\b/, "NSW"], [/\bnew south wales\b/i, "NSW"],
+  [/\bVIC\b/, "VIC"], [/\bvictoria\b/i, "VIC"],
+  [/\bQLD\b/, "QLD"], [/\bqueensland\b/i, "QLD"],
+  [/\bSA\b/, "SA"], [/\bsouth australia\b/i, "SA"],
+  [/\bTAS\b/, "TAS"], [/\btasmania\b/i, "TAS"],
+  [/\bNT\b/, "NT"], [/\bnorthern territory\b/i, "NT"],
+  [/\bACT\b/, "ACT"], [/\baustralian capital territory\b|\bcanberra\b/i, "ACT"],
+];
+function detectState(question: string): string | null {
+  for (const [re, st] of STATE_PATTERNS) if (re.test(question)) return st;
+  return null;
+}
 import { validateResponse } from "./validation.ts";
 import { getAllowedOrigin } from "../_shared/cors.ts";
 import { expandQuery, TRADIE_SYNONYMS } from "./synonyms.ts";
@@ -412,6 +434,23 @@ serve(async (req) => {
 
     // Detect explicit clause numbers
     const clauseNumberMatches = effectiveQuestion.match(/\b[A-Za-z]?\d+(?:\.\d+){1,4}\b/g) || [];
+    // NCC exact-clause hits. Letter-coded NCC clauses (H1D4, E2D3, S42C1) can't
+    // collide with an AS/NZS number so they always count; dotted numbers
+    // (10.2.9) only count as NCC when the question actually names the NCC —
+    // otherwise a Housing Provisions 3.9.4 would get pinned above an AS/NZS
+    // 3000 3.9.4 hit with a fabricated 1.0 similarity.
+    const mentionsNcc = /\b(ncc|national construction code|building code|bca|housing provisions|plumbing code)\b/i.test(effectiveQuestion);
+    const nccClauseMatches = [...new Set([
+      ...(effectiveQuestion.match(/\b(?:[A-J]\d{1,2}[DPVOF]\d{1,2}|S\d{1,2}C\d{1,2})\b/g) || []),
+      ...(mentionsNcc ? clauseNumberMatches.filter((n: string) => /^\d/.test(n)) : []),
+    ])];
+    // A state named in the question wins; otherwise the profile's state(s) —
+    // tradies often work across a border, so that's a list.
+    const askedState = detectState(effectiveQuestion);
+    const nccStates: string[] = askedState
+      ? [askedState]
+      : (Array.isArray((profile as any)?.states) ? (profile as any).states : []);
+    const nccStateFilter = nccStates.length ? `state.is.null,state.in.(${nccStates.join(",")})` : "state.is.null";
 
     // Ranked full-text search replaces the old `ilike '%word%'` scan over the
     // first five words of the question (which happily searched on "what" and
@@ -423,7 +462,7 @@ serve(async (req) => {
     )].join(" or ");
 
     // Phase 2: all expensive operations in parallel
-    const [embResponse, expandedEmbResponse, keywordChunksResult, clauseResult, ownedStandardsResult] = await Promise.all([
+    const [embResponse, expandedEmbResponse, keywordChunksResult, clauseResult, ownedStandardsResult, nccFtsResult, nccClauseResult] = await Promise.all([
       fetch("https://api.openai.com/v1/embeddings", {
         method: "POST",
         headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
@@ -452,7 +491,23 @@ serve(async (req) => {
             .in("clause_number", clauseNumberMatches)
             .limit(20)
         : Promise.resolve({ data: [] }),
-      supabase.from("standards").select("id, standard_code, title").or(ownershipFilter),
+      // Shared NCC rows (source = 'ncc', no owner) ride along so trade
+      // mapping, codeToStdId and citation resolution treat them like any
+      // other standard. They never appear in standard_chunks/figures lookups
+      // keyed on ownedStandardIds — there are simply no rows there for them.
+      supabase.from("standards").select("id, standard_code, title, source").or(`${ownershipFilter},source.eq.ncc`),
+      ftsQuery
+        ? supabase.rpc("match_ncc_chunks_fts", { query_text: ftsQuery, match_count: 10, p_states: nccStates })
+        : Promise.resolve({ data: [] }),
+      nccClauseMatches.length > 0
+        ? supabase
+            .from("ncc_chunks")
+            .select("id, standard_id, content, clause_number, clause_title, chunk_index, chunk_type, state, source_url, figure_refs")
+            .eq("is_live", true)
+            .or(nccStateFilter)
+            .in("clause_number", nccClauseMatches)
+            .limit(10)
+        : Promise.resolve({ data: [] }),
     ]);
 
     // Map every standard the user/org can see to its trade (by code/title
@@ -485,6 +540,8 @@ serve(async (req) => {
 
     // Vector search 1 — original query; also search for past feedback corrections in parallel
     let vectorChunks1: any[] = [];
+    let nccVectorChunks1: any[] = [];
+    let nccVectorChunks2: any[] = [];
     let feedbackCorrections: Array<{ question_text: string; user_comment: string }> = [];
     // Hoisted so the cache-write step near the end of a cache MISS can reuse
     // the same embedding — no second OpenAI call needed either way.
@@ -589,7 +646,7 @@ serve(async (req) => {
         }
       }
 
-      const [chunksResult, correctionsResult] = await Promise.all([
+      const [chunksResult, correctionsResult, nccResult] = await Promise.all([
         supabase.rpc("match_chunks", {
           query_embedding: queryEmbedding,
           match_user_id: userId,
@@ -602,8 +659,15 @@ serve(async (req) => {
           match_threshold: 0.82,
           match_count: 3,
         }),
+        supabase.rpc("match_ncc_chunks", {
+          query_embedding: queryEmbedding,
+          match_threshold: 0.30,
+          match_count: 10,
+          p_states: nccStates,
+        }),
       ]);
       if (!chunksResult.error && chunksResult.data?.length) vectorChunks1 = chunksResult.data;
+      if (!nccResult.error && nccResult.data?.length) nccVectorChunks1 = tagNcc(nccResult.data);
       if (!correctionsResult.error && correctionsResult.data?.length) feedbackCorrections = correctionsResult.data;
     }
 
@@ -618,13 +682,22 @@ serve(async (req) => {
           usage: { input_tokens: embData2.usage.prompt_tokens ?? 0, output_tokens: 0 },
         });
       }
-      const { data, error: matchError2 } = await supabase.rpc("match_chunks", {
-        query_embedding: expandedEmbedding,
-        match_user_id: userId,
-        match_threshold: 0.30,
-        match_count: 20,
-      });
+      const [{ data, error: matchError2 }, nccResult2] = await Promise.all([
+        supabase.rpc("match_chunks", {
+          query_embedding: expandedEmbedding,
+          match_user_id: userId,
+          match_threshold: 0.30,
+          match_count: 20,
+        }),
+        supabase.rpc("match_ncc_chunks", {
+          query_embedding: expandedEmbedding,
+          match_threshold: 0.30,
+          match_count: 10,
+          p_states: nccStates,
+        }),
+      ]);
       if (!matchError2 && data?.length) vectorChunks2 = data;
+      if (!nccResult2.error && nccResult2.data?.length) nccVectorChunks2 = tagNcc(nccResult2.data);
     }
 
     // Merge vector results (deduplicated)
@@ -638,7 +711,15 @@ serve(async (req) => {
     }
 
     const keywordChunks: any[] = keywordChunksResult.data || [];
-    const clauseChunks: any[] = (clauseResult.data || []).map((c: any) => ({ ...c, similarity: 1.0 }));
+    const clauseChunks: any[] = [
+      ...(clauseResult.data || []),
+      ...tagNcc(nccClauseResult.data || []),
+    ].map((c: any) => ({ ...c, similarity: 1.0 }));
+    const nccKeywordChunks: any[] = tagNcc(nccFtsResult.data || []);
+    // NCC vector hits count as real similarity signal too (see maxVectorSim).
+    for (const c of [...nccVectorChunks1, ...nccVectorChunks2]) {
+      if (!seenVectorIds.has(c.id)) { seenVectorIds.add(c.id); vectorChunks.push(c); }
+    }
 
     // Drop confidently wrong-trade chunks from every channel before they can
     // be fused, ranked, cited, or opened via a source link — this is the
@@ -646,7 +727,10 @@ serve(async (req) => {
     // surfacing and being cited for an electrical question).
     vectorChunks1 = filterCrossTrade(vectorChunks1);
     vectorChunks2 = filterCrossTrade(vectorChunks2);
+    nccVectorChunks1 = filterCrossTrade(nccVectorChunks1);
+    nccVectorChunks2 = filterCrossTrade(nccVectorChunks2);
     const keywordChunksFiltered = filterCrossTrade(keywordChunks);
+    const nccKeywordChunksFiltered = filterCrossTrade(nccKeywordChunks);
     const clauseChunksFiltered = filterCrossTrade(clauseChunks);
 
     // Reciprocal-rank fusion across channels. The old merge appended every
@@ -670,6 +754,12 @@ serve(async (req) => {
     addRanked(vectorChunks1, 1.0);
     addRanked(vectorChunks2, 1.0);
     addRanked(keywordChunksFiltered, 0.8);
+    // NCC channels fuse into the same pool: a clause that both the user's
+    // AS/NZS upload and the NCC agree on floats up the same way two AS/NZS
+    // channels agreeing would.
+    addRanked(nccVectorChunks1, 1.0);
+    addRanked(nccVectorChunks2, 1.0);
+    addRanked(nccKeywordChunksFiltered, 0.8);
     const clauseIds = new Set(clauseChunksFiltered.map((c: any) => c.id));
     const fused = [...rrf.values()]
       .sort((a, b) => b.score - a.score)
@@ -889,7 +979,7 @@ serve(async (req) => {
     // Get standard details
     const standardIds = [...new Set(matchedChunks.map((c: any) => c.standard_id))];
     const standards = standardIds.length > 0
-      ? (await supabase.from("standards").select("id, standard_code, version, title").in("id", standardIds)).data
+      ? (await supabase.from("standards").select("id, standard_code, version, title, source").in("id", standardIds)).data
       : [];
     const standardMap = new Map(standards?.map((s: any) => [s.id, s]) || []);
 
@@ -1024,7 +1114,10 @@ serve(async (req) => {
     const contextChunks = matchedChunks.length > 0
       ? matchedChunks.map((chunk: any, i: number) => {
           const std = standardMap.get(chunk.standard_id);
-          return `[Source ${i + 1} — ${std?.standard_code || "Unknown"} ${std?.version || ""} Clause ${chunk.clause_number || "N/A"} (Page ${chunk.page_number || "N/A"})${chunkTag(chunk)}]
+          const where = chunk.source === "ncc"
+            ? ` (NCC${chunk.state ? ` — ${chunk.state} variation` : ""}; © ABCB, CC BY 4.0)`
+            : ` (Page ${chunk.page_number || "N/A"})`;
+          return `[Source ${i + 1} — ${std?.standard_code || "Unknown"} ${std?.version || ""} Clause ${chunk.clause_number || "N/A"}${where}${chunkTag(chunk)}]
 ${chunk.content}`;
         }).join("\n\n") + tableRowContext + figCaptionContext + correctionsContext +
         buildKnownGapsContext(matchedFailedItems, knownGapStandardLabel)
@@ -1096,7 +1189,8 @@ ${chunk.content}`;
     }
 
     const staticSystemPrompt = buildStaticSystemPrompt(trade);
-    const contextSystemBlock = buildContextSystemBlock(contextChunks, matchedPhrases);
+    const hasNccContext = matchedChunks.some((c: any) => c.source === "ncc");
+    const contextSystemBlock = buildContextSystemBlock(contextChunks, matchedPhrases, hasNccContext);
     const queryId = crypto.randomUUID();
     // Calibrated for genuine text-embedding-3-small similarities (real matches
     // ~0.45–0.65; 0.80 was unreachable and flagged nearly every answer). An
@@ -1615,6 +1709,8 @@ User's question/context: ${effectiveQuestion}` : "";
         });
         parsedResponse.answer = validation.cleanedResponse;
 
+        console.log("[citations] raw from model:", JSON.stringify((parsedResponse.citations || []).map((c: any) => ({ s: c.standard_code, n: c.clause_number }))));
+
         // Strip hallucinated citations
         if (parsedResponse.citations?.length && matchedChunks.length > 0) {
           const allChunkText = matchedChunks.map((c: any) => c.content.toLowerCase()).join(" ");
@@ -1757,7 +1853,14 @@ User's question/context: ${effectiveQuestion}` : "";
             const answerWords = new Set((parsedResponse.answer || "").toLowerCase().match(/\b[a-z]{5,}\b|\b\d+(?:\.\d+)?[a-zΩ°]{0,3}\b/g) || []);
             if (answerWords.size >= 3) {
               const isRealClause = (cn: string) => cn !== "" && /^[A-Z]?\d+(?:\.\d+)*$/.test(cn);
-              const realClauseChunks = matchedChunks.filter((c: any) => isRealClause((c.clause_number || "").toString().trim()) && c.chunk_index !== 0);
+              // NCC rows are one clause each (chunk_index 0 is the clause, not a
+              // document map) and use letter codes like H1D4/S42C1, so they
+              // get their own test rather than the PDF-pipeline heuristics.
+              const realClauseChunks = matchedChunks.filter((c: any) =>
+                c.source === "ncc"
+                  ? !!c.clause_number && c.chunk_type !== "glossary"
+                  : isRealClause((c.clause_number || "").toString().trim()) && c.chunk_index !== 0,
+              );
               let scored = realClauseChunks
                 .map((c: any) => {
                   const chunkLc = (c.content || "").toLowerCase();
@@ -1823,21 +1926,69 @@ User's question/context: ${effectiveQuestion}` : "";
           parsedResponse.tables_referenced = dedupeRefs(parsedResponse.tables_referenced, "table_number");
         }
 
+        // NCC citations open the clause on ncc.abcb.gov.au instead of a PDF
+        // page, so attach source + source_url (+ the figure list the clause
+        // references — the images themselves are outside the CC BY licence and
+        // are never stored). Figure/table crops are PDF-only; drop any that
+        // resolved to an NCC standard so the frontend never tries to clip one.
+        {
+          const isNccStd = (id: string | null | undefined) => !!id && standardMap.get(id)?.source === "ncc";
+          const nccChunks = matchedChunks.filter((mc: any) => mc.source === "ncc");
+          for (const c of parsedResponse.citations || []) {
+            const want = (c.clause_number || "").toString().trim().toUpperCase();
+            const hit =
+              nccChunks.find((mc: any) => mc.standard_id === c.standard_id && (mc.clause_number || "").toString().trim().toUpperCase() === want) ||
+              (isNccStd(c.standard_id) ? null : nccChunks.find((mc: any) => (mc.clause_number || "").toString().trim().toUpperCase() === want));
+            if (!hit && !isNccStd(c.standard_id)) continue;
+            if (hit) c.standard_id = hit.standard_id;
+            const std = standardMap.get(c.standard_id);
+            c.standard_code = std?.standard_code || c.standard_code;
+            c.standard_version = std?.version || c.standard_version;
+            c.source = "ncc";
+            c.source_url = hit?.source_url || "https://ncc.abcb.gov.au/editions/ncc-2025";
+            c.page_number = null;
+            if (hit?.figure_refs?.length) c.figure_refs = hit.figure_refs;
+          }
+          parsedResponse.figures_referenced = (parsedResponse.figures_referenced || []).filter((r: any) => !isNccStd(r.standard_id));
+          parsedResponse.tables_referenced = (parsedResponse.tables_referenced || []).filter((r: any) => !isNccStd(r.standard_id));
+          // The model sometimes names the same NCC clause twice under slightly
+          // different standard_code spellings ("… Housing Provisions" vs "…
+          // Housing Provisions (WA)"); the dedupe above ran before those were
+          // normalised, so dedupe NCC citations again on standard_id + clause.
+          const seenNcc = new Set<string>();
+          parsedResponse.citations = (parsedResponse.citations || []).filter((c: any) => {
+            if (c.source !== "ncc") return true;
+            const key = `${c.standard_id}::${(c.clause_number || "").toString().trim().toUpperCase()}`;
+            if (seenNcc.has(key)) return false;
+            seenNcc.add(key);
+            return true;
+          });
+        }
+
         // Snapshot the real citations BEFORE gating — the analytics tables
         // used to permanently store "[Upgrade to Pro to unlock this clause]"
         // for every free-tier query.
         const citationsForLog = (parsedResponse.citations || []).map((c: any) => ({ ...c }));
 
         // Free tier clause gating
+        // NCC content is CC BY 4.0 and available to every account, so only
+        // the user's own AS/NZS citations get gated.
         if (tier === "free" && parsedResponse.citations) {
-          parsedResponse.citations = parsedResponse.citations.map((c: any) => ({
-            ...c,
-            clause_number: "[Upgrade to Pro to unlock this clause]",
-            relevant_text: "This clause is available with a Pro subscription.",
-            gated: true,
-          }));
-          parsedResponse.gated = true;
-          parsedResponse.gated_message = "You're on the right track — upgrade to Pro to get the full clause and complete guidance.";
+          let gatedAny = false;
+          parsedResponse.citations = parsedResponse.citations.map((c: any) => {
+            if (c.source === "ncc") return c;
+            gatedAny = true;
+            return {
+              ...c,
+              clause_number: "[Upgrade to Pro to unlock this clause]",
+              relevant_text: "This clause is available with a Pro subscription.",
+              gated: true,
+            };
+          });
+          if (gatedAny) {
+            parsedResponse.gated = true;
+            parsedResponse.gated_message = "You're on the right track — upgrade to Pro to get the full clause and complete guidance.";
+          }
         }
 
         // Send done event with full metadata

@@ -15,6 +15,8 @@ import { useProfile, useStandards, useOrganization, useSubscription } from "@/ho
 import { supabase } from "@/integrations/supabase/client";
 import { compressImageToBlob } from "@/lib/image";
 
+const AU_STATES = ["WA", "NSW", "VIC", "QLD", "SA", "TAS", "NT", "ACT"] as const;
+
 const TRADE_LABELS: Record<string, string> = {
   electrical: "Electrical",
   plumbing: "Plumbing",
@@ -83,6 +85,9 @@ const Profile = () => {
 
   const [editName, setEditName] = useState("");
   const [editTrades, setEditTrades] = useState<string[]>([]);
+  // States/territories the user works in — picks which NCC state variations
+  // apply to their answers (national clauses always do). Optional, multi.
+  const [editStates, setEditStates] = useState<string[]>([]);
   const [editBusinessName, setEditBusinessName] = useState("");
   const [editLicenceNumber, setEditLicenceNumber] = useState("");
   const [logoPath, setLogoPath] = useState<string | null>(null);
@@ -98,6 +103,7 @@ const Profile = () => {
     const p = profile as any;
     setEditName(p.display_name || "");
     setEditTrades(p.trade_type ? p.trade_type.split(",").filter(Boolean) : []);
+    setEditStates(Array.isArray(p.states) ? p.states : []);
     setEditBusinessName(p.business_name || "");
     setEditLicenceNumber(p.licence_number || "");
     setLogoPath(p.logo_storage_path || null);
@@ -146,6 +152,7 @@ const Profile = () => {
         .update({
           display_name: editName.trim() || null,
           trade_type: editTrades.join(","),
+          states: editStates,
           business_name: editBusinessName.trim() || null,
           licence_number: editLicenceNumber.trim() || null,
           logo_storage_path: logoPath,
@@ -590,6 +597,24 @@ const Profile = () => {
                           ))}
                         </div>
                       </div>
+                      <div>
+                        <Label className="text-xs">States / territories you work in</Label>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          Applies those states' NCC variations to your answers. Pick as many as apply.
+                        </p>
+                        <div className="flex flex-wrap gap-1.5 mt-1.5">
+                          {AU_STATES.map((st) => (
+                            <Badge
+                              key={st}
+                              variant={editStates.includes(st) ? "default" : "outline"}
+                              className="cursor-pointer text-[11px] px-2 py-1"
+                              onClick={() => setEditStates((prev) => (prev.includes(st) ? prev.filter((x) => x !== st) : [...prev, st]))}
+                            >
+                              {st}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
                       <Separator />
                       <p className="text-xs font-semibold text-foreground -mb-1">Used on Site Audit reports</p>
                       <div>
@@ -886,6 +911,10 @@ const Profile = () => {
                           <ExternalLink className="h-3.5 w-3.5" />
                           Privacy Policy
                         </a>
+                        <p className="text-[10px] text-muted-foreground pt-1">
+                          The National Construction Code 2025 was provided by the Australian Building Codes Board
+                          under the CC BY 4.0 licence. StandAId is independent and not endorsed by the ABCB.
+                        </p>
                       </div>
                     </div>
                   )}

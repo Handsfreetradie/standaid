@@ -12,6 +12,7 @@ const STANDARD_TO_TRADE: Record<string, TradeType> = {
   "AS/NZS 61439": "electrical",
 
   // Plumbing
+  "NCC 2025 VOLUME THREE": "plumbing",   // Plumbing Code of Australia (shared NCC index)
   "AS/NZS 3500": "plumbing",
   "AS/NZS 5601": "plumbing",
   "AS 3740": "plumbing",

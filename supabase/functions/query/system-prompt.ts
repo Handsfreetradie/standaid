@@ -11,7 +11,11 @@ export type TradeType =
 // here changes this string, which changes the hash, which invalidates every
 // previously cached answer instead of silently serving stale ones.
 export function promptVersionSource(): string {
-  return CORE_SYSTEM_PROMPT + JSON.stringify(TRADE_GUIDANCE) + JSON.stringify(EXAMPLES_BY_TRADE);
+  // RETRIEVAL_VERSION: bump when what gets retrieved changes (not just how
+  // it's worded) — e.g. adding the shared NCC index — so cached answers made
+  // without the new sources aren't served as if they had them.
+  const RETRIEVAL_VERSION = "ncc-v1";
+  return CORE_SYSTEM_PROMPT + JSON.stringify(TRADE_GUIDANCE) + JSON.stringify(EXAMPLES_BY_TRADE) + RETRIEVAL_VERSION;
 }
 
 // Static per-trade block — identical for every query of the same trade, so
@@ -30,7 +34,15 @@ ${EXAMPLES_BY_TRADE[trade] ?? EXAMPLES_BY_TRADE.general}`;
 export function buildContextSystemBlock(
   contextChunks: string,
   matchedTradieTerms: string[] = [],
+  hasNccSources = false,
 ): string {
+  // Sources marked "(NCC …)" come from the shared National Construction Code
+  // index, not the user's uploads. They cite exactly like a standard — the
+  // Source label's name is the standard_code — but the tradie opens them on
+  // ncc.abcb.gov.au, so there is never a page number.
+  const nccNote = hasNccSources
+    ? `\nNOTE ON NCC SOURCES: Some extracts are marked "(NCC …)" — they are from the National Construction Code 2025 (Building Code of Australia / Plumbing Code of Australia / ABCB Housing Provisions), which applies to every account. Cite them exactly like any other clause: put the Source label's name (e.g. "NCC 2025 Housing Provisions", "NCC 2025 Volume Two") in "standard_code", the clause number exactly as shown (e.g. "9.2.7", "H1D4", "S42C1") in "clause_number", and a direct quote in "relevant_text". An extract marked as a state variation (e.g. "WA variation") overrides the national clause in that state — say so when it matters. Where a clause refers to a Figure, tell the tradie to check that figure on the NCC website; you cannot see it.\n`
+    : "";
   const conversationNote = `CONVERSATION CONTEXT: If there are prior messages in the conversation, the user's latest question may be a follow-up. Use the conversation history to understand what they're referring to (e.g. "its on a 16amp type c" means "16A Type C MCB" in the context of a fault loop question). Always answer the latest question in context.\n`;
 
   const tradieTermNote = matchedTradieTerms.length > 0
@@ -38,7 +50,7 @@ export function buildContextSystemBlock(
     : "";
 
   return `---
-${conversationNote}${tradieTermNote}
+${conversationNote}${tradieTermNote}${nccNote}
 RETRIEVED STANDARD EXTRACTS:
 ${contextChunks}
 

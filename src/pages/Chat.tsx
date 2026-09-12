@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Mic, ThumbsUp, ThumbsDown, HelpCircle, Check, FileText, History, X } from "lucide-react";
+import { Send, Camera, AlertTriangle, Lock, Zap, Shield, Mic, ThumbsUp, ThumbsDown, HelpCircle, Check, FileText, History, X, ExternalLink } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import VoiceMode from "@/components/VoiceMode";
@@ -26,7 +26,15 @@ interface Citation {
   page_number?: number;
   relevant_text?: string;
   gated?: boolean;
+  // Shared NCC index (© ABCB, CC BY 4.0). Opens the clause on ncc.abcb.gov.au
+  // instead of a PDF page; figures are linked, never stored (outside the licence).
+  source?: "ncc";
+  source_url?: string;
+  figure_refs?: Array<{ number: string; title: string; url: string }>;
 }
+
+const NCC_ATTRIBUTION =
+  "The National Construction Code 2025 was provided by the Australian Building Codes Board under the CC BY 4.0 licence.";
 
 interface ImageRef {
   figure_number?: string;
@@ -630,6 +638,20 @@ const Chat = () => {
                             🔒 {citation.clause_number}
                             {citation.standard_code ? ` (${citation.standard_code})` : ""}
                           </Badge>
+                        ) : citation.source === "ncc" ? (
+                          <a
+                            key={idx}
+                            href={citation.source_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={`${citation.standard_code} — opens on ncc.abcb.gov.au`}
+                            className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold border border-emerald-600/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 active:scale-95 transition-all"
+                          >
+                            <span className="rounded-sm bg-emerald-600 px-1 text-[9px] font-bold uppercase leading-4 text-white">NCC</span>
+                            {citation.clause_number}
+                            {citation.standard_code ? ` (${citation.standard_code.replace(/^NCC 2025 /, "")})` : ""}
+                            <ExternalLink className="h-3 w-3 opacity-70" />
+                          </a>
                         ) : (
                           <button
                             key={idx}
@@ -643,6 +665,34 @@ const Chat = () => {
                       )}
                     </div>
                   )}
+
+                  {/* NCC figures — linked to ABCB's site, never reproduced (images
+                      are outside the NCC's CC BY licence) */}
+                  {!msg.isTyping && (() => {
+                    const seen = new Set<string>();
+                    const figs = (msg.citations || []).flatMap((c) => c.figure_refs || []).filter((f) => {
+                      if (seen.has(f.number)) return false;
+                      seen.add(f.number);
+                      return true;
+                    });
+                    if (figs.length === 0) return null;
+                    return (
+                      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                        {figs.map((f) => (
+                          <a
+                            key={f.number}
+                            href={f.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-[11px] text-emerald-700 dark:text-emerald-300 hover:underline"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                            Figure {f.number}{f.title ? ` — ${f.title}` : ""}
+                          </a>
+                        ))}
+                      </div>
+                    );
+                  })()}
 
                   {/* Figures — cropped live from the PDF, see StandardClipImage */}
                   {!msg.isTyping && msg.figures_referenced && msg.figures_referenced.length > 0 && (
@@ -683,14 +733,21 @@ const Chat = () => {
                       if screenshotted or copied out of the app. */}
                   {!msg.isTyping && (() => {
                     const codes = new Set<string>();
-                    msg.citations?.forEach((c) => c.standard_code && codes.add(c.standard_code));
+                    let hasNcc = false;
+                    msg.citations?.forEach((c) => {
+                      if (c.source === "ncc") { hasNcc = true; return; }
+                      if (c.standard_code) codes.add(c.standard_code);
+                    });
                     msg.figures_referenced?.forEach((f) => f.standard_code && codes.add(f.standard_code));
                     msg.tables_referenced?.forEach((t) => t.standard_code && codes.add(t.standard_code));
-                    if (codes.size === 0) return null;
+                    if (codes.size === 0 && !hasNcc) return null;
                     return (
-                      <p className="mt-2 text-[10px] text-muted-foreground/70">
-                        Sourced from {Array.from(codes).join(", ")} — © Standards Australia. Shown under your personal licence.
-                      </p>
+                      <div className="mt-2 space-y-0.5 text-[10px] text-muted-foreground/70">
+                        {codes.size > 0 && (
+                          <p>Sourced from {Array.from(codes).join(", ")} — © Standards Australia. Shown under your personal licence.</p>
+                        )}
+                        {hasNcc && <p>Source: NCC 2025, © ABCB, CC BY 4.0. {NCC_ATTRIBUTION}</p>}
+                      </div>
                     );
                   })()}
 
