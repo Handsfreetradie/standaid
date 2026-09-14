@@ -36,6 +36,15 @@ interface Citation {
   guide_title?: string | null;
 }
 
+// Tap-to-fill example questions shown on the empty chat, all answerable from
+// the shared NCC index alone (no upload needed).
+const NCC_EXAMPLES = [
+  "Where do smoke alarms go in a two-storey house?",
+  "How far does a shed have to be from the house?",
+  "What has to be waterproof in a shower?",
+  "Max hot water temperature at a basin?",
+];
+
 const GUIDE_DISCLAIMER = "Simplified summary — always verify against the current clause of the standard.";
 
 // CC BY 4.0 §3(a): creator + copyright notice, licence notice with link,
@@ -541,14 +550,37 @@ const Chat = () => {
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-5 py-4 flex flex-col">
         {messages.length === 0 && (
           <div className="flex-1 flex flex-col items-center justify-center px-4 gap-5">
-            <div className="text-center">
+            <div className="text-center max-w-md">
               <Shield className="h-12 w-12 text-primary/30 mb-3 mx-auto" />
               <p className="text-sm font-semibold text-foreground mb-1">
                 What do you need to know?
               </p>
               <p className="text-xs text-muted-foreground">
-                Ask anything about your uploaded documents. I'll find the exact clause.
+                Ask about your uploaded documents, or the NCC — I'll find the exact clause.
               </p>
+            </div>
+            {/* NCC is built in for every account — say so, or nobody knows to ask. */}
+            <div className="w-full max-w-md rounded-xl border border-emerald-600/30 bg-emerald-500/5 p-3">
+              <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                <span className="rounded-sm bg-emerald-600 px-1 text-[9px] font-bold uppercase leading-4 text-white">NCC</span>
+                National Construction Code 2025 — built in, no upload needed
+              </p>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                The full text of Volumes One, Two and Three and the ABCB Housing Provisions, including your
+                state's variations. Every answer links to the clause on ncc.abcb.gov.au.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {NCC_EXAMPLES.map((q) => (
+                  <button
+                    key={q}
+                    type="button"
+                    onClick={() => setInput(q)}
+                    className="rounded-full border border-emerald-600/30 bg-background px-2.5 py-1 text-[11px] text-foreground hover:bg-emerald-500/10 transition-colors"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}
@@ -886,7 +918,7 @@ const Chat = () => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={pendingImage ? "Describe what to check, or just send to let Claude assess it..." : "Ask about your documents..."}
+            placeholder={pendingImage ? "Describe what to check, or just send to let Claude assess it..." : "Ask about the NCC or your documents..."}
             className="min-h-[40px] max-h-[120px] resize-none text-sm"
             rows={1}
           />
