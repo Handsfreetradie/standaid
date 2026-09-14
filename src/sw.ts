@@ -23,7 +23,9 @@ cleanupOutdatedCaches();
 
 registerRoute(
   new NavigationRoute(createHandlerBoundToURL("index.html"), {
-    denylist: [/^\/~oauth/],
+    // /ncc/* are static, crawlable explainer pages in public/ — never hand
+    // them to the SPA shell (see scripts/build-ncc-pages.py).
+    denylist: [/^\/~oauth/, /^\/ncc(\/|$)/, /^\/sitemap-ncc\.xml$/],
   }),
 );
 

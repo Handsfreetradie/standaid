@@ -1,0 +1,315 @@
+{
+  "_about": "Public NCC explainer pages (SEO). Each topic = our own plain-English intro + FAQ, followed by the actual NCC 2025 clause text pulled from ncc_chunks (CC BY 4.0, attributed). Built by scripts/build-ncc-pages.py into public/ncc/<slug>/index.html. Intros are StandAId's words; keep them factual, cite clause numbers, never claim 'official'.",
+  "site": {
+    "base_url": "https://app.standaid.ai",
+    "brand": "StandAId",
+    "cta_url": "https://app.standaid.ai/auth",
+    "cta_text": "Ask the NCC in StandAId — free, 3 questions a day"
+  },
+  "topics": [
+    {
+      "slug": "smoke-alarms-in-houses",
+      "title": "Smoke alarms in houses — NCC 2025 rules explained",
+      "h1": "Smoke alarms in a house: where they go, mains power and interconnection",
+      "description": "What the NCC 2025 Housing Provisions require for smoke alarms in Class 1a houses — locations on each storey, ceiling positioning, mains power, interconnection and AS 3786. Clause text with links to the ABCB.",
+      "trades": [
+        "electrical",
+        "building"
+      ],
+      "intro": [
+        "Every new house (Class 1a) needs smoke alarms, and the NCC is specific about where. The short version: on any storey with bedrooms, alarms go in every corridor or hallway that serves a bedroom — or, where there's no hallway, between the bedrooms and the rest of the house. Any other storey gets at least one alarm too, so a typical two-storey home ends up with alarms on both levels.",
+        "The alarms themselves have to comply with AS 3786, be wired to the consumer mains power (where mains is available), and be interconnected so that when one goes off, they all go off. Positioning on the ceiling matters — keep them clear of the wall/ceiling corner dead-air space and follow the sloped-ceiling rules.",
+        "The clauses below are from the ABCB Housing Provisions (the deemed-to-satisfy pathway most houses use) plus the Volume Two performance clause they sit under. NSW has a state variation to the location rule — if you're in NSW, read the NSW entry as well."
+      ],
+      "clauses": [
+        {
+          "publication": "housing",
+          "clause": "9.5.1"
+        },
+        {
+          "publication": "housing",
+          "clause": "9.5.2"
+        },
+        {
+          "publication": "housing",
+          "clause": "9.5.4"
+        },
+        {
+          "publication": "vol2",
+          "clause": "H3D6"
+        }
+      ],
+      "faq": [
+        {
+          "q": "Do smoke alarms in a new house have to be hardwired?",
+          "a": "Yes — where consumer mains power is supplied to the building, the NCC requires smoke alarms to be connected to it (with battery back-up as per AS 3786). See Housing Provisions 9.5.4."
+        },
+        {
+          "q": "Do smoke alarms need to be interconnected?",
+          "a": "Where more than one alarm is installed in a house, the NCC requires them to be interconnected so they all sound together. See Housing Provisions 9.5.4."
+        },
+        {
+          "q": "How many smoke alarms does a two-storey house need?",
+          "a": "At least one on each storey: on the bedroom storey they go in hallways serving bedrooms (or between bedrooms and the rest of the house), and every other storey gets at least one. See Housing Provisions 9.5.2."
+        }
+      ],
+      "related": [
+        "wet-area-waterproofing-bathrooms",
+        "class-10a-shed-garage-fire-separation"
+      ]
+    },
+    {
+      "slug": "wet-area-waterproofing-bathrooms",
+      "title": "Bathroom wet area waterproofing — NCC 2025 explained",
+      "h1": "Wet area waterproofing in houses: showers, baths, floors and walls",
+      "description": "NCC 2025 Housing Provisions Part 10.2 explained: which wet-area surfaces must be waterproof vs water resistant, shower areas, baths, floor falls and materials. Clause text with links to the ABCB.",
+      "trades": [
+        "plumbing",
+        "building",
+        "electrical"
+      ],
+      "intro": [
+        "Wet areas — bathrooms, showers, laundries and sanitary compartments — have to be built so water can't get into the structure. The NCC splits the requirements by location: the shower area gets the strictest treatment (waterproof floors, water-resistant or waterproof walls to set heights), areas around baths and outside the shower have their own rules, and the whole thing hangs off a defined list of what counts as 'waterproof' versus 'water resistant' material.",
+        "For sparkies the same zones matter for a different reason — AS/NZS 3000's bathroom zones for electrical equipment are measured from the same bath and shower. For plumbers and builders, the falls to floor wastes and the membrane rules decide whether the job leaks in five years.",
+        "The clauses below are the Housing Provisions Part 10.2 core. South Australia replaces 10.2.1 with its own version — SA readers should check the SA entry."
+      ],
+      "clauses": [
+        {
+          "publication": "housing",
+          "clause": "10.2.1"
+        },
+        {
+          "publication": "housing",
+          "clause": "10.2.2"
+        },
+        {
+          "publication": "housing",
+          "clause": "10.2.4"
+        },
+        {
+          "publication": "housing",
+          "clause": "10.2.8"
+        },
+        {
+          "publication": "housing",
+          "clause": "10.2.9"
+        },
+        {
+          "publication": "housing",
+          "clause": "10.2.12"
+        }
+      ],
+      "faq": [
+        {
+          "q": "Does a bathroom floor have to be waterproof or just water resistant?",
+          "a": "It depends on the area: shower area floors must be waterproof, and floors elsewhere in the wet area have their own requirement depending on the flooring material and whether a floor waste is provided. See Housing Provisions 10.2.1 to 10.2.4."
+        },
+        {
+          "q": "What counts as a water resistant substrate?",
+          "a": "The NCC lists deemed water resistant materials for walls and floors — concrete, cement render, fibre-cement sheeting, water resistant plasterboard and compliant masonry among them. See Housing Provisions 10.2.9."
+        },
+        {
+          "q": "What fall does a wet area floor need to a floor waste?",
+          "a": "Housing Provisions 10.2.12 sets the minimum falls to a floor waste in shower areas and other wet-area floors — read the clause for the ratios."
+        }
+      ],
+      "related": [
+        "smoke-alarms-in-houses",
+        "hot-water-delivery-temperature"
+      ]
+    },
+    {
+      "slug": "class-10a-shed-garage-fire-separation",
+      "title": "Shed and garage fire separation from the house — NCC 2025",
+      "h1": "How far a shed or garage (Class 10a) has to be from the house and other sheds",
+      "description": "NCC 2025 Housing Provisions Part 9.2: separation of Class 10a sheds, garages and carports from Class 1 houses, from each other and from the allotment boundary — 900 mm and 1.8 m rules, FRL walls, carport exemptions. Clause text with ABCB links.",
+      "trades": [
+        "building",
+        "carpentry",
+        "electrical"
+      ],
+      "intro": [
+        "A shed, garage or carport is a Class 10a building, and the NCC treats it as a fire risk to the house next to it. The rules come down to distances and fire-rated walls: a Class 10a building generally needs to be a set distance from the allotment boundary, from the house, and from other Class 10a buildings — or the wall facing them needs a fire-resistance level (FRL).",
+        "The number people ask about most is the 1.8 m: where two or more Class 10a buildings sit between different houses on the same block, they need to be at least 1.8 m apart or built with FRL walls. There are separate provisions for carports, which get an exemption if they're open enough.",
+        "Below are the core Part 9.2 clauses. Western Australia has its own Part 9.6 for roofed outdoor areas (patios, alfrescos) — see the separate WA page."
+      ],
+      "clauses": [
+        {
+          "publication": "housing",
+          "clause": "9.2.3"
+        },
+        {
+          "publication": "housing",
+          "clause": "9.2.5"
+        },
+        {
+          "publication": "housing",
+          "clause": "9.2.6"
+        },
+        {
+          "publication": "housing",
+          "clause": "9.2.7"
+        },
+        {
+          "publication": "housing",
+          "clause": "9.2.8"
+        }
+      ],
+      "faq": [
+        {
+          "q": "How far does a shed have to be from the boundary?",
+          "a": "Under the Housing Provisions a Class 10a building's external wall generally needs to be at least 900 mm from the allotment boundary or have the required FRL — read 9.2.5 and 9.2.6 for the conditions."
+        },
+        {
+          "q": "Do two sheds on the same block have to be separated?",
+          "a": "Where two or more Class 10a buildings are between and associated with different Class 1 houses on the same allotment, they must be at least 1.8 m apart or separated by walls with the required FRL. See 9.2.7."
+        },
+        {
+          "q": "Is a carport treated the same as a garage?",
+          "a": "No — an open carport can be exempt from some fire separation requirements if it meets the openness conditions in 9.2.8."
+        }
+      ],
+      "related": [
+        "wa-patio-alfresco-fire-separation",
+        "smoke-alarms-in-houses"
+      ]
+    },
+    {
+      "slug": "wa-patio-alfresco-fire-separation",
+      "title": "WA patio and alfresco fire separation — NCC 2025 Part 9.6",
+      "h1": "Roofed patios and alfrescos near the boundary in WA: non-combustible construction rules",
+      "description": "Western Australia's NCC 2025 variation for roofed outdoor areas (Housing Provisions Part 9.6): when a patio, alfresco or verandah near the boundary needs non-combustible construction, the 900 mm rule and separation between roofed areas. WA clause text with ABCB links.",
+      "trades": [
+        "building",
+        "carpentry"
+      ],
+      "state": "WA",
+      "intro": [
+        "Western Australia adds its own part to the Housing Provisions for roofed outdoor areas — patios, alfrescos, verandahs, pergolas with roofs. The idea is the same as the shed rules: a roofed structure close to the boundary can carry fire to the neighbour, so it either keeps its distance or is built from non-combustible material.",
+        "In practice: keep the roofed area at least 900 mm from the allotment boundary, or comply with the fire separation requirements, and watch the rules for infill panels and for separation between roofed areas on the same block. This is a WA-only variation — it doesn't apply in other states, which use the standard Part 9.2 provisions.",
+        "The clauses below are the WA variation text (marked as such) from the NCC 2025 Housing Provisions."
+      ],
+      "clauses": [
+        {
+          "publication": "housing",
+          "clause": "9.6.1",
+          "state": "WA"
+        },
+        {
+          "publication": "housing",
+          "clause": "9.6.2",
+          "state": "WA"
+        }
+      ],
+      "faq": [
+        {
+          "q": "Does my patio in WA need to be non-combustible?",
+          "a": "If the roofed outdoor area is closer than 900 mm to the allotment boundary, or otherwise doesn't meet the separation conditions, WA's Part 9.6 requires non-combustible construction for the relevant parts. See WA 9.6.2."
+        },
+        {
+          "q": "Does WA Part 9.6 apply in other states?",
+          "a": "No. It is a Western Australian variation to the Housing Provisions. Other states apply the national Part 9.2 fire separation rules."
+        }
+      ],
+      "related": [
+        "class-10a-shed-garage-fire-separation"
+      ]
+    },
+    {
+      "slug": "hot-water-delivery-temperature",
+      "title": "Hot water delivery temperature (50°C rule) — NCC 2025 Volume Three",
+      "h1": "Maximum hot water temperature at the tap: what the Plumbing Code requires",
+      "description": "NCC 2025 Volume Three (Plumbing Code of Australia) on heated water: the maximum delivery temperature at sanitary fixtures used for personal hygiene, storage temperature for Legionella control, and the water heater requirements. Clause text with ABCB links.",
+      "trades": [
+        "plumbing"
+      ],
+      "intro": [
+        "Two temperatures matter in a domestic hot water system and they pull in opposite directions. Water has to be stored hot enough to control Legionella, but delivered cool enough at a bath, basin or shower that a child or elderly person can't be scalded. The NCC's Plumbing Code handles that with a maximum delivery temperature at fixtures used for personal hygiene, and a storage temperature requirement on the heater side.",
+        "The usual way to satisfy both is a tempering valve or thermostatic mixing valve on the outlet side of the heater, with the deemed-to-satisfy detail coming from AS/NZS 3500.4.",
+        "The clauses below are the Volume Three heated water provisions."
+      ],
+      "clauses": [
+        {
+          "publication": "vol3",
+          "clause": "B2P1"
+        },
+        {
+          "publication": "vol3",
+          "clause": "B2D2"
+        },
+        {
+          "publication": "vol3",
+          "clause": "B2D5"
+        },
+        {
+          "publication": "vol3",
+          "clause": "B2V1"
+        }
+      ],
+      "faq": [
+        {
+          "q": "What's the maximum hot water temperature at a bathroom tap?",
+          "a": "NCC Volume Three sets a maximum delivery temperature at sanitary fixtures used primarily for personal hygiene — 50°C in a typical house, with a lower figure for certain care facilities. See B2D5."
+        },
+        {
+          "q": "Why store hot water at a higher temperature than it's delivered?",
+          "a": "Storage temperature is about controlling Legionella growth in the tank; delivery temperature is about scalding. A tempering or thermostatic mixing valve reconciles the two. See B2D2 and B2V1."
+        }
+      ],
+      "related": [
+        "wet-area-waterproofing-bathrooms"
+      ]
+    },
+    {
+      "slug": "stairs-and-balustrades-in-houses",
+      "title": "Stairs and balustrades in houses — NCC 2025 rules",
+      "h1": "Stair construction and barriers to prevent falls in a house",
+      "description": "NCC 2025 Housing Provisions Parts 11.2 and 11.3: stairway construction (riser and going dimensions, consistency, landings) and barriers/balustrades to prevent falls — heights, openings and the 1 m rule. Clause text with ABCB links.",
+      "trades": [
+        "building",
+        "carpentry"
+      ],
+      "intro": [
+        "Stairs and balustrades are where houses fail inspections most often, because the numbers are unforgiving. Risers and goings have to sit inside set ranges and be consistent through a flight, landings are required at set intervals, and any trafficable surface where it's possible to fall 1 m or more needs a barrier of the right height with openings small enough that a child can't fall through or climb.",
+        "The NCC's Housing Provisions cover both the stair geometry (Part 11.2) and the barriers (Part 11.3). Volume Two's performance clause sits above them.",
+        "The clauses below are the core deemed-to-satisfy provisions; read them together — a compliant stair with a non-compliant balustrade is still a fail."
+      ],
+      "clauses": [
+        {
+          "publication": "housing",
+          "clause": "11.2.2"
+        },
+        {
+          "publication": "housing",
+          "clause": "11.3.3"
+        },
+        {
+          "publication": "housing",
+          "clause": "11.3.4"
+        },
+        {
+          "publication": "vol2",
+          "clause": "H5D2"
+        }
+      ],
+      "faq": [
+        {
+          "q": "When does a deck or landing need a balustrade?",
+          "a": "Where a person could fall 1 m or more from a trafficable surface — landings, decks, balconies, stairs — the Housing Provisions require a barrier. See 11.3.3."
+        },
+        {
+          "q": "How high does a balustrade have to be?",
+          "a": "The Housing Provisions set minimum barrier heights for landings/decks and for stairs, plus limits on openings and climbable elements. See 11.3.4 for the figures."
+        },
+        {
+          "q": "Do all the risers in a stair have to be the same?",
+          "a": "Risers and goings must be within the permitted ranges and consistent through a flight — see 11.2.2."
+        }
+      ],
+      "related": [
+        "class-10a-shed-garage-fire-separation",
+        "smoke-alarms-in-houses"
+      ]
+    }
+  ]
+}
