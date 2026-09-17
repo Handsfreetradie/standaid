@@ -634,6 +634,94 @@ export function remeasureLock(
   return { ...lock, refA: again(lock.refA), refB: lock.refB ? again(lock.refB) : undefined };
 }
 
+// "spacing": place copies at a fixed centre-to-centre distance, capping the
+// count if the wall runs out of room before the requested spacing does.
+// "toEnd": ignore the spacing figure and spread the requested count evenly
+// between the fitting and the wall's far end, with the last copy landing
+// right on it — for "fill the rest of this wall" rather than "every 1m".
+export type DuplicateAlongWallMode = "spacing" | "toEnd";
+
+export interface DuplicateAlongWallResult {
+  /** Positions for the NEW copies only — the source fitting itself is untouched. */
+  positions: Point[];
+  /** Parallel to `positions` — each copy is measured off the source fitting, the same way a tradie would read a tape off the one they just placed. */
+  measurementLocks: MeasurementLock[];
+  /** How many copies were actually produced — less than requested if the wall ran out of room. */
+  actualCount: number;
+  /** Set when the request had to be capped or couldn't be satisfied at all, for a toast telling the tradie what happened. */
+  cappedReason: string | null;
+}
+
+/**
+ * Positions (and measurement locks) for repeating a wall-mounted fitting
+ * along its wall, or a ceiling fitting along a line parallel to a nearby
+ * wall — same maths either way, since all this needs is a start point and a
+ * direction to walk in. The wall only decides direction and how much room
+ * there is; it does not have to be the wall the fitting is snapped to (a
+ * downlight's "nearest wall" is just borrowed for its orientation).
+ *
+ * Direction: from the fitting toward whichever end of the wall is further
+ * away — that's the end with more room to actually fit copies before running
+ * out of wall.
+ */
+export function duplicatePositionsAlongWall(
+  fitting: Pick<SetoutFitting, "id" | "position">,
+  wall: WallSegment,
+  count: number,
+  spacingMm: number,
+  mode: DuplicateAlongWallMode
+): DuplicateAlongWallResult {
+  const requested = Math.max(0, Math.floor(count));
+  const none: DuplicateAlongWallResult = { positions: [], measurementLocks: [], actualCount: 0, cappedReason: null };
+  if (requested === 0 || spacingMm <= 0) return none;
+
+  const len = wallLength(wall);
+  const offset = projectPointOntoWall(fitting.position, wall);
+  const roomTowardEnd = len - offset;
+  const roomTowardStart = offset;
+  const forward = roomTowardEnd >= roomTowardStart;
+  const roomAvailable = forward ? roomTowardEnd : roomTowardStart;
+
+  const dx = wall.end.x - wall.start.x;
+  const dy = wall.end.y - wall.start.y;
+  const wallVectorLen = Math.hypot(dx, dy) || 1;
+  const dirX = (forward ? dx : -dx) / wallVectorLen;
+  const dirY = (forward ? dy : -dy) / wallVectorLen;
+
+  let spacingM: number;
+  let actualCount = requested;
+  let cappedReason: string | null = null;
+
+  if (mode === "toEnd") {
+    spacingM = roomAvailable / requested;
+    if (spacingM <= 0) {
+      return { ...none, cappedReason: "There's no wall left in that direction to space copies along." };
+    }
+  } else {
+    spacingM = spacingMm / 1000;
+    const maxFit = Math.floor((roomAvailable + 1e-9) / spacingM);
+    if (maxFit < requested) {
+      actualCount = maxFit;
+      cappedReason =
+        maxFit > 0
+          ? `Only room for ${maxFit} more at ${spacingMm}mm spacing before the wall ends — placed ${maxFit} instead of ${requested}.`
+          : `There's not enough wall left for even one more at ${spacingMm}mm spacing.`;
+    }
+  }
+
+  if (actualCount <= 0) return { ...none, cappedReason };
+
+  const positions: Point[] = [];
+  const measurementLocks: MeasurementLock[] = [];
+  for (let i = 1; i <= actualCount; i++) {
+    const d = spacingM * i;
+    positions.push({ x: fitting.position.x + dirX * d, y: fitting.position.y + dirY * d });
+    measurementLocks.push({ refA: { kind: "fitting", fittingId: fitting.id, distance: d } });
+  }
+
+  return { positions, measurementLocks, actualCount, cappedReason };
+}
+
 /** A midpoint offered as a placement target, and the two fittings it sits between. */
 export interface MidpointSnap {
   position: Point;

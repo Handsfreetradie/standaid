@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download, Undo2, PencilRuler, Pencil, Ruler, Image as ImageIcon, EyeOff, Camera, Plus, Minus, Trash2, Network, GripHorizontal, ChevronLeft, ChevronRight, Layers, Columns3, Rows3, Gauge, Zap, Sun, Mic } from "lucide-react";
+import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download, Undo2, PencilRuler, Pencil, Ruler, Image as ImageIcon, EyeOff, Camera, Plus, Minus, Trash2, Network, GripHorizontal, ChevronLeft, ChevronRight, Layers, Columns3, Rows3, Gauge, Zap, Sun, Mic, Share2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,8 @@ import SetoutCanvas, { type SetoutCanvasMode } from "@/components/setout/SetoutC
 import FittingPalette from "@/components/setout/FittingPalette";
 import LayerVisibilityToggle from "@/components/setout/LayerVisibilityToggle";
 import SwitchLinksPanel from "@/components/setout/SwitchLinksPanel";
+import DuplicateAlongWallPopover from "@/components/setout/DuplicateAlongWallPopover";
+import ShareReportDialog from "@/components/setout/ShareReportDialog";
 import DataCabinetLinksPanel from "@/components/setout/DataCabinetLinksPanel";
 import PhotoPointDialog from "@/components/setout/PhotoPointDialog";
 import CameraCapture from "@/components/setout/CameraCapture";
@@ -33,7 +35,16 @@ import {
   DEFAULT_DRIVER_SIZES_W,
 } from "@/lib/setoutMaterials";
 import { DEFAULT_LAYER_VISIBILITY, DEFAULT_TWIN_SPACING_MM, distance, gangsFor, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type MeasurementRef, type PathPoint, type Point, type SetoutFitting, type SetoutCanvas as SetoutCanvasRow } from "@/lib/setoutTypes";
-import { autoRotationForWallMount, computeMeasurementLock, defaultHeightForType, remeasureLock, DEFAULT_MOUNTING_HEIGHT } from "@/lib/setoutGeometry";
+import {
+  autoRotationForWallMount,
+  computeMeasurementLock,
+  defaultHeightForType,
+  remeasureLock,
+  DEFAULT_MOUNTING_HEIGHT,
+  nearestMountWall,
+  duplicatePositionsAlongWall,
+  type DuplicateAlongWallMode,
+} from "@/lib/setoutGeometry";
 import { generateSetoutReportPdf, type PlanImage } from "@/lib/setoutReport";
 import { urlToBase64 } from "@/lib/auditReport";
 import { BASE_PDF_SCALE, renderPdfTile, type PdfPage } from "@/lib/planRender";
@@ -63,9 +74,11 @@ import {
   useRemoveSwitchGang,
   useDeleteSetoutFitting,
   useRestoreSetoutFitting,
+  useBulkCreateSetoutFittings,
   useBulkDeleteSetoutFittings,
   useBulkAssignSetoutFittingCircuit,
   useBulkRestoreSetoutFittings,
+  useRotateSetoutExportToken,
   useSetoutPhotoPoints,
   useCreateSetoutPhotoPoint,
   useUpdateSetoutPhotoPointDirection,
@@ -99,6 +112,7 @@ type UndoEntry =
   | { type: "create"; fittingId: string }
   | { type: "delete"; fitting: SetoutFitting }
   | { type: "bulk-delete"; fittings: SetoutFitting[] }
+  | { type: "bulk-create"; fittingIds: string[] }
   | { type: "move"; fittingId: string; prevPosition: Point; prevMeasurementLock: MeasurementLock | null; prevSpecs: FittingSpecs };
 
 // Fetches one canvas's own background image for the PDF export, mirroring
@@ -197,6 +211,8 @@ const SetoutPlan = () => {
     setCanvasNameDialog(null);
   };
   const [exporting, setExporting] = useState(false);
+  const [showShareDialog, setShowShareDialog] = useState(false);
+  const [revokingShareLink, setRevokingShareLink] = useState(false);
   // Maximum demand lives behind a dialog rather than taking up permanent
   // sidebar space — it's a "check once you're done" total, not something
   // edited constantly like circuits, so a glanceable total in the toolbar
@@ -226,9 +242,11 @@ const SetoutPlan = () => {
   const updateFittingStatus = useUpdateSetoutFittingStatus(planId || "");
   const deleteFitting = useDeleteSetoutFitting(planId || "");
   const restoreFitting = useRestoreSetoutFitting(planId || "");
+  const bulkCreateFittings = useBulkCreateSetoutFittings(planId || "");
   const bulkDeleteFittings = useBulkDeleteSetoutFittings(planId || "");
   const bulkAssignFittingCircuit = useBulkAssignSetoutFittingCircuit(planId || "");
   const bulkRestoreFittings = useBulkRestoreSetoutFittings(planId || "");
+  const rotateExportToken = useRotateSetoutExportToken(planId || "");
   const assignFittingCircuit = useAssignFittingCircuit(planId || "");
   const createPhotoPoint = useCreateSetoutPhotoPoint(planId || "");
   const updatePhotoPointDirection = useUpdateSetoutPhotoPointDirection(planId || "");
@@ -850,6 +868,64 @@ const SetoutPlan = () => {
     });
   };
 
+  // Which wall "Repeat along wall" should walk along for the currently
+  // selected fitting, if any — a genuinely wall-mounted type snaps to (and
+  // is measured off) the wall it's physically on; anything else with a wall
+  // in its measurement lock (an imported-plan fitting measured to a printed
+  // line doesn't count — that's a stroke ref, not a wall one) reuses that
+  // same wall; a downlight has neither, so it just borrows the nearest
+  // wall's direction to lay copies out in a straight line. Everything else
+  // (LED strips, data cabinets, etc.) has no sensible "along a wall" to offer.
+  const repeatAlongWallInfo = useMemo(() => {
+    if (!selectedFitting || !activeCanvas || multiSelectIds.size > 0) return null;
+    const isWallMounted = isSingleWallFitting(selectedFitting.type);
+    const lockedWallRef =
+      selectedFitting.measurement_lock?.refA?.kind === "wall"
+        ? selectedFitting.measurement_lock.refA
+        : selectedFitting.measurement_lock?.refB?.kind === "wall"
+          ? selectedFitting.measurement_lock.refB
+          : null;
+    let wall = null as ReturnType<typeof nearestMountWall>;
+    if (isWallMounted) {
+      wall = lockedWallRef
+        ? activeCanvas.walls.find((w) => w.id === lockedWallRef.wallId) ?? nearestMountWall(selectedFitting.position, activeCanvas.walls)
+        : nearestMountWall(selectedFitting.position, activeCanvas.walls);
+    } else if (lockedWallRef) {
+      wall = activeCanvas.walls.find((w) => w.id === lockedWallRef.wallId) ?? null;
+    } else if (selectedFitting.type === "downlight") {
+      wall = nearestMountWall(selectedFitting.position, activeCanvas.walls);
+    }
+    if (!wall) return null;
+    return { wall, onWall: isWallMounted };
+  }, [selectedFitting, activeCanvas, multiSelectIds]);
+
+  // Creates every copy in one round trip and one undo entry — pressing Undo
+  // once removes the whole batch, not just the last one placed.
+  const handleConfirmRepeatAlongWall = (input: { count: number; spacingMm: number; mode: DuplicateAlongWallMode }) => {
+    if (!selectedFitting || !activeCanvas || !repeatAlongWallInfo) return;
+    const result = duplicatePositionsAlongWall(selectedFitting, repeatAlongWallInfo.wall, input.count, input.spacingMm, input.mode);
+    if (result.cappedReason) toast.warning(result.cappedReason);
+    if (result.actualCount === 0) {
+      if (!result.cappedReason) toast.error("No room to add copies along that wall.");
+      return;
+    }
+    bulkCreateFittings.mutate(
+      result.positions.map((position, i) => ({
+        canvas_id: activeCanvas.id,
+        type: selectedFitting.type,
+        position,
+        measurement_lock: result.measurementLocks[i],
+        specs: selectedFitting.specs,
+      })),
+      {
+        onSuccess: (created) => {
+          if (created.length > 0) pushUndo({ type: "bulk-create", fittingIds: created.map((f) => f.id) });
+          toast.success(`Added ${created.length} ${created.length === 1 ? "copy" : "copies"} along the wall`);
+        },
+      }
+    );
+  };
+
   // How this fitting gets dimensioned. Traced walls win when they exist —
   // they're what the tradie chose as the reference, and a measurement against
   // them survives editing them. With tracing skipped the imported drawing is
@@ -1158,7 +1234,13 @@ const SetoutPlan = () => {
     });
   };
 
-  const handleExport = async () => {
+  // exportTokenOverride lets a revoke-and-reshare pass the just-minted token
+  // straight through, rather than relying on `plan.export_token` in the
+  // component's own state — that's only refreshed once the rotation
+  // mutation's query invalidation actually lands, a render or two later, so
+  // reading it here immediately after rotating would still upload under the
+  // now-dead old token.
+  const handleExport = async (exportTokenOverride?: string) => {
     if (!plan || exporting || !user || canvases.length === 0) return;
     setExporting(true);
     // One toast, updated in place as each step runs, rather than a new toast
@@ -1187,7 +1269,7 @@ const SetoutPlan = () => {
       // exported PDF can be shared without also exposing every other plan
       // this tradie has via a predictable path. Falls back to the plan id
       // only if the token somehow isn't present at runtime.
-      const reportPath = `${user.id}/${plan.export_token || plan.id}.pdf`;
+      const reportPath = `${user.id}/${exportTokenOverride || plan.export_token || plan.id}.pdf`;
       const reportUrl = supabase.storage.from("setout-plan-exports").getPublicUrl(reportPath).data.publicUrl;
 
       // Same business-branding source as the Site Audit report — the
@@ -1253,6 +1335,26 @@ const SetoutPlan = () => {
     }
   };
 
+  // "Revoke and make a new link" — kills the old public link straight away
+  // (best-effort remove, see useRotateSetoutExportToken) by rotating the
+  // plan's export_token, then immediately re-runs the export under the new
+  // token so the file, the link shown in ShareReportDialog, and the
+  // legend's own QR code all agree again rather than the QR pointing at a
+  // token that's just been abandoned.
+  const handleRevokeAndReshare = async () => {
+    if (!plan || revokingShareLink) return;
+    setRevokingShareLink(true);
+    try {
+      const rotated = await rotateExportToken.mutateAsync(plan.export_token);
+      await handleExport(rotated.export_token);
+      toast.success("New share link ready — the old one no longer works.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't rotate the share link");
+    } finally {
+      setRevokingShareLink(false);
+    }
+  };
+
   const handleWorkspaceModeChange = (next: WorkspaceMode) => {
     setWorkspaceMode(next);
     setSelectedFittingId(null);
@@ -1298,6 +1400,8 @@ const SetoutPlan = () => {
       restoreFitting.mutate(entry.fitting);
     } else if (entry.type === "bulk-delete") {
       bulkRestoreFittings.mutate(entry.fittings);
+    } else if (entry.type === "bulk-create") {
+      bulkDeleteFittings.mutate(entry.fittingIds);
     } else if (entry.type === "move") {
       updateFittingPosition.mutate({
         fittingId: entry.fittingId,
@@ -1589,26 +1693,33 @@ const SetoutPlan = () => {
   const renderActiveToolPanel = (compact: boolean) => (
     <>
       {workspaceMode === "place-fittings" ? (
-        <FittingPalette
-          compact={compact}
-          twinSpacingDefaultMm={plan?.plan_defaults?.twinDownlightSpacingMm}
-          ceilingHeightDefaultM={plan?.plan_defaults?.ceilingHeightM}
-          selectedType={selectedType}
-          onSelectType={setSelectedType}
-          onSelectPreset={handleSelectPreset}
-          selectedPresetSpecs={selectedPresetSpecs}
-          selectedFittingId={selectedFittingId}
-          onDeleteSelected={handleDeleteSelected}
-          selectedFitting={selectedFitting}
-          onUpdateSpecs={handleUpdateSpecs}
-          onUpdateStatus={handleUpdateStatus}
-          onRotate={handleRotate}
-          onUpdateMeasurementLock={handleUpdateMeasurementLock}
-          onPickMeasurementRef={handlePickMeasurementRef}
-          pickingMeasurementSlot={pickingMeasurementSlot}
-          circuits={circuits}
-          onAssignCircuit={handleAssignCircuit}
-        />
+        <>
+          <FittingPalette
+            compact={compact}
+            twinSpacingDefaultMm={plan?.plan_defaults?.twinDownlightSpacingMm}
+            ceilingHeightDefaultM={plan?.plan_defaults?.ceilingHeightM}
+            selectedType={selectedType}
+            onSelectType={setSelectedType}
+            onSelectPreset={handleSelectPreset}
+            selectedPresetSpecs={selectedPresetSpecs}
+            selectedFittingId={selectedFittingId}
+            onDeleteSelected={handleDeleteSelected}
+            selectedFitting={selectedFitting}
+            onUpdateSpecs={handleUpdateSpecs}
+            onUpdateStatus={handleUpdateStatus}
+            onRotate={handleRotate}
+            onUpdateMeasurementLock={handleUpdateMeasurementLock}
+            onPickMeasurementRef={handlePickMeasurementRef}
+            pickingMeasurementSlot={pickingMeasurementSlot}
+            circuits={circuits}
+            onAssignCircuit={handleAssignCircuit}
+          />
+          <DuplicateAlongWallPopover
+            available={!!repeatAlongWallInfo}
+            onWall={!!repeatAlongWallInfo?.onWall}
+            onConfirm={handleConfirmRepeatAlongWall}
+          />
+        </>
       ) : workspaceMode === "draw-led-strip" ? (
         stripPanelUI
       ) : workspaceMode === "measure" ? (
@@ -2031,9 +2142,13 @@ const SetoutPlan = () => {
             <Undo2 className="h-3.5 w-3.5" />
             Undo
           </Button>
-          <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={handleExport} disabled={exporting}>
+          <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => handleExport()} disabled={exporting}>
             {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
             Export PDF
+          </Button>
+          <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setShowShareDialog(true)} disabled={!user}>
+            <Share2 className="h-3.5 w-3.5" />
+            Share
           </Button>
         </div>
         {activeCanvasNeedsSetup ? (
@@ -2334,6 +2449,17 @@ const SetoutPlan = () => {
       </Dialog>
 
       {plan && <SwitchboardLegendPreview open={showLegendPreview} onOpenChange={setShowLegendPreview} plan={plan} />}
+
+      {plan && user && (
+        <ShareReportDialog
+          open={showShareDialog}
+          onOpenChange={setShowShareDialog}
+          plan={plan}
+          userId={user.id}
+          busy={revokingShareLink}
+          onRevoke={handleRevokeAndReshare}
+        />
+      )}
 
       <Dialog open={!!canvasNameDialog} onOpenChange={(open) => { if (!open) setCanvasNameDialog(null); }}>
         <DialogContent className="max-w-sm">

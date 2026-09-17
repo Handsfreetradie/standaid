@@ -8,6 +8,7 @@ import {
   wallLength,
   pointAtOffset,
   closestPointOnWall,
+  duplicatePositionsAlongWall,
 } from "./setoutGeometry";
 import type { FittingSpecs, SetoutFitting, WallSegment } from "./setoutTypes";
 
@@ -159,5 +160,81 @@ describe("wallLength / pointAtOffset / closestPointOnWall on a curved wall", () 
     expect(result.x).toBeGreaterThan(0.3);
     expect(result.x).toBeLessThan(1.7);
     expect(result.y).toBeGreaterThan(0.3);
+  });
+});
+
+// Feature: "Repeat along wall" — a 10m wall along the x-axis is the easy
+// case to reason about by hand: 1m spacing, direction and capping are all
+// plain arithmetic on the x coordinate.
+describe("duplicatePositionsAlongWall", () => {
+  const wall: WallSegment = { id: "w1", start: { x: 0, y: 0 }, end: { x: 10, y: 0 } };
+
+  it("walks toward the far end (more room ahead than behind) at the requested spacing", () => {
+    const fitting = { id: "f1", position: { x: 2, y: 0 } };
+    const result = duplicatePositionsAlongWall(fitting, wall, 3, 1000, "spacing");
+    expect(result.actualCount).toBe(3);
+    expect(result.cappedReason).toBeNull();
+    expect(result.positions).toEqual([{ x: 3, y: 0 }, { x: 4, y: 0 }, { x: 5, y: 0 }]);
+  });
+
+  it("measures every copy off the source fitting, at its actual distance along the wall", () => {
+    const fitting = { id: "f1", position: { x: 2, y: 0 } };
+    const result = duplicatePositionsAlongWall(fitting, wall, 3, 1000, "spacing");
+    expect(result.measurementLocks).toEqual([
+      { refA: { kind: "fitting", fittingId: "f1", distance: 1 } },
+      { refA: { kind: "fitting", fittingId: "f1", distance: 2 } },
+      { refA: { kind: "fitting", fittingId: "f1", distance: 3 } },
+    ]);
+  });
+
+  it("walks toward the start instead when that end has more room", () => {
+    const fitting = { id: "f1", position: { x: 9, y: 0 } };
+    const result = duplicatePositionsAlongWall(fitting, wall, 2, 1000, "spacing");
+    expect(result.positions).toEqual([{ x: 8, y: 0 }, { x: 7, y: 0 }]);
+  });
+
+  it("caps the count and explains why when the wall runs out of room before the requested spacing does", () => {
+    const fitting = { id: "f1", position: { x: 2, y: 0 } }; // 8m of room ahead
+    const result = duplicatePositionsAlongWall(fitting, wall, 5, 3000, "spacing"); // 3m spacing -> only 2 fit
+    expect(result.actualCount).toBe(2);
+    expect(result.positions).toEqual([{ x: 5, y: 0 }, { x: 8, y: 0 }]);
+    expect(result.cappedReason).toContain("2");
+  });
+
+  it("returns nothing (with a reason) when there's no room left at all — a degenerate zero-length wall", () => {
+    const zeroLengthWall: WallSegment = { id: "w0", start: { x: 5, y: 5 }, end: { x: 5, y: 5 } };
+    const fitting = { id: "f1", position: { x: 5, y: 5 } };
+    const result = duplicatePositionsAlongWall(fitting, zeroLengthWall, 3, 1000, "spacing");
+    expect(result.actualCount).toBe(0);
+    expect(result.cappedReason).toContain("not enough wall");
+  });
+
+  it("picks up the far end even from right at the near end — the OTHER end still has all the room", () => {
+    const fitting = { id: "f1", position: { x: 10, y: 0 } }; // sitting exactly at wall.end
+    const result = duplicatePositionsAlongWall(fitting, wall, 2, 1000, "spacing");
+    expect(result.actualCount).toBe(2);
+    expect(result.positions).toEqual([{ x: 9, y: 0 }, { x: 8, y: 0 }]);
+  });
+
+  it("'toEnd' mode ignores the spacing figure and spaces copies evenly, landing the last one exactly on the wall's end", () => {
+    const fitting = { id: "f1", position: { x: 2, y: 0 } }; // 8m of room ahead
+    const result = duplicatePositionsAlongWall(fitting, wall, 4, 999999, "toEnd");
+    expect(result.actualCount).toBe(4);
+    expect(result.positions).toEqual([{ x: 4, y: 0 }, { x: 6, y: 0 }, { x: 8, y: 0 }, { x: 10, y: 0 }]);
+  });
+
+  it("works along a vertical wall too — direction isn't hardcoded to the x-axis", () => {
+    const verticalWall: WallSegment = { id: "w2", start: { x: 5, y: 0 }, end: { x: 5, y: 6 } };
+    const fitting = { id: "f2", position: { x: 5, y: 1 } };
+    const result = duplicatePositionsAlongWall(fitting, verticalWall, 2, 1000, "spacing");
+    expect(result.positions[0].x).toBeCloseTo(5, 6);
+    expect(result.positions[0].y).toBeCloseTo(2, 6);
+    expect(result.positions[1].y).toBeCloseTo(3, 6);
+  });
+
+  it("returns nothing for a non-positive count or spacing", () => {
+    const fitting = { id: "f1", position: { x: 2, y: 0 } };
+    expect(duplicatePositionsAlongWall(fitting, wall, 0, 1000, "spacing").actualCount).toBe(0);
+    expect(duplicatePositionsAlongWall(fitting, wall, 3, 0, "spacing").actualCount).toBe(0);
   });
 });

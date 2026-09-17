@@ -227,6 +227,48 @@ export function useUpdateSetoutPlanDefaults(planId: string) {
   });
 }
 
+// Revokes the current public export link and mints a fresh one — "Revoke
+// and make a new link" in ShareReportDialog. Removing the old PDF first
+// (best-effort: a failure there must not block getting a new token, an
+// orphaned old file costs nothing but a little storage space) means the old
+// link stops resolving even before the plan is re-exported under the new
+// token; the caller re-runs the export straight after this resolves so the
+// QR code and the new link agree again.
+export function useRotateSetoutExportToken(planId: string) {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (currentExportToken: string | null | undefined) => {
+      if (!user) throw new Error("Not signed in");
+      if (currentExportToken) {
+        const { error: removeError } = await supabase.storage
+          .from("setout-plan-exports")
+          .remove([`${user.id}/${currentExportToken}.pdf`]);
+        if (removeError) console.warn("[useRotateSetoutExportToken] Could not remove the old export:", removeError);
+      }
+      // 32 hex characters (16 random bytes) — same shape as the token every
+      // plan already gets on creation (a DB default), just generated
+      // client-side here since this is a deliberate rotation, not a fresh row.
+      const bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      const nextToken = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+      const { data, error } = await sb
+        .from("setout_plans")
+        .update({ export_token: nextToken })
+        .eq("id", planId)
+        .select()
+        .single();
+      if (error) throw error;
+      return data as SetoutPlan;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["setout_plan", planId] });
+      queryClient.invalidateQueries({ queryKey: ["setout_plans"] });
+    },
+  });
+}
+
 export function useUpdateSetoutFittingSpecs(planId: string) {
   const queryClient = useQueryClient();
 
