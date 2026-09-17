@@ -5,10 +5,11 @@ import type jsPDF from "jspdf";
 import { createElement } from "react";
 import { FITTING_LABELS, FITTING_SYMBOLS } from "@/components/setout/symbols";
 import type { FittingType } from "@/components/setout/symbols";
-import { aggregateMaterials } from "@/lib/setoutMaterials";
+import { aggregateMaterialsWithCableRuns } from "@/lib/setoutMaterials";
+import type { CircuitCableEstimate } from "@/lib/setoutCableRuns";
 import { calculateMaximumDemand } from "@/lib/setoutMaximumDemand";
 import { calculateSolarVoltageRise } from "@/lib/setoutSolarVoltageRise";
-import { circuitHasRcd, formatCircuitCable, formatCircuitDevice } from "@/lib/setoutCircuitSchedule";
+import { circuitHasRcd, formatCircuitCable, formatCircuitDevice, CIRCUIT_CABLE_TYPE_LABELS } from "@/lib/setoutCircuitSchedule";
 import { loadImageSize } from "@/lib/auditReport";
 import {
   CATEGORY_FOR_TYPE,
@@ -773,7 +774,7 @@ async function drawSwitchboardPage(
 // fitting's specs — so a 4-gang GPO orders four mechs, a 6-port data plate
 // orders six, and an LED run is priced off the length actually drawn rather
 // than off a fitting count.
-function drawMaterialsPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting[]): void {
+function drawMaterialsPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting[], circuits: SetoutCircuit[], canvases: SetoutCanvas[]): void {
   let y = drawPageHeader(doc, plan, "Materials list");
   const ensureSpace = (needed: number) => {
     if (y + needed > PAGE_H - MARGIN) {
@@ -782,11 +783,32 @@ function drawMaterialsPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting
     }
   };
 
-  const lines = aggregateMaterials(fittings, {
-    extrusionStockLengthM: plan.plan_defaults?.ledExtrusionStockLengthM,
-    driverSizesW: plan.plan_defaults?.ledDriverSizesW,
-    driverHeadroomPct: plan.plan_defaults?.ledDriverHeadroomPct,
-  });
+  // setoutCableRuns.ts's CircuitCableColumns is a local placeholder for a
+  // schedule migration that has since landed with different shapes (numeric
+  // CSA, short type codes) — mapped through the same label table the
+  // circuit schedule already prints (CIRCUIT_CABLE_TYPE_LABELS), rather than
+  // widening setoutCableRuns.ts's contract, since this file is the only one
+  // in scope here.
+  const cableRunCircuits = circuits.map((c) => ({
+    id: c.id,
+    label: c.label,
+    circuit_type: c.circuit_type,
+    specs: c.specs,
+    cable_csa_mm2: c.cable_csa_mm2 != null ? String(c.cable_csa_mm2) : null,
+    cable_type: c.cable_type ? CIRCUIT_CABLE_TYPE_LABELS[c.cable_type] : null,
+  }));
+
+  const { lines, cableRuns } = aggregateMaterialsWithCableRuns(
+    fittings,
+    cableRunCircuits,
+    canvases,
+    {
+      extrusionStockLengthM: plan.plan_defaults?.ledExtrusionStockLengthM,
+      driverSizesW: plan.plan_defaults?.ledDriverSizesW,
+      driverHeadroomPct: plan.plan_defaults?.ledDriverHeadroomPct,
+    },
+    plan.plan_defaults?.ceilingHeightM,
+  );
   if (lines.length === 0) {
     doc.setFontSize(10);
     doc.setTextColor(120);
@@ -827,14 +849,82 @@ function drawMaterialsPage(doc: jsPDF, plan: SetoutPlan, fittings: SetoutFitting
   y += 4;
   doc.setFontSize(8);
   doc.setTextColor(130);
-  doc.text(
-    doc.splitTextToSize(
-      "Check quantities before ordering — this list is worked out from what is on the plan and does not include cable, conduit, or fixings.",
-      CONTENT_W
-    ),
-    MARGIN,
-    y
+  const materialsDisclaimerLines = doc.splitTextToSize(
+    "Check quantities before ordering — this list is worked out from what is on the plan and does not include conduit or fixings. Cable metres are an estimate — see below.",
+    CONTENT_W
   );
+  doc.text(materialsDisclaimerLines, MARGIN, y);
+  y += materialsDisclaimerLines.length * 3.6;
+
+  if (cableRuns.length === 0) return;
+
+  ensureSpace(16);
+  y += 6;
+  doc.setFontSize(9);
+  doc.setTextColor(20);
+  doc.text("CABLE RUNS (ESTIMATE)", MARGIN, y);
+  y += 2;
+  doc.setDrawColor(220);
+  doc.line(MARGIN, y, PAGE_W - MARGIN, y);
+  y += 5;
+
+  const CABLE_CIRCUIT_W = 55;
+  const CABLE_CABLE_W = 70;
+  const xCableCable = MARGIN + CABLE_CIRCUIT_W;
+  const CABLE_METRES_RIGHT_X = MARGIN + CABLE_CIRCUIT_W + CABLE_CABLE_W + 25;
+  const CABLE_POINTS_RIGHT_X = PAGE_W - MARGIN;
+
+  ensureSpace(8);
+  doc.setFontSize(8);
+  doc.setTextColor(90);
+  doc.text("Circuit", MARGIN, y);
+  doc.text("Cable", xCableCable, y);
+  doc.text("Metres", CABLE_METRES_RIGHT_X, y, { align: "right" });
+  doc.text("Points", CABLE_POINTS_RIGHT_X, y, { align: "right" });
+  y += 2;
+  doc.setDrawColor(220);
+  doc.line(MARGIN, y, PAGE_W - MARGIN, y);
+  y += 4.5;
+
+  for (const run of cableRuns as CircuitCableEstimate[]) {
+    const labelLines = doc.splitTextToSize(run.label, CABLE_CIRCUIT_W - 2);
+    const cableLines = doc.splitTextToSize(run.cableLabel, CABLE_CABLE_W - 2);
+    const rowLines = Math.max(labelLines.length, cableLines.length, 1);
+    ensureSpace(Math.max(5, rowLines * 4));
+    doc.setFontSize(8.5);
+    doc.setTextColor(40);
+    doc.text(labelLines, MARGIN, y);
+    doc.text(cableLines, xCableCable, y);
+    doc.text(`${run.metres} m`, CABLE_METRES_RIGHT_X, y, { align: "right" });
+    doc.text(String(run.pointsCount), CABLE_POINTS_RIGHT_X, y, { align: "right" });
+    y += Math.max(5, rowLines * 4);
+  }
+
+  const distinctAssumptions = Array.from(new Set(cableRuns.flatMap((r) => r.assumptions)));
+  if (distinctAssumptions.length > 0) {
+    ensureSpace(6);
+    y += 3;
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(7.5);
+    doc.setTextColor(130);
+    for (const assumption of distinctAssumptions) {
+      const assumptionLines = doc.splitTextToSize(assumption, CONTENT_W);
+      ensureSpace(assumptionLines.length * 3.6);
+      doc.text(assumptionLines, MARGIN, y);
+      y += assumptionLines.length * 3.6;
+    }
+    doc.setFont("helvetica", "normal");
+  }
+
+  ensureSpace(8);
+  y += 3;
+  doc.setFontSize(8);
+  doc.setTextColor(130);
+  const cableEstimateDisclaimerLines = doc.splitTextToSize(
+    "Estimate only: Manhattan runs through the ceiling space with 10% wastage and 1 m per termination. Measure on site before ordering.",
+    CONTENT_W
+  );
+  doc.text(cableEstimateDisclaimerLines, MARGIN, y);
 }
 
 // Comes after the materials list and before the switchboard legend — the
@@ -975,7 +1065,7 @@ export async function generateSetoutReportPdf(opts: {
     );
     doc.addPage();
   }
-  drawMaterialsPage(doc, plan, fittings);
+  drawMaterialsPage(doc, plan, fittings, circuits, canvases);
   doc.addPage();
   drawMaximumDemandPage(doc, plan, fittings, loadItems);
   doc.addPage();
