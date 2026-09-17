@@ -1,6 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import type { CircuitSpecs, CircuitType, SetoutCircuit } from "@/lib/setoutTypes";
+import type { CircuitCableType, CircuitDeviceType, CircuitSpecs, CircuitType, SetoutCircuit } from "@/lib/setoutTypes";
+
+// Structured circuit-schedule fields (20260917020000) shared by create and
+// update — all optional so existing callers that only pass label/
+// description/breaker_rating keep working unchanged.
+interface CircuitScheduleFields {
+  device_type?: CircuitDeviceType | null;
+  rcd_protected?: boolean | null;
+  poles?: 1 | 3 | null;
+  cable_csa_mm2?: number | null;
+  cable_type?: CircuitCableType | null;
+  notes?: string | null;
+}
 
 // setout_* tables are newer than the generated Supabase types — same `as any`
 // escape hatch used elsewhere in this repo (e.g. useSetoutPlans.ts) for tables
@@ -28,13 +40,15 @@ export function useCreateSetoutCircuit(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (input: {
-      label: string;
-      description?: string;
-      breaker_rating?: string;
-      circuit_type?: CircuitType;
-      specs?: CircuitSpecs;
-    }) => {
+    mutationFn: async (
+      input: {
+        label: string;
+        description?: string;
+        breaker_rating?: string;
+        circuit_type?: CircuitType;
+        specs?: CircuitSpecs;
+      } & CircuitScheduleFields,
+    ) => {
       // New circuits go to the end of the arranged order — read the current
       // list out of the cache rather than a fresh fetch, since it's already
       // there and this only needs to be roughly right (a concurrent add from
@@ -53,6 +67,12 @@ export function useCreateSetoutCircuit(planId: string) {
           sort_order: nextOrder,
           circuit_type: input.circuit_type ?? "standard",
           specs: input.specs ?? {},
+          device_type: input.device_type ?? null,
+          rcd_protected: input.rcd_protected ?? null,
+          poles: input.poles ?? null,
+          cable_csa_mm2: input.cable_csa_mm2 ?? null,
+          cable_type: input.cable_type ?? null,
+          notes: input.notes ?? null,
         })
         .select()
         .single();
@@ -99,20 +119,28 @@ export function useUpdateSetoutCircuit(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (input: {
-      circuitId: string;
-      label?: string;
-      description?: string;
-      breaker_rating?: string;
-      circuit_type?: CircuitType;
-      specs?: CircuitSpecs;
-    }) => {
+    mutationFn: async (
+      input: {
+        circuitId: string;
+        label?: string;
+        description?: string;
+        breaker_rating?: string;
+        circuit_type?: CircuitType;
+        specs?: CircuitSpecs;
+      } & CircuitScheduleFields,
+    ) => {
       const updates: Record<string, unknown> = {};
       if (input.label !== undefined) updates.label = input.label;
       if (input.description !== undefined) updates.description = input.description || null;
       if (input.breaker_rating !== undefined) updates.breaker_rating = input.breaker_rating || null;
       if (input.circuit_type !== undefined) updates.circuit_type = input.circuit_type;
       if (input.specs !== undefined) updates.specs = input.specs;
+      if (input.device_type !== undefined) updates.device_type = input.device_type;
+      if (input.rcd_protected !== undefined) updates.rcd_protected = input.rcd_protected;
+      if (input.poles !== undefined) updates.poles = input.poles;
+      if (input.cable_csa_mm2 !== undefined) updates.cable_csa_mm2 = input.cable_csa_mm2;
+      if (input.cable_type !== undefined) updates.cable_type = input.cable_type;
+      if (input.notes !== undefined) updates.notes = input.notes;
 
       const { data, error } = await sb
         .from("setout_circuits")

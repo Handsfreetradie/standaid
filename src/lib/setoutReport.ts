@@ -8,6 +8,7 @@ import type { FittingType } from "@/components/setout/symbols";
 import { aggregateMaterials } from "@/lib/setoutMaterials";
 import { calculateMaximumDemand } from "@/lib/setoutMaximumDemand";
 import { calculateSolarVoltageRise } from "@/lib/setoutSolarVoltageRise";
+import { circuitHasRcd, formatCircuitCable, formatCircuitDevice } from "@/lib/setoutCircuitSchedule";
 import { loadImageSize } from "@/lib/auditReport";
 import {
   CATEGORY_FOR_TYPE,
@@ -588,14 +589,18 @@ async function drawSwitchboardPage(
 
   const colNoW = 8;
   const colSwatchW = 6;
-  const colCircuitW = 44;
-  const colBreakerW = 20;
-  const colPointsW = CONTENT_W - colNoW - colSwatchW - colCircuitW - colBreakerW;
+  const colCircuitW = 38;
+  const colDeviceW = 26;
+  const colCableW = 24;
+  const colRcdW = 10;
+  const colPointsW = CONTENT_W - colNoW - colSwatchW - colCircuitW - colDeviceW - colCableW - colRcdW;
   const xNo = MARGIN;
   const xSwatch = xNo + colNoW;
   const xCircuit = xSwatch + colSwatchW + 2;
-  const xBreaker = xCircuit + colCircuitW;
-  const xPoints = xBreaker + colBreakerW;
+  const xDevice = xCircuit + colCircuitW;
+  const xCable = xDevice + colDeviceW;
+  const xRcd = xCable + colCableW;
+  const xPoints = xRcd + colRcdW;
 
   const drawHeaderRow = () => {
     doc.setFillColor(235, 237, 240);
@@ -604,7 +609,9 @@ async function drawSwitchboardPage(
     doc.setTextColor(60);
     doc.text("No.", xNo + colNoW / 2, y + 5, { align: "center" });
     doc.text("Circuit", xCircuit, y + 5);
-    doc.text("Breaker", xBreaker, y + 5);
+    doc.text("Device", xDevice, y + 5);
+    doc.text("Cable", xCable, y + 5);
+    doc.text("RCD", xRcd + colRcdW / 2, y + 5, { align: "center" });
     doc.text("Points served", xPoints, y + 5);
     y += 7;
   };
@@ -621,11 +628,20 @@ async function drawSwitchboardPage(
   drawHeaderRow();
 
   let rowIndex = 0;
-  const drawRow = (label: string, breaker: string, pointsText: string, description: string | null, color: string | null, blank = false) => {
+  const drawRow = (
+    label: string,
+    device: string,
+    cable: string,
+    rcd: boolean | null,
+    pointsText: string,
+    description: string | null,
+    color: string | null,
+    blank = false,
+  ) => {
     const spotNumber = rowIndex + 1;
     doc.setFontSize(8.5);
     const pointsLines: string[] = blank ? [""] : doc.splitTextToSize(pointsText || "—", colPointsW - 2);
-    const descLines: string[] = description ? doc.splitTextToSize(description, colCircuitW + colBreakerW - 2) : [];
+    const descLines: string[] = description ? doc.splitTextToSize(description, colCircuitW + colDeviceW - 2) : [];
     const bodyLines = Math.max(pointsLines.length, 1 + descLines.length);
     const rowH = Math.max(7, bodyLines * 4 + 2);
 
@@ -661,7 +677,11 @@ async function drawSwitchboardPage(
 
     doc.setFontSize(8.5);
     doc.setTextColor(60);
-    doc.text(breaker || (blank ? "" : "—"), xBreaker, y + 4.5);
+    doc.text(device || (blank ? "" : "—"), xDevice, y + 4.5);
+    doc.text(cable || (blank ? "" : "—"), xCable, y + 4.5);
+    if (!blank) {
+      doc.text(rcd === null ? "—" : rcd ? "Y" : "—", xRcd + colRcdW / 2, y + 4.5, { align: "center" });
+    }
     doc.text(pointsLines, xPoints, y + 4.5);
 
     doc.setDrawColor(225);
@@ -669,7 +689,9 @@ async function drawSwitchboardPage(
     doc.line(MARGIN, y + rowH, MARGIN + CONTENT_W, y + rowH);
     doc.line(xSwatch - 1, y, xSwatch - 1, y + rowH);
     doc.line(xCircuit - 2, y, xCircuit - 2, y + rowH);
-    doc.line(xBreaker - 2, y, xBreaker - 2, y + rowH);
+    doc.line(xDevice - 2, y, xDevice - 2, y + rowH);
+    doc.line(xCable - 2, y, xCable - 2, y + rowH);
+    doc.line(xRcd - 2, y, xRcd - 2, y + rowH);
     doc.line(xPoints - 2, y, xPoints - 2, y + rowH);
 
     y += rowH;
@@ -680,16 +702,24 @@ async function drawSwitchboardPage(
     const assigned = fittings.filter((f) => f.circuit_id === c.id);
     const pointsText = assigned.length === 0 ? "None assigned" : assigned.map((f) => codes.get(f.id) ?? "?").join(", ");
     const description = [c.description, solarCircuitDetail(c, fittings)].filter(Boolean).join(" — ") || null;
-    drawRow(c.label, c.breaker_rating || "—", pointsText, description, colorForCircuit(circuits, c.id));
+    drawRow(
+      c.label,
+      formatCircuitDevice(c),
+      formatCircuitCable(c),
+      circuitHasRcd(c),
+      pointsText,
+      description,
+      colorForCircuit(circuits, c.id),
+    );
   }
 
   if (unassigned.length > 0) {
     const pointsText = unassigned.map((f) => codes.get(f.id) ?? "?").join(", ");
-    drawRow("Unassigned", "—", pointsText, null, null);
+    drawRow("Unassigned", "—", "—", null, pointsText, null, null);
   }
 
   while (rowIndex < MIN_CIRCUIT_SPOTS) {
-    drawRow("", "", "", null, null, true);
+    drawRow("", "", "", null, "", null, null, true);
   }
 
   if (fittings.some((f) => f.type === "solar_inverter")) {

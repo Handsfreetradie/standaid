@@ -768,6 +768,22 @@ export interface CircuitSpecs {
   boardPhase?: "A" | "B" | "C";
 }
 
+// The protective device fitted for a circuit — matches the DB CHECK
+// constraint on setout_circuits.device_type (20260917020000). "rcd_mcb" is
+// an MCB paired with a separate RCD module (two devices, one still reads as
+// RCD-protected), distinct from "rcbo" (the two combined in one device).
+// "main_switch" is the board's own main switch/isolator, not a final
+// subcircuit — circuitWarnings in setoutCircuitSchedule.ts never flags it
+// for missing RCD protection.
+export type CircuitDeviceType = "mcb" | "rcbo" | "rcd_mcb" | "main_switch" | "other";
+
+// Cable construction/insulation for a circuit's schedule entry — a plain
+// open string union (not a DB enum, matching cable_type's TEXT column) so
+// naming a new construction later is a TS-only change. "orange_circular" is
+// the common underground/flexible circular TPS-equivalent tradies call by
+// its colour on site.
+export type CircuitCableType = "tps" | "xlpe" | "orange_circular";
+
 export interface SetoutCircuit {
   id: string;
   plan_id: string;
@@ -779,6 +795,16 @@ export interface SetoutCircuit {
   sort_order: number;
   circuit_type: CircuitType;
   specs: CircuitSpecs;
+  // Structured schedule fields (20260917020000) — all optional/nullable so a
+  // circuit saved before this migration still satisfies the type. Every
+  // reader (CircuitsPanel, SwitchboardLegendPreview, setoutReport.ts) treats
+  // an absent value as "unknown" and falls back to breaker_rating/"—".
+  device_type?: CircuitDeviceType | null;
+  rcd_protected?: boolean | null;
+  poles?: 1 | 3 | null;
+  cable_csa_mm2?: number | null;
+  cable_type?: CircuitCableType | null;
+  notes?: string | null;
   created_at: string;
 }
 

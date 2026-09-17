@@ -15,6 +15,7 @@ import {
 } from "@/hooks/useSetoutCircuits";
 import { buildFittingCodes } from "@/lib/setoutReport";
 import { colorForCircuit, type SetoutPlan } from "@/lib/setoutTypes";
+import { circuitHasRcd, formatCircuitCable, formatCircuitDevice } from "@/lib/setoutCircuitSchedule";
 
 interface SwitchboardLegendPreviewProps {
   open: boolean;
@@ -167,13 +168,16 @@ export default function SwitchboardLegendPreview({ open, onOpenChange, plan }: S
             )}
           </div>
 
-          <table className="w-full text-sm border-collapse">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-sm border-collapse">
             <thead>
               <tr className="bg-muted/60 text-xs text-muted-foreground">
                 <th className="py-1.5 px-1 text-center font-medium w-10">No.</th>
                 <th className="py-1.5 px-2 text-left font-medium w-8"></th>
                 <th className="py-1.5 px-2 text-left font-medium">Circuit</th>
-                <th className="py-1.5 px-2 text-left font-medium w-20">Breaker</th>
+                <th className="py-1.5 px-2 text-left font-medium w-24">Device</th>
+                <th className="py-1.5 px-2 text-left font-medium w-24">Cable</th>
+                <th className="py-1.5 px-2 text-center font-medium w-10">RCD</th>
                 <th className="py-1.5 px-2 text-left font-medium">Points served</th>
               </tr>
             </thead>
@@ -183,11 +187,12 @@ export default function SwitchboardLegendPreview({ open, onOpenChange, plan }: S
                 const color = colorForCircuit(circuits, circuit.id);
                 const isEditing = editingId === circuit.id;
                 const pointsText = assigned.length === 0 ? "None assigned" : assigned.map((f) => codes.get(f.id) ?? "?").join(", ");
+                const rcd = circuitHasRcd(circuit);
 
                 if (isEditing) {
                   return (
                     <tr key={circuit.id} className={index % 2 === 1 ? "bg-muted/20" : undefined}>
-                      <td colSpan={5} className="p-2">
+                      <td colSpan={7} className="p-2">
                         <div className="space-y-2 rounded-lg border border-border bg-background p-3">
                           <div className="grid grid-cols-3 gap-2">
                             <Input value={editLabel} onChange={(e) => setEditLabel(e.target.value)} placeholder="Circuit label" className="col-span-2" />
@@ -233,7 +238,11 @@ export default function SwitchboardLegendPreview({ open, onOpenChange, plan }: S
                       <p className="font-medium">{circuit.label}</p>
                       {circuit.description && <p className="text-xs text-muted-foreground">{circuit.description}</p>}
                     </td>
-                    <td className="py-1.5 px-2 border-b border-border/60 text-muted-foreground">{circuit.breaker_rating || "—"}</td>
+                    <td className="py-1.5 px-2 border-b border-border/60 text-muted-foreground">{formatCircuitDevice(circuit)}</td>
+                    <td className="py-1.5 px-2 border-b border-border/60 text-muted-foreground">{formatCircuitCable(circuit)}</td>
+                    <td className="py-1.5 px-2 border-b border-border/60 text-center text-muted-foreground">
+                      {rcd === null ? "—" : rcd ? "✓" : "—"}
+                    </td>
                     <td className="py-1.5 px-2 border-b border-border/60 text-muted-foreground">{pointsText}</td>
                   </tr>
                 );
@@ -247,6 +256,8 @@ export default function SwitchboardLegendPreview({ open, onOpenChange, plan }: S
                   </td>
                   <td className="py-1.5 px-2 border-b border-border/60 font-medium">Unassigned</td>
                   <td className="py-1.5 px-2 border-b border-border/60 text-muted-foreground">—</td>
+                  <td className="py-1.5 px-2 border-b border-border/60 text-muted-foreground">—</td>
+                  <td className="py-1.5 px-2 border-b border-border/60 text-center text-muted-foreground">—</td>
                   <td className="py-1.5 px-2 border-b border-border/60 text-muted-foreground">
                     {unassigned.map((f) => codes.get(f.id) ?? "?").join(", ")}
                   </td>
@@ -258,11 +269,12 @@ export default function SwitchboardLegendPreview({ open, onOpenChange, plan }: S
                   <td className="py-1.5 px-1 text-center text-muted-foreground/50 border-b border-border/60">
                     {String(filledRows + i + 1).padStart(2, "0")}
                   </td>
-                  <td className="py-1.5 px-2 border-b border-border/60" colSpan={4} />
+                  <td className="py-1.5 px-2 border-b border-border/60" colSpan={6} />
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </div>
 
         {showAddForm ? (
