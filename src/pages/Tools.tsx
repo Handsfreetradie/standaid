@@ -32,6 +32,14 @@ import ProjectManager from "@/components/tools/ProjectManager";
 
 type ToolMode = "menu" | "earth-conductor" | "voltage-drop" | "concrete-volume" | "pipe-sizing" | "cable-sizer" | "conduit-fill" | "max-demand" | "brick-calc" | "timber-span" | "roof-pitch" | "heat-load" | "duct-sizing" | "gas-pipe" | "drainage-fall" | "backflow" | "steel-lintel" | "stair-compliance" | "stormwater" | "ventilation" | "fault-loop" | "pv-string" | "dc-isolator" | "battery-check" | "projects";
 
+// Trades allowed to use the Rough-in setout module — exported so App.tsx's
+// SetoutRoute guard checks the exact same trades as the upsell card below,
+// rather than keeping two copies of "electrical" | "hvac" in sync by hand.
+export function hasSetoutTrade(tradeType: string | null | undefined): boolean {
+  const trades = tradeType ? tradeType.split(",").filter(Boolean) : [];
+  return trades.includes("electrical") || trades.includes("hvac");
+}
+
 const TOOLS: { id: ToolMode; title: string; desc: string; category: string }[] = [
   // Project Management
   { id: "projects", title: "Projects", desc: "Create & manage calculation jobs", category: "Management" },
@@ -105,7 +113,7 @@ const Tools = () => {
   // same `as any` escape hatch used elsewhere in this repo for newer columns.
   const hasSetoutAddon = Boolean((profile as { has_setout_addon?: boolean } | null)?.has_setout_addon);
   // Setout feature gated to electricians and HVAC techs
-  const hasSetoutAccess = (profileTrades.includes("electrical") || profileTrades.includes("hvac")) && hasSetoutAddon;
+  const hasSetoutAccess = hasSetoutTrade(profile?.trade_type) && hasSetoutAddon;
 
   // Deep-link from Learn's Scenario Walkthrough ("Work this out in the
   // Cable Sizer tool" button) — same ?q= prefill pattern Chat.tsx uses.

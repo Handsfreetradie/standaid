@@ -3,7 +3,7 @@
 // resistance/reactance data (real AS/NZS 3008.1.1 Table 30/34/35 figures)
 // rather than a second, parallel lookup table — mvPerAm is a pure function
 // with no UI dependency, safe to import here.
-import { mvPerAm, type CableMaterial, type SystemType, type PhaseType } from "@/components/tools/electricalData";
+import { mvPerAm, CABLE_TYPES, type CableMaterial, type SystemType, type PhaseType } from "@/components/tools/electricalData";
 
 // AS/NZS 4777.1 caps the total voltage rise from the inverter's AC output
 // terminals to the point of common coupling at 2% (at rated output current)
@@ -32,7 +32,13 @@ export interface SolarVoltageRiseResult {
 // has no resistance figure at all (e.g. an aluminium size XLPE doesn't
 // stock), same "unknown, not zero" convention mvPerAm itself uses.
 export function calculateSolarVoltageRise(input: SolarVoltageRiseInput): SolarVoltageRiseResult | null {
-  const mv = mvPerAm(input.material, input.cableCsaMm2, input.systemType, input.phase, 75, undefined, input.cableType);
+  // The insulation's real operating temperature (90°C for XLPE/V-90, 75°C
+  // for V-75, etc.) — CABLE_TYPES already carries this as `maxTemp`, so this
+  // reads it straight off the selected cable type rather than assuming the
+  // old hardcoded 75°C for every cable. Falls back to 75 (the previous
+  // behaviour) when no cableType is given.
+  const conductorTempC = input.cableType ? CABLE_TYPES[input.cableType]?.maxTemp ?? 75 : 75;
+  const mv = mvPerAm(input.material, input.cableCsaMm2, input.systemType, input.phase, conductorTempC, undefined, input.cableType);
   if (mv === null) return null;
   const voltageRisePercent = ((mv * input.currentAmps * input.runLengthM) / 1000 / input.supplyVoltage) * 100;
   return { voltageRisePercent, mvPerAm: mv, pass: voltageRisePercent <= MAX_INVERTER_VOLTAGE_RISE_PERCENT };

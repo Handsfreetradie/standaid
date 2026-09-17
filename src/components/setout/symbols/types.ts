@@ -43,6 +43,7 @@ export type FittingType =
   | "other_appliance"
   | "gpo_switch_combo"
   | "solar_inverter"
+  | "ev_charger"
   // Data
   | "data"
   | "data_cabinet"

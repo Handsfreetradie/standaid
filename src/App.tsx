@@ -10,7 +10,7 @@ import AppLayout from "./components/AppLayout";
 import { AppLoader } from "./components/AppLoader";
 import Index from "./pages/Index";
 import Standards from "./pages/Standards";
-import Tools from "./pages/Tools";
+import Tools, { hasSetoutTrade } from "./pages/Tools";
 import Chat from "./pages/Chat";
 import Learn from "./pages/Learn";
 import Profile from "./pages/Profile";
@@ -20,12 +20,16 @@ import AuthConfirm from "./pages/AuthConfirm";
 import StandardsUpload from "./pages/StandardsUpload";
 import Audits from "./pages/Audits";
 import AuditDetail from "./pages/AuditDetail";
-import Setout from "./pages/Setout";
-import SetoutPlan from "./pages/SetoutPlan";
 import Onboarding from "./pages/Onboarding";
 import Legal from "./pages/Legal";
 import NotFound from "./pages/NotFound";
-import React from "react";
+import React, { Suspense } from "react";
+
+// Setout is a paid add-on only a slice of tradies (electrical/HVAC with the
+// add-on) ever open, and its page pulls in the canvas/PDF-export machinery —
+// lazy-loaded so that weight isn't in every other tradie's main bundle.
+const Setout = React.lazy(() => import("./pages/Setout"));
+const SetoutPlan = React.lazy(() => import("./pages/SetoutPlan"));
 
 const queryClient = new QueryClient();
 
@@ -84,20 +88,20 @@ function AuthRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// Rough-In Setout Assistant is electrical-only and a paid add-on on top of
-// the base subscription — both conditions must hold, independently of each
-// other, so an electrician can see the upsell before buying and a non-
-// electrical trade never sees the module at all.
+// Rough-In Setout Assistant is electrical/HVAC-only and a paid add-on on top
+// of the base subscription — both conditions must hold, independently of
+// each other, so an electrician or HVAC tech can see the upsell before
+// buying and any other trade never sees the module at all. The trade check
+// itself is shared with Tools.tsx's own upsell card via hasSetoutTrade, so
+// the two can't drift apart.
 function SetoutRoute({ children }: { children: React.ReactNode }) {
   const { data: profile, isLoading } = useProfile();
   if (isLoading) return <AppLoader />;
-  const trades = profile?.trade_type ? profile.trade_type.split(",").filter(Boolean) : [];
-  const isElectrical = trades.includes("electrical");
   // has_setout_addon isn't in the generated Supabase types yet (new column,
   // types not regenerated) — same `as any` escape hatch used elsewhere in
   // this repo for newer columns (e.g. AuditDetail.tsx).
   const hasAddon = (profile as { has_setout_addon?: boolean } | null)?.has_setout_addon;
-  if (!isElectrical || !hasAddon) return <Navigate to="/tools" replace />;
+  if (!hasSetoutTrade(profile?.trade_type) || !hasAddon) return <Navigate to="/tools" replace />;
   return <>{children}</>;
 }
 
@@ -138,7 +142,9 @@ const AppRoutes = () => (
         path="/setout"
         element={
           <SetoutRoute>
-            <Setout />
+            <Suspense fallback={<AppLoader />}>
+              <Setout />
+            </Suspense>
           </SetoutRoute>
         }
       />
@@ -146,7 +152,9 @@ const AppRoutes = () => (
         path="/setout/:planId"
         element={
           <SetoutRoute>
-            <SetoutPlan />
+            <Suspense fallback={<AppLoader />}>
+              <SetoutPlan />
+            </Suspense>
           </SetoutRoute>
         }
       />

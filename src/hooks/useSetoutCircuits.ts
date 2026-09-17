@@ -5,6 +5,7 @@ import type { CircuitSpecs, CircuitType, SetoutCircuit } from "@/lib/setoutTypes
 // setout_* tables are newer than the generated Supabase types — same `as any`
 // escape hatch used elsewhere in this repo (e.g. useSetoutPlans.ts) for tables
 // ahead of a type regen.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const sb = supabase as any;
 
 export function useSetoutCircuits(planId: string | undefined) {

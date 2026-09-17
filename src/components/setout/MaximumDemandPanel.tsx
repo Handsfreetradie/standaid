@@ -442,6 +442,7 @@ export default function MaximumDemandPanel({ planId }: MaximumDemandPanelProps) 
                       runLengthM,
                       currentAmps: specs.inverterOutputAmps,
                       supplyVoltage: specs.inverterPhase === "three" ? 400 : 230,
+                      cableType: specs.inverterCableType ?? "xlpe",
                     })
                   : null;
               return (

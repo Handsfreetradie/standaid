@@ -100,6 +100,11 @@ const Setout = () => {
                   <span className="text-[11px]">Builder's PDF or photo, calibrate scale</span>
                 </button>
               </div>
+              {sourceType === "import" && (
+                <p className="mt-1.5 text-[11px] text-muted-foreground">
+                  Next you'll calibrate the scale — tap two points on the plan a known distance apart.
+                </p>
+              )}
             </div>
             <Button className="w-full gap-1.5" onClick={handleCreate} disabled={createPlan.isPending || !name.trim()}>
               {createPlan.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}

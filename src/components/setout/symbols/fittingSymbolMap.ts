@@ -11,6 +11,7 @@ import DataCabinetSymbol from "./DataCabinetSymbol";
 import DataOutletSymbol from "./DataOutletSymbol";
 import DownlightSymbol from "./DownlightSymbol";
 import DuctedHeatingUnitSymbol from "./DuctedHeatingUnitSymbol";
+import EvChargerSymbol from "./EvChargerSymbol";
 import EvapCoolingDuctSymbol from "./EvapCoolingDuctSymbol";
 import EvapCoolingUnitSymbol from "./EvapCoolingUnitSymbol";
 import ExhaustFanLightSymbol from "./ExhaustFanLightSymbol";
@@ -90,6 +91,7 @@ export const FITTING_SYMBOLS: Record<FittingType, ComponentType<SetoutSymbolProp
   spa_pool_heater: SpaPoolHeaterSymbol,
   other_appliance: OtherApplianceSymbol,
   solar_inverter: SolarInverterSymbol,
+  ev_charger: EvChargerSymbol,
   // Data
   data: DataOutletSymbol,
   data_cabinet: DataCabinetSymbol,
@@ -151,6 +153,7 @@ export const FITTING_LABELS: Record<FittingType, string> = {
   spa_pool_heater: "Spa/pool heater",
   other_appliance: "Other appliance",
   solar_inverter: "Solar inverter",
+  ev_charger: "EV charger",
   // Data
   data: "Data outlet",
   data_cabinet: "Data cabinet",

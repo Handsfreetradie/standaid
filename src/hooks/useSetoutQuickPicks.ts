@@ -4,6 +4,7 @@ import { useAuth } from "./useAuth";
 
 // profiles' setout_quick_picks column is newer than the generated Supabase
 // types — same `as any` escape hatch used elsewhere in this repo.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const sb = supabase as any;
 
 export function useUpdateSetoutQuickPicks() {

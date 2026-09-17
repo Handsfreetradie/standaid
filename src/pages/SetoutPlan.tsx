@@ -63,6 +63,9 @@ import {
   useRemoveSwitchGang,
   useDeleteSetoutFitting,
   useRestoreSetoutFitting,
+  useBulkDeleteSetoutFittings,
+  useBulkAssignSetoutFittingCircuit,
+  useBulkRestoreSetoutFittings,
   useSetoutPhotoPoints,
   useCreateSetoutPhotoPoint,
   useUpdateSetoutPhotoPointDirection,
@@ -223,6 +226,9 @@ const SetoutPlan = () => {
   const updateFittingStatus = useUpdateSetoutFittingStatus(planId || "");
   const deleteFitting = useDeleteSetoutFitting(planId || "");
   const restoreFitting = useRestoreSetoutFitting(planId || "");
+  const bulkDeleteFittings = useBulkDeleteSetoutFittings(planId || "");
+  const bulkAssignFittingCircuit = useBulkAssignSetoutFittingCircuit(planId || "");
+  const bulkRestoreFittings = useBulkRestoreSetoutFittings(planId || "");
   const assignFittingCircuit = useAssignFittingCircuit(planId || "");
   const createPhotoPoint = useCreateSetoutPhotoPoint(planId || "");
   const updatePhotoPointDirection = useUpdateSetoutPhotoPointDirection(planId || "");
@@ -436,6 +442,24 @@ const SetoutPlan = () => {
 
   const commitWallThickness = (next: { exterior: number; interior: number }) => {
     updateWallThickness.mutate({ exterior: next.exterior / 1000, interior: next.interior / 1000 });
+  };
+
+  // Blurring an input fires its own onBlur commit handler, so Enter just
+  // needs to trigger that blur rather than duplicating each field's commit
+  // logic — also drops the on-screen numeric keyboard on mobile, which a
+  // tradie tapping Enter almost certainly wants anyway.
+  const commitOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") e.currentTarget.blur();
+  };
+
+  // Tidies the driver-sizes text and saves every job default together — the
+  // same work its own field's onBlur does, reused so closing the Job
+  // defaults panel (e.g. clicking away) can't leave a just-typed value
+  // sitting uncommitted just because that field never individually blurred.
+  const commitJobDefaultsPanel = () => {
+    const parsed = parseDriverSizes(driverSizesDraft);
+    setDriverSizesDraft((parsed.length > 0 ? parsed : DEFAULT_DRIVER_SIZES_W).join(", "));
+    commitPlanDefaults();
   };
 
   // Reference image behind the traced walls/fittings — the original
@@ -684,12 +708,12 @@ const SetoutPlan = () => {
   };
 
   const handlePrevPhoto = () => {
-    if (activePhotoIndex > 0) {
-      setActivePhotoIndex((prev) => prev - 1);
-      const prevPhoto = activeGallery!.photos[activePhotoIndex - 1];
-      setActivePhotoPointId(prevPhoto.id);
-      loadPhotoPointUrl(prevPhoto.storage_path);
-    }
+    if (!activeGallery || activePhotoIndex <= 0) return;
+    const prevPhoto = activeGallery.photos[activePhotoIndex - 1];
+    if (!prevPhoto) return;
+    setActivePhotoIndex((prev) => prev - 1);
+    setActivePhotoPointId(prevPhoto.id);
+    loadPhotoPointUrl(prevPhoto.storage_path);
   };
 
   const loadPhotoPointUrl = async (storagePath: string) => {
@@ -1137,6 +1161,11 @@ const SetoutPlan = () => {
   const handleExport = async () => {
     if (!plan || exporting || !user || canvases.length === 0) return;
     setExporting(true);
+    // One toast, updated in place as each step runs, rather than a new toast
+    // per step — an export with several floors and an upload at the end can
+    // take a little while, and a stack of toasts piling up would be worse
+    // than one that just changes its message.
+    const progressToastId = toast.loading("Rendering floor 1 of " + canvases.length + "…");
     try {
       // The marked-up pages need the drawing that was marked up on each —
       // one plan page per floor/area, so every canvas's own background image
@@ -1145,28 +1174,44 @@ const SetoutPlan = () => {
       // inlined — failing that, that canvas's page still renders with just
       // its walls and fittings.
       const planImages = new Map<string, PlanImage>();
-      for (const canvas of canvases) {
-        const image = await loadPlanImageForCanvas(canvas);
-        if (image) planImages.set(canvas.id, image);
+      for (let i = 0; i < canvases.length; i++) {
+        toast.loading(`Rendering floor ${i + 1} of ${canvases.length}…`, { id: progressToastId });
+        const image = await loadPlanImageForCanvas(canvases[i]);
+        if (image) planImages.set(canvases[i].id, image);
       }
 
       const baseFilename = (plan.name || "setout-plan").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
 
-      // The storage path is deterministic (one file per plan, overwritten
-      // every export), so the switchboard legend's QR code can be baked in
-      // pointing at it before the file itself is actually uploaded below.
-      const reportPath = `${user.id}/${plan.id}.pdf`;
+      // The storage path is keyed by the plan's export token, not its id —
+      // a token isn't guessable from the plan's own URL, so a link to the
+      // exported PDF can be shared without also exposing every other plan
+      // this tradie has via a predictable path. Falls back to the plan id
+      // only if the token somehow isn't present at runtime.
+      const reportPath = `${user.id}/${plan.export_token || plan.id}.pdf`;
       const reportUrl = supabase.storage.from("setout-plan-exports").getPublicUrl(reportPath).data.publicUrl;
 
       // Same business-branding source as the Site Audit report — the
       // switchboard legend gets stuck in the switchboard, so it needs to
       // identify who wired the job just as much as an audit report does.
-      const p = (profile as any) || {};
+      // These columns aren't in the generated Supabase types yet — same
+      // `as { field?: type } | null` escape hatch App.tsx's SetoutRoute uses
+      // for has_setout_addon, just naming the fields this export actually reads.
+      const p =
+        (profile as {
+          logo_storage_path?: string | null;
+          business_name?: string | null;
+          display_name?: string | null;
+          licence_number?: string | null;
+          business_phone?: string | null;
+          business_email?: string | null;
+        } | null) || {};
       let logoBase64: string | null = null;
       if (p.logo_storage_path) {
         const { data: signed } = await supabase.storage.from("business-logos").createSignedUrl(p.logo_storage_path, 3600);
         if (signed?.signedUrl) logoBase64 = await urlToBase64(signed.signedUrl);
       }
+
+      toast.loading("Building the PDF…", { id: progressToastId });
 
       // One PDF — marked-up plan, materials, maximum demand, switchboard
       // legend — downloaded and also published to public storage so the
@@ -1191,6 +1236,7 @@ const SetoutPlan = () => {
       doc.save(`${baseFilename}.pdf`);
 
       try {
+        toast.loading("Uploading…", { id: progressToastId });
         const reportBlob = doc.output("blob") as Blob;
         const { error: uploadError } = await supabase.storage
           .from("setout-plan-exports")
@@ -1199,8 +1245,9 @@ const SetoutPlan = () => {
       } catch (err) {
         console.error("[SetoutPlan] Could not publish the report for the QR code:", err);
       }
+      toast.success("Export ready", { id: progressToastId });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not generate the export");
+      toast.error(err instanceof Error ? err.message : "Could not generate the export", { id: progressToastId });
     } finally {
       setExporting(false);
     }
@@ -1230,14 +1277,14 @@ const SetoutPlan = () => {
 
   const handleBulkAssignCircuit = () => {
     const circuitId = bulkCircuitId === "unassigned" ? null : bulkCircuitId;
-    multiSelectIds.forEach((fittingId) => assignFittingCircuit.mutate({ fittingId, circuitId }));
+    bulkAssignFittingCircuit.mutate({ ids: Array.from(multiSelectIds), circuitId });
     setMultiSelectIds(new Set());
   };
 
   const handleBulkDelete = () => {
     const toDelete = fittings.filter((f) => multiSelectIds.has(f.id));
     if (toDelete.length > 0) pushUndo({ type: "bulk-delete", fittings: toDelete });
-    multiSelectIds.forEach((fittingId) => deleteFitting.mutate(fittingId));
+    bulkDeleteFittings.mutate(Array.from(multiSelectIds));
     setMultiSelectIds(new Set());
   };
 
@@ -1250,7 +1297,7 @@ const SetoutPlan = () => {
     } else if (entry.type === "delete") {
       restoreFitting.mutate(entry.fitting);
     } else if (entry.type === "bulk-delete") {
-      entry.fittings.forEach((f) => restoreFitting.mutate(f));
+      bulkRestoreFittings.mutate(entry.fittings);
     } else if (entry.type === "move") {
       updateFittingPosition.mutate({
         fittingId: entry.fittingId,
@@ -1800,7 +1847,7 @@ const SetoutPlan = () => {
             <PencilRuler className="h-3.5 w-3.5" />
             Edit walls
           </Button>
-          <Popover>
+          <Popover onOpenChange={(open) => { if (!open) commitWallThickness(wallThicknessMm); }}>
             <PopoverTrigger asChild>
               <Button variant="outline" size="sm" className="h-8 gap-1.5">
                 <Ruler className="h-3.5 w-3.5" />
@@ -1824,6 +1871,7 @@ const SetoutPlan = () => {
                     value={wallThicknessMm.exterior}
                     onChange={(e) => setWallThicknessMm((prev) => ({ ...prev, exterior: Number(e.target.value) || prev.exterior }))}
                     onBlur={() => commitWallThickness(wallThicknessMm)}
+                    onKeyDown={commitOnEnter}
                     className="h-9"
                   />
                 </div>
@@ -1838,13 +1886,14 @@ const SetoutPlan = () => {
                     value={wallThicknessMm.interior}
                     onChange={(e) => setWallThicknessMm((prev) => ({ ...prev, interior: Number(e.target.value) || prev.interior }))}
                     onBlur={() => commitWallThickness(wallThicknessMm)}
+                    onKeyDown={commitOnEnter}
                     className="h-9"
                   />
                 </div>
               </div>
             </PopoverContent>
           </Popover>
-          <Popover>
+          <Popover onOpenChange={(open) => { if (!open) commitJobDefaultsPanel(); }}>
             <PopoverTrigger asChild>
               <Button variant="outline" size="sm" className="h-8 gap-1.5">
                 <Ruler className="h-3.5 w-3.5" />
@@ -1873,6 +1922,7 @@ const SetoutPlan = () => {
                       }))
                     }
                     onBlur={commitPlanDefaults}
+                    onKeyDown={commitOnEnter}
                     className="h-9"
                   />
                   <p className="text-[10px] text-muted-foreground">
@@ -1892,6 +1942,7 @@ const SetoutPlan = () => {
                       setPlanDefaultsDraft((prev) => ({ ...prev, twinDownlightSpacingMm: Number(e.target.value) || prev.twinDownlightSpacingMm }))
                     }
                     onBlur={commitPlanDefaults}
+                    onKeyDown={commitOnEnter}
                     className="h-9"
                   />
                 </div>
@@ -1911,6 +1962,7 @@ const SetoutPlan = () => {
                       }))
                     }
                     onBlur={commitPlanDefaults}
+                    onKeyDown={commitOnEnter}
                     className="h-9"
                   />
                   <p className="text-[10px] text-muted-foreground">
@@ -1925,13 +1977,10 @@ const SetoutPlan = () => {
                     placeholder="30, 60, 100, 150, 200"
                     value={driverSizesDraft}
                     onChange={(e) => setDriverSizesDraft(e.target.value)}
-                    onBlur={() => {
-                      // Show the tidied list back, so it's obvious what was
-                      // actually saved rather than what was typed.
-                      const parsed = parseDriverSizes(driverSizesDraft);
-                      setDriverSizesDraft((parsed.length > 0 ? parsed : DEFAULT_DRIVER_SIZES_W).join(", "));
-                      commitPlanDefaults();
-                    }}
+                    // Tidies the typed list and saves, so it's obvious what
+                    // was actually saved rather than what was typed.
+                    onBlur={commitJobDefaultsPanel}
+                    onKeyDown={commitOnEnter}
                     className="h-9"
                   />
                 </div>
@@ -1951,6 +2000,7 @@ const SetoutPlan = () => {
                       }))
                     }
                     onBlur={commitPlanDefaults}
+                    onKeyDown={commitOnEnter}
                     className="h-9"
                   />
                   <p className="text-[10px] text-muted-foreground">
@@ -1970,6 +2020,7 @@ const SetoutPlan = () => {
                       setPlanDefaultsDraft((prev) => ({ ...prev, ledWattsPerMetre: Number(e.target.value) || prev.ledWattsPerMetre }))
                     }
                     onBlur={commitPlanDefaults}
+                    onKeyDown={commitOnEnter}
                     className="h-9"
                   />
                 </div>

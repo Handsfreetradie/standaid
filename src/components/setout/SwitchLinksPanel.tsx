@@ -30,6 +30,11 @@ export default function SwitchLinksPanel({
   onCycleDimmer,
 }: SwitchLinksPanelProps) {
   const switches = fittings.filter((f) => f.type === "switch");
+  // Defends against a stale gang reference to a fitting that's since been
+  // deleted (normally pruned proactively — see useDeleteSetoutFitting in
+  // useSetoutPlans.ts — this is the second line of defence for anything
+  // that slips past that, e.g. older data).
+  const liveIds = new Set(fittings.map((f) => f.id));
 
   if (switches.length === 0) {
     return <p className="text-xs text-muted-foreground py-3">No switches placed yet — add one from the palette above, then link it to lights here.</p>;
@@ -87,7 +92,7 @@ export default function SwitchLinksPanel({
                         // switches each independently link it — tap the same
                         // light from another switch's gang and it picks this
                         // up on its own, no separate switch-to-switch step.
-                        const ways = wayCountForTarget(target.id, switches);
+                        const ways = wayCountForTarget(target.id, switches, liveIds);
                         // Every other switch in this light's run — not just
                         // ones that directly share this exact light, but the
                         // whole connected chain (switch A - light1, switch B
@@ -95,7 +100,7 @@ export default function SwitchLinksPanel({
                         // 3-way run) — so selecting a switch surfaces them
                         // all here rather than making the tradie hunt
                         // through every other card.
-                        const runGroup = runGroupFittingIds(target.id, switches);
+                        const runGroup = runGroupFittingIds(target.id, switches, undefined, liveIds);
                         const siblingSwitches = switches.filter((other) => other.id !== sw.id && runGroup.has(other.id));
                         return (
                           <span key={target.id} className="contents">

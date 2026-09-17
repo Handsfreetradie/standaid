@@ -40,6 +40,7 @@ export const CATEGORY_FOR_TYPE: Record<FittingType, FittingCategory> = {
   spa_pool_heater: "power",
   other_appliance: "power",
   solar_inverter: "power",
+  ev_charger: "power",
   // Data
   data: "data",
   data_cabinet: "data",
@@ -224,6 +225,19 @@ export interface FittingSpecs {
   inverterPhase?: "single" | "three";
   inverterCableMaterial?: "copper" | "aluminium";
   inverterCableCsaMm2?: string;
+  // The AC output circuit's insulation type — a CABLE_TYPES key (e.g.
+  // "xlpe", "v90") from src/components/tools/electricalData.ts. Defaults to
+  // "xlpe" (the common outdoor-rated choice for a solar AC run) when unset,
+  // so old plans saved before this field existed still get a real
+  // resistance/reactance table rather than the 20°C-reference fallback.
+  inverterCableType?: string;
+  // ev_charger only — a placed EV charger's connected load (Table C1/
+  // Appendix C treatment per AS/NZS 3000:2018 Amendment 2 — see
+  // ev_charging_equipment in setoutMaximumDemand.ts, 100% of connected
+  // load, no diversity unless load management is fitted). kW rather than W
+  // since that's how EV chargers are actually rated/sold.
+  evChargerKw?: number;
+  evChargerPhase?: "single" | "three";
 }
 
 // Centre-to-centre spacing for a twin downlight when the plan has no default
@@ -341,6 +355,7 @@ export const SINGLE_WALL_FITTING_TYPES: FittingType[] = [
   "spa_pool_heater",
   "other_appliance",
   "solar_inverter",
+  "ev_charger",
   "data",
   "data_cabinet",
   "wall_batten_holder",
@@ -380,7 +395,19 @@ function gangNodeId(switchId: string, gangIndex: number): string {
   return `${switchId}::gang${gangIndex}`;
 }
 
-function computeRunGroups(switches: Pick<SetoutFitting, "id" | "specs">[]): {
+// liveIds, when given, is the set of fitting ids that actually still exist
+// on the plan — a switch's `gangs` can end up with a stale/deleted id (a
+// "ghost" reference) if a light gets removed and something misses pruning
+// the switch that pointed at it (e.g. old data from before that pruning
+// existed — see useDeleteSetoutFitting in useSetoutPlans.ts). Left
+// unfiltered, a ghost id shared by two otherwise-unrelated switches would
+// wrongly merge them into one connected run. Optional and defaults to no
+// filtering so every existing caller (SetoutCanvas.tsx, setoutReport.ts)
+// that doesn't pass it keeps its current behaviour unchanged.
+function computeRunGroups(
+  switches: Pick<SetoutFitting, "id" | "specs">[],
+  liveIds?: ReadonlySet<string>,
+): {
   groups: Map<string, Set<string>>;
   switchOfGangNode: Map<string, string>;
 } {
@@ -396,7 +423,10 @@ function computeRunGroups(switches: Pick<SetoutFitting, "id" | "specs">[]): {
     gangsFor(sw).forEach((gang, gangIndex) => {
       const node = gangNodeId(sw.id, gangIndex);
       switchOfGangNode.set(node, sw.id);
-      for (const lightId of gang) connect(node, lightId);
+      for (const lightId of gang) {
+        if (liveIds && !liveIds.has(lightId)) continue; // ghost id — never connect it
+        connect(node, lightId);
+      }
     });
   }
   const groups = new Map<string, Set<string>>();
@@ -424,8 +454,12 @@ function computeRunGroups(switches: Pick<SetoutFitting, "id" | "specs">[]): {
 // crosses into an unrelated gang on the same switch plate. Single source
 // of truth for the canvas connector labels, SwitchLinksPanel's badges, and
 // the PDF cable-run list.
-export function wayCountForTarget(targetId: string, switches: Pick<SetoutFitting, "id" | "specs">[]): number {
-  const { groups, switchOfGangNode } = computeRunGroups(switches);
+export function wayCountForTarget(
+  targetId: string,
+  switches: Pick<SetoutFitting, "id" | "specs">[],
+  liveIds?: ReadonlySet<string>,
+): number {
+  const { groups, switchOfGangNode } = computeRunGroups(switches, liveIds);
   const group = groups.get(targetId);
   if (!group) return 0;
   const switchIds = new Set<string>();
@@ -445,9 +479,10 @@ export function wayCountForTarget(targetId: string, switches: Pick<SetoutFitting
 export function runGroupFittingIds(
   id: string,
   switches: Pick<SetoutFitting, "id" | "specs">[],
-  gangIndex?: number
+  gangIndex?: number,
+  liveIds?: ReadonlySet<string>,
 ): Set<string> {
-  const { groups, switchOfGangNode } = computeRunGroups(switches);
+  const { groups, switchOfGangNode } = computeRunGroups(switches, liveIds);
   const isSwitch = switches.some((s) => s.id === id);
   const startNode = isSwitch ? gangNodeId(id, gangIndex ?? 0) : id;
   const group = groups.get(startNode);
@@ -662,6 +697,11 @@ export interface SetoutPlan {
   // Optional so a plan row saved before this column existed still satisfies
   // the type — every read goes through `plan.plan_defaults?.x ?? fallback`.
   plan_defaults?: PlanDefaults;
+  // Stable, unguessable id for the exported PDF's public URL —
+  // `${user.id}/${export_token}.pdf` in the setout-plan-exports bucket.
+  // Separate from the plan's own id so the export link can be rotated
+  // (re-generated) without that changing the plan's identity elsewhere.
+  export_token: string;
   created_at: string;
   updated_at: string;
 }

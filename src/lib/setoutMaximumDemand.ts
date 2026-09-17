@@ -45,6 +45,7 @@ export type LoadGroupKey =
   | "instantaneous_water_heater"
   | "storage_water_heater"
   | "spa_pool_heater"
+  | "ev_charging_equipment"
   | "other_load";
 
 interface PointsLoadGroup {
@@ -59,7 +60,15 @@ interface PointsLoadGroup {
 }
 
 interface PercentLoadGroup {
-  key: "outdoor_lighting" | "cooking_laundry" | "space_heating_cooling" | "instantaneous_water_heater" | "storage_water_heater" | "spa_pool_heater" | "other_load";
+  key:
+    | "outdoor_lighting"
+    | "cooking_laundry"
+    | "space_heating_cooling"
+    | "instantaneous_water_heater"
+    | "storage_water_heater"
+    | "spa_pool_heater"
+    | "ev_charging_equipment"
+    | "other_load";
   kind: "percent";
   label: string;
   clauseRef: string;
@@ -165,9 +174,17 @@ export const LOAD_GROUPS: LoadGroupDef[] = [
     note: "Simplified for one spa/pool — AS3000 has an extra allowance if there's more than one.",
   },
   {
+    key: "ev_charging_equipment",
+    kind: "percent",
+    label: "EV charging equipment",
+    clauseRef: "AS/NZS 3000:2018 Amdt 2, Cl 2.2.2 / Appendix C",
+    percentOfLoad: 1,
+    note: "Full connected load — no diversity applies unless the installation has EV load/energy management fitted (Cl 2.2.2).",
+  },
+  {
     key: "other_load",
     kind: "percent",
-    label: "Other (EV charger, etc.)",
+    label: "Other",
     clauseRef: "Table C1",
     percentOfLoad: 1,
     note: "Full connected load, no diversity applied — check the specific AS3000 provision for this equipment.",
@@ -221,7 +238,11 @@ function lightingPointsFromFittings(fittings: Pick<SetoutFitting, "type" | "spec
 function socketPointsFromFittings(fittings: Pick<SetoutFitting, "type" | "specs">[]): number {
   let points = 0;
   for (const f of fittings) {
-    if (f.type === "gpo") points += f.specs.count ?? 1;
+    // A 15A/20A/32A GPO is already counted via the flat socket_15a_present/
+    // socket_20a_present allowances (Table C1 groups (b)(ii)/(b)(iii), Note
+    // 10) below, NOT by the point — counting it here as well would double
+    // it up. Absent ratingAmps means the standard 10A outlet.
+    if (f.type === "gpo" && (f.specs.ratingAmps ?? 10) <= 10) points += f.specs.count ?? 1;
   }
   return points;
 }
@@ -249,6 +270,11 @@ const APPLIANCE_LOAD_GROUP_BY_TYPE: Partial<Record<FittingType, LoadGroupKey>> =
   ac_head_unit: "space_heating_cooling",
   cooling_unit: "space_heating_cooling",
   spa_pool_heater: "spa_pool_heater",
+  // AS/NZS 3000:2018 Amendment 2 treats EV charging equipment as its own
+  // load — full connected load, no diversity, unless the installation has
+  // load/energy management fitted (out of scope here; the tradie ticks
+  // this manually via a load-management note if that applies).
+  ev_charger: "ev_charging_equipment",
 };
 
 function applianceLoadGroupForFitting(fitting: Pick<SetoutFitting, "type" | "specs">): LoadGroupKey | null {
@@ -258,14 +284,21 @@ function applianceLoadGroupForFitting(fitting: Pick<SetoutFitting, "type" | "spe
   return APPLIANCE_LOAD_GROUP_BY_TYPE[fitting.type] ?? null;
 }
 
-// Sum of every placed appliance fitting's own ratingW that maps to this
+// An EV charger is rated/sold in kW, not W (see FittingSpecs.evChargerKw) —
+// everything else here uses the shared ratingW (Watts) field directly.
+function wattageForApplianceFitting(fitting: Pick<SetoutFitting, "type" | "specs">): number {
+  if (fitting.type === "ev_charger") return (fitting.specs.evChargerKw ?? 0) * 1000;
+  return fitting.specs.ratingW ?? 0;
+}
+
+// Sum of every placed appliance fitting's own rating that maps to this
 // group — additive with the manual load-items list, not a replacement for
 // it, so a tradie can still record something with no symbol on the plan
 // (e.g. a dryer with no dedicated fitting type).
 function applianceWattageForGroup(fittings: Pick<SetoutFitting, "type" | "specs">[], groupKey: LoadGroupKey): number {
   let total = 0;
   for (const f of fittings) {
-    if (applianceLoadGroupForFitting(f) === groupKey) total += f.specs.ratingW ?? 0;
+    if (applianceLoadGroupForFitting(f) === groupKey) total += wattageForApplianceFitting(f);
   }
   return total;
 }

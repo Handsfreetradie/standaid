@@ -16,6 +16,7 @@ import {
 // setout_canvases is newer than the generated Supabase types — same `as any`
 // escape hatch used throughout useSetoutPlans.ts for tables ahead of a type
 // regen.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const sb = supabase as any;
 
 // One canvas per job, keyed by plan_id — the lowest sort_order (first-

@@ -289,6 +289,7 @@ export const BASE_MATERIALS_BY_TYPE: Record<TableFittingType, BaseLine[]> = {
     { item: "AC isolator switch, solar inverter", qty: 1, unit: "ea" },
     { item: "DC isolator switch, solar inverter", qty: 1, unit: "ea" },
   ], // TODO: confirm — inverter itself is solar-installer supplied
+  ev_charger: [{ item: "Isolating switch, EV charger", qty: 1, unit: "ea" }], // TODO: confirm — charger unit itself is customer/EV-installer supplied; check dedicated-circuit RCD type required
 
   // Data
   data_cabinet: [{ item: "Data cabinet / patch panel enclosure", qty: 1, unit: "ea" }], // TODO: confirm — size/port count varies per job

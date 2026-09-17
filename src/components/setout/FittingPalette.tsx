@@ -95,7 +95,31 @@ const WATER_HEATER_TYPE_OPTIONS: { value: NonNullable<FittingSpecs["waterHeaterT
   { value: "instantaneous", label: "Instantaneous" },
 ];
 
-const SOLAR_CSA_SIZES: Record<CableMaterial, string[]> = CABLE_TYPES.xlpe.sizes;
+// 7.4kW single-phase (32A) is the common domestic EV charger — a reasonable
+// default that's one tap away from being changed for a 3-phase/22kW unit.
+const DEFAULT_EV_CHARGER_KW = 7.4;
+
+// One-tap standard Australian trade heights next to the mounting-height
+// input — by specific fitting type (not category) so, say, editing an oven
+// (also "power" category) doesn't offer a "GPO 300mm" chip that makes no
+// sense on it. Values match the DEFAULT_HEIGHT_BY_TYPE starting points in
+// setoutGeometry.ts; these are just a faster way to set/reset the same
+// field, not a second source of truth for it.
+const MOUNTING_HEIGHT_PRESETS: { types: FittingType[]; label: string; heightMm: number }[] = [
+  { types: ["gpo", "gpo_switch_combo"], label: "GPO 300mm", heightMm: 300 },
+  { types: ["gpo", "gpo_switch_combo"], label: "Bench GPO 1200mm", heightMm: 1200 },
+  { types: ["switch", "cooktop_isolator"], label: "Switch 1200mm", heightMm: 1200 },
+  { types: ["wall_batten_holder", "wall_stair_light", "external_light"], label: "Wall light 1800mm", heightMm: 1800 },
+];
+
+// Solar cable CSA options depend on the chosen insulation type (a
+// CABLE_TYPES key) as well as material — XLPE stocks a much bigger size
+// range than, say, flat TPS. Falls back to XLPE's own sizes for an unknown/
+// legacy cableType so an old saved fitting never ends up with an empty list.
+function solarCsaSizesFor(cableType: string, material: CableMaterial): string[] {
+  return CABLE_TYPES[cableType]?.sizes[material] ?? CABLE_TYPES.xlpe.sizes[material];
+}
+const DEFAULT_SOLAR_CABLE_TYPE = "xlpe";
 
 // One-tap presets for the fitting variants a tradie places over and over —
 // picking one sets the type AND its specs together, so a run of "GPO
@@ -152,6 +176,7 @@ const ALL_QUICK_PICK_PRESETS: FittingPreset[] = [
   { key: "underfloor_heating", type: "underfloor_heating_stat", specs: {}, label: "Underfloor heating stat" },
   { key: "solar_inverter", type: "solar_inverter", specs: {}, label: "Solar inverter" },
   { key: "spa_pool_heater", type: "spa_pool_heater", specs: {}, label: "Spa/pool heater" },
+  { key: "ev_charger", type: "ev_charger", specs: { evChargerKw: DEFAULT_EV_CHARGER_KW, evChargerPhase: "single" }, label: "EV charger" },
 ];
 const ALL_QUICK_PICK_PRESETS_BY_KEY = new Map(ALL_QUICK_PICK_PRESETS.map((p) => [p.key, p]));
 
@@ -283,12 +308,24 @@ const FittingPalette = ({
   // Unset (new account, never customised) falls back to the built-in set.
   const { data: profile } = useProfile();
   const updateQuickPicks = useUpdateSetoutQuickPicks();
+  // profiles.setout_quick_picks is newer than the generated Supabase types
+  // (same gap useSetoutQuickPicks.ts's own `as any` works around) — profile
+  // itself has no narrower type to read this field off.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const quickPickKeys: string[] = (profile as any)?.setout_quick_picks ?? DEFAULT_QUICK_PICK_KEYS;
   const activePresets = quickPickKeys
     .map((key) => ALL_QUICK_PICK_PRESETS_BY_KEY.get(key))
     .filter((p): p is FittingPreset => !!p);
 
   const [customizeOpen, setCustomizeOpen] = useState(false);
+  const [typeSearch, setTypeSearch] = useState("");
+  const typeSearchQuery = typeSearch.trim().toLowerCase();
+  const filteredTypesByCategory = typeSearchQuery
+    ? TYPES_BY_CATEGORY.map(({ category, types }) => ({
+        category,
+        types: types.filter((type) => FITTING_LABELS[type].toLowerCase().includes(typeSearchQuery)),
+      })).filter((group) => group.types.length > 0)
+    : TYPES_BY_CATEGORY;
 
   const toggleQuickPickKey = (key: string) => {
     const next = quickPickKeys.includes(key) ? quickPickKeys.filter((k) => k !== key) : [...quickPickKeys, key];
@@ -689,6 +726,29 @@ const FittingPalette = ({
                 </div>
               )}
               <div>
+                <p className="text-[11px] font-medium text-muted-foreground mb-1">Insulation type</p>
+                <Select
+                  value={selectedFitting.specs.inverterCableType ?? DEFAULT_SOLAR_CABLE_TYPE}
+                  onValueChange={(value) => onUpdateSpecs({ ...selectedFitting.specs, inverterCableType: value })}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(CABLE_TYPES)
+                      .filter(([, info]) => info.materials.includes(selectedFitting.specs.inverterCableMaterial ?? "copper"))
+                      .map(([key, info]) => (
+                        <SelectItem key={key} value={key}>
+                          {info.label}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  Sets the cable's real operating temperature for the voltage-rise check (90°C for XLPE/V-90, 75°C for V-75).
+                </p>
+              </div>
+              <div>
                 <p className="text-[11px] font-medium text-muted-foreground mb-1">Cable material</p>
                 <div className="flex flex-wrap gap-1.5">
                   {(["copper", "aluminium"] as const).map((value) => {
@@ -712,7 +772,10 @@ const FittingPalette = ({
               <div>
                 <p className="text-[11px] font-medium text-muted-foreground mb-1">Cable CSA (mm²)</p>
                 <div className="flex flex-wrap gap-1.5">
-                  {SOLAR_CSA_SIZES[selectedFitting.specs.inverterCableMaterial ?? "copper"].map((size) => {
+                  {solarCsaSizesFor(
+                    selectedFitting.specs.inverterCableType ?? DEFAULT_SOLAR_CABLE_TYPE,
+                    selectedFitting.specs.inverterCableMaterial ?? "copper"
+                  ).map((size) => {
                     const active = selectedFitting.specs.inverterCableCsaMm2 === size;
                     return (
                       <button
@@ -733,6 +796,49 @@ const FittingPalette = ({
               <p className="text-[10px] text-muted-foreground">
                 Voltage rise is checked automatically against AS/NZS 4777.1's 2% limit in Max Demand — the cable run length is
                 measured from this symbol to the nearest switchboard on the plan.
+              </p>
+            </div>
+          )}
+
+          {selectedFitting?.type === "ev_charger" && onUpdateSpecs && (
+            <div className="space-y-2 border-t border-destructive/10 pt-2">
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground mb-1">Rating (kW)</p>
+                <DraftNumberInput
+                  key={`ev-kw-${selectedFitting.id}-${selectedFitting.specs.evChargerKw ?? DEFAULT_EV_CHARGER_KW}`}
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.1"
+                  className="h-8 text-xs"
+                  initialValue={selectedFitting.specs.evChargerKw ?? DEFAULT_EV_CHARGER_KW}
+                  onCommit={(value) => onUpdateSpecs({ ...selectedFitting.specs, evChargerKw: value > 0 ? value : undefined })}
+                />
+              </div>
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground mb-1">Phase</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {(["single", "three"] as const).map((value) => {
+                    const active = (selectedFitting.specs.evChargerPhase ?? "single") === value;
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => onUpdateSpecs({ ...selectedFitting.specs, evChargerPhase: value })}
+                        className={cn(
+                          "rounded-lg border px-2 py-1 text-[11px] font-medium capitalize",
+                          active ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground"
+                        )}
+                      >
+                        {value}-phase
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Counts toward Maximum Demand automatically under "EV charging equipment" — full connected load, no diversity
+                applied (AS/NZS 3000:2018 Amendment 2), unless the installation has EV load/energy management fitted.
               </p>
             </div>
           )}
@@ -836,6 +942,24 @@ const FittingPalette = ({
                 )}
                 onCommit={(value) => onUpdateSpecs({ ...selectedFitting.specs, mountingHeight: value ? fromMm(value) : 0 })}
               />
+              {(() => {
+                const presets = MOUNTING_HEIGHT_PRESETS.filter((p) => p.types.includes(selectedFitting.type));
+                if (presets.length === 0) return null;
+                return (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {presets.map((preset) => (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        onClick={() => onUpdateSpecs({ ...selectedFitting.specs, mountingHeight: fromMm(preset.heightMm) })}
+                        className="rounded-lg border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground"
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
               {selectedFitting.type === "downlight" && (
                 <p className="mt-1 text-[10px] text-muted-foreground">Sizes this downlight's coverage circle — not a lux calculation.</p>
               )}
@@ -1016,6 +1140,15 @@ const FittingPalette = ({
         </div>
       )}
 
+      {!compact && (
+        <Input
+          value={typeSearch}
+          onChange={(e) => setTypeSearch(e.target.value)}
+          placeholder="Search fitting types…"
+          className="h-9 text-xs"
+        />
+      )}
+
       <div className="flex items-center gap-1.5">
         <Select
           value={selectedType ?? undefined}
@@ -1043,22 +1176,26 @@ const FittingPalette = ({
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            {TYPES_BY_CATEGORY.map(({ category, types }) => (
-              <SelectGroup key={category}>
-                <SelectLabel>{LAYER_LABELS[category]}</SelectLabel>
-                {types.map((type) => {
-                  const Icon = FITTING_SYMBOLS[type];
-                  return (
-                    <SelectItem key={type} value={type}>
-                      <span className="flex items-center gap-2">
-                        <Icon size={16} className="text-foreground flex-shrink-0" strokeWidth={1.5} />
-                        {FITTING_LABELS[type]}
-                      </span>
-                    </SelectItem>
-                  );
-                })}
-              </SelectGroup>
-            ))}
+            {filteredTypesByCategory.length === 0 ? (
+              <p className="px-2 py-3 text-xs text-muted-foreground">No fitting types match "{typeSearch.trim()}".</p>
+            ) : (
+              filteredTypesByCategory.map(({ category, types }) => (
+                <SelectGroup key={category}>
+                  <SelectLabel>{LAYER_LABELS[category]}</SelectLabel>
+                  {types.map((type) => {
+                    const Icon = FITTING_SYMBOLS[type];
+                    return (
+                      <SelectItem key={type} value={type}>
+                        <span className="flex items-center gap-2">
+                          <Icon size={16} className="text-foreground flex-shrink-0" strokeWidth={1.5} />
+                          {FITTING_LABELS[type]}
+                        </span>
+                      </SelectItem>
+                    );
+                  })}
+                </SelectGroup>
+              ))
+            )}
           </SelectContent>
         </Select>
         {selectedType && (

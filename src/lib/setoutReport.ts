@@ -1,7 +1,7 @@
 // Builds the Rough-In Setout Assistant PDF summary. Pure function — takes
 // plain data (no React/DB/Supabase calls) so the caller decides how the
 // plan/fittings/circuits were fetched. Follows the pattern in auditReport.ts.
-import jsPDF from "jspdf";
+import type jsPDF from "jspdf";
 import { createElement } from "react";
 import { FITTING_LABELS, FITTING_SYMBOLS } from "@/components/setout/symbols";
 import type { FittingType } from "@/components/setout/symbols";
@@ -182,6 +182,7 @@ const CODE_PREFIX: Record<FittingType, string> = {
   hot_water_unit: "HWU",
   spa_pool_heater: "SPA",
   other_appliance: "APPL",
+  ev_charger: "EV",
   solar_inverter: "SOLAR",
   // Data
   data: "DATA",
@@ -913,8 +914,12 @@ export async function generateSetoutReportPdf(opts: {
   reportUrl?: string;
 }): Promise<jsPDF> {
   const { plan, canvases, fittings, circuits, loadItems = [], planImages, business = {}, reportUrl } = opts;
-  const [{ svg2pdf }, { renderToStaticMarkup }] = await Promise.all([import("svg2pdf.js"), import("react-dom/server")]);
-  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const [{ default: JsPDF }, { svg2pdf }, { renderToStaticMarkup }] = await Promise.all([
+    import("jspdf"),
+    import("svg2pdf.js"),
+    import("react-dom/server"),
+  ]);
+  const doc = new JsPDF({ unit: "mm", format: "a4" });
   // Assigned once across every canvas's fittings combined, so two floors'
   // fittings never collide on the same code (e.g. two "L1" downlights).
   const codes = buildFittingCodes(fittings);

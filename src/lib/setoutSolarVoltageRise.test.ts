@@ -49,4 +49,45 @@ describe("calculateSolarVoltageRise", () => {
       calculateSolarVoltageRise({ material: "aluminium", cableCsaMm2: "1", systemType: "ac", phase: "single", runLengthM: 10, currentAmps: 10, supplyVoltage: 230 })
     ).toBeNull();
   });
+
+  it("uses the real AS/NZS 3008.1.1 table figure (via cableType) rather than the 20°C-reference fallback", () => {
+    const input = {
+      material: "copper" as const,
+      cableCsaMm2: "16",
+      systemType: "ac" as const,
+      phase: "single" as const,
+      runLengthM: 50,
+      currentAmps: 20,
+      supplyVoltage: 230,
+    };
+    const withoutCableType = calculateSolarVoltageRise(input)!;
+    const withXlpe = calculateSolarVoltageRise({ ...input, cableType: "xlpe" })!;
+    // Same formula either way, but a different (table-based, real XLPE
+    // single-core resistance/reactance) mV/A·m once cableType is given —
+    // proving cableType is actually being passed through and used, not
+    // silently ignored.
+    expect(withXlpe.mvPerAm).not.toBeCloseTo(withoutCableType.mvPerAm, 3);
+  });
+
+  it("uses the cable's own operating temperature (90°C for XLPE) rather than always assuming 75°C", () => {
+    const base = {
+      material: "copper" as const,
+      cableCsaMm2: "16",
+      systemType: "ac" as const,
+      phase: "single" as const,
+      runLengthM: 50,
+      currentAmps: 20,
+      supplyVoltage: 230,
+      cableType: "xlpe",
+    };
+    // Resistance rises with temperature, so mV/A·m at XLPE's real 90°C
+    // operating temperature must come out higher than the same cable
+    // evaluated (incorrectly) at 75°C — this is an internal-consistency
+    // check against mvPerAm itself (not an externally published AS/NZS
+    // 3008.1.1 figure), since that's what changing the hardcoded 75 is
+    // actually meant to fix.
+    const mv90 = calculateSolarVoltageRise(base)!.mvPerAm;
+    const mv75 = mvPerAm("copper", "16", "ac", "single", 75, undefined, "xlpe")!;
+    expect(mv90).toBeGreaterThan(mv75);
+  });
 });

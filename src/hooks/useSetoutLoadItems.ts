@@ -5,6 +5,7 @@ import type { SetoutLoadItem } from "@/lib/setoutTypes";
 // setout_* tables are newer than the generated Supabase types — same `as any`
 // escape hatch used elsewhere in this repo (e.g. useSetoutCircuits.ts) for
 // tables ahead of a type regen.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const sb = supabase as any;
 
 export function useSetoutLoadItems(planId: string | undefined) {

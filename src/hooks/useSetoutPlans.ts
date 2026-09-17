@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./useAuth";
 import {
@@ -23,6 +23,7 @@ import type { FittingType } from "@/components/setout/symbols";
 // setout_* tables are newer than the generated Supabase types — same `as any`
 // escape hatch used elsewhere in this repo (e.g. AuditDetail.tsx) for tables
 // ahead of a type regen.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const sb = supabase as any;
 
 export function useSetoutPlans() {
@@ -243,11 +244,69 @@ export function useUpdateSetoutFittingSpecs(planId: string) {
   });
 }
 
+// Every upload flow for this plan (CalibrationImportFlow's background/source
+// image, SetoutPlan's photo points, VoiceNotesPanel's recordings) writes its
+// files straight under `${user.id}/${planId}/...` in its own bucket — see
+// each flow's own upload call — so listing that one folder per bucket finds
+// every file belonging to this plan, across every canvas in the job, with
+// no need to separately walk setout_canvases. Best-effort only: a storage
+// failure here must never block the row delete (an orphaned file left
+// behind costs nothing but a little space; a plan stuck undeletable because
+// storage hiccupped would be far worse), so every failure is caught and
+// logged rather than thrown.
+async function cleanupSetoutPlanStorage(planId: string, userId: string): Promise<void> {
+  const folder = `${userId}/${planId}`;
+  for (const bucket of ["setout-plan-uploads", "setout-photo-points", "setout-voice-notes"] as const) {
+    try {
+      const { data: files, error } = await supabase.storage.from(bucket).list(folder);
+      if (error) {
+        console.warn(`[useDeleteSetoutPlan] Could not list ${bucket} for cleanup:`, error);
+        continue;
+      }
+      if (!files || files.length === 0) continue;
+      const paths = files.map((f) => `${folder}/${f.name}`);
+      const { error: removeError } = await supabase.storage.from(bucket).remove(paths);
+      if (removeError) console.warn(`[useDeleteSetoutPlan] Could not remove files from ${bucket}:`, removeError);
+    } catch (err) {
+      console.warn(`[useDeleteSetoutPlan] Storage cleanup failed for ${bucket}:`, err);
+    }
+  }
+}
+
+// The exported PDF is named by the plan's export_token, not its id (see
+// SetoutPlan.export_token) — a separate, best-effort removal since it's a
+// single known path rather than a folder listing.
+async function cleanupSetoutPlanExport(planId: string, userId: string, queryClient: QueryClient): Promise<void> {
+  try {
+    let exportToken: string | null | undefined = queryClient
+      .getQueryData<SetoutPlan[]>(["setout_plans", userId])
+      ?.find((p) => p.id === planId)?.export_token;
+    if (exportToken === undefined) {
+      const { data, error } = await sb.from("setout_plans").select("export_token").eq("id", planId).single();
+      if (error) {
+        console.warn("[useDeleteSetoutPlan] Could not look up export_token for cleanup:", error);
+        return;
+      }
+      exportToken = data?.export_token ?? null;
+    }
+    if (!exportToken) return;
+    const { error: removeError } = await supabase.storage.from("setout-plan-exports").remove([`${userId}/${exportToken}.pdf`]);
+    if (removeError) console.warn("[useDeleteSetoutPlan] Could not remove exported PDF:", removeError);
+  } catch (err) {
+    console.warn("[useDeleteSetoutPlan] Export cleanup failed:", err);
+  }
+}
+
 export function useDeleteSetoutPlan() {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (planId: string) => {
+      if (user) {
+        await cleanupSetoutPlanStorage(planId, user.id);
+        await cleanupSetoutPlanExport(planId, user.id, queryClient);
+      }
       const { error } = await sb.from("setout_plans").delete().eq("id", planId);
       if (error) throw error;
     },
@@ -286,9 +345,10 @@ export function useCreateSetoutFitting(planId: string) {
 }
 
 // Bulk variant of useCreateSetoutFitting — a single multi-row insert for
-// when a whole batch of fittings lands at once (AI plan-import extraction),
-// rather than one round trip per fitting.
-export function useCreateSetoutFittingsBulk(planId: string) {
+// when a whole batch of fittings lands at once (AI plan-import extraction,
+// or re-adding a batch of fittings after a bulk delete elsewhere), rather
+// than one round trip per fitting.
+export function useBulkCreateSetoutFittings(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -335,6 +395,38 @@ export function useRestoreSetoutFitting(planId: string) {
         circuit_id: fitting.circuit_id,
         linked_to: fitting.linked_to,
       });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
+    },
+  });
+}
+
+// Bulk variant of useRestoreSetoutFitting — undoing a bulk delete brings
+// back a whole batch of fittings in one round trip, each with its original
+// id intact so any switch-gang link or circuit assignment pointing at it
+// re-attaches automatically rather than being left dangling.
+export function useBulkRestoreSetoutFittings(planId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (fittings: SetoutFitting[]) => {
+      if (fittings.length === 0) return;
+      const rows = fittings.map((fitting) => ({
+        id: fitting.id,
+        plan_id: fitting.plan_id,
+        canvas_id: fitting.canvas_id,
+        type: fitting.type,
+        position: fitting.position,
+        category: fitting.category,
+        specs: fitting.specs,
+        measurement_lock: fitting.measurement_lock,
+        status: fitting.status,
+        circuit_id: fitting.circuit_id,
+        linked_to: fitting.linked_to,
+      }));
+      const { error } = await sb.from("setout_fittings").insert(rows);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -436,7 +528,37 @@ export function useUpdateSetoutFittingPosition(planId: string) {
       const { error } = await sb.from("setout_fittings").update(update).eq("id", input.fittingId);
       if (error) throw error;
     },
-    onSuccess: () => {
+    // Optimistic: a drag should visibly settle at its new spot immediately
+    // rather than snapping back-and-forth while the round trip is in
+    // flight. Standard TanStack Query optimistic-update shape — cancel any
+    // in-flight refetch so it can't clobber this write with stale data,
+    // snapshot the previous cache to roll back to on failure, then write
+    // the new position/measurement lock/specs straight into the cache
+    // (rotation lives in specs.rotation, so the `specs` branch covers it
+    // too, same as the real update above).
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_fittings", planId] });
+      const previousFittings = queryClient.getQueryData<SetoutFitting[]>(["setout_fittings", planId]);
+      queryClient.setQueryData<SetoutFitting[]>(["setout_fittings", planId], (old) =>
+        old?.map((f) =>
+          f.id === input.fittingId
+            ? {
+                ...f,
+                position: input.position,
+                measurement_lock: input.measurement_lock,
+                ...(input.specs ? { specs: input.specs } : {}),
+              }
+            : f
+        )
+      );
+      return { previousFittings };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previousFittings) {
+        queryClient.setQueryData(["setout_fittings", planId], context.previousFittings);
+      }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
     },
   });
@@ -464,12 +586,98 @@ export function useUpdateSetoutFittingMeasurementLock(planId: string) {
   });
 }
 
+// After deleting one or more fittings, anything else on the plan can be left
+// holding a "ghost" id — a switch gang (specs.gangs: string[][]) that looped
+// through the now-gone fitting, or a data outlet's specs.dataCabinetId
+// pointing at a now-gone cabinet. Left alone these show up as broken links
+// (SwitchLinksPanel) or, worse, as false switch-run merges — see the
+// liveIds param computeRunGroups/wayCountForTarget/runGroupFittingIds gained
+// in setoutTypes.ts as a second line of defence for data that slips past
+// this. Reads the plan's fittings from the query cache first (already there
+// in the normal delete-from-canvas flow) and only falls back to a fresh
+// select when the cache is empty (e.g. this mutation used outside the
+// canvas page).
+async function pruneDeletedFittingReferences(planId: string, deletedIds: string[], queryClient: QueryClient): Promise<void> {
+  if (deletedIds.length === 0) return;
+  const deleted = new Set(deletedIds);
+
+  let fittings = queryClient.getQueryData<SetoutFitting[]>(["setout_fittings", planId]);
+  if (!fittings) {
+    const { data, error } = await sb.from("setout_fittings").select("*").eq("plan_id", planId);
+    if (error) {
+      console.warn("[pruneDeletedFittingReferences] could not load fittings to prune references", error);
+      return;
+    }
+    fittings = data as SetoutFitting[];
+  }
+
+  for (const fitting of fittings) {
+    if (deleted.has(fitting.id)) continue;
+    let changed = false;
+    const specs: FittingSpecs = { ...fitting.specs };
+
+    if (specs.gangs) {
+      const nextGangs = specs.gangs.map((gang) => gang.filter((id) => !deleted.has(id)));
+      if (nextGangs.some((gang, i) => gang.length !== specs.gangs![i].length)) {
+        specs.gangs = nextGangs;
+        changed = true;
+      }
+    }
+    if (specs.dataCabinetId && deleted.has(specs.dataCabinetId)) {
+      specs.dataCabinetId = null;
+      changed = true;
+    }
+
+    if (changed) {
+      const { error } = await sb.from("setout_fittings").update({ specs }).eq("id", fitting.id);
+      if (error) console.warn("[pruneDeletedFittingReferences] could not prune references on fitting", fitting.id, error);
+    }
+  }
+}
+
 export function useDeleteSetoutFitting(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (fittingId: string) => {
       const { error } = await sb.from("setout_fittings").delete().eq("id", fittingId);
+      if (error) throw error;
+      await pruneDeletedFittingReferences(planId, [fittingId], queryClient);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
+    },
+  });
+}
+
+// Bulk variant of useDeleteSetoutFitting — one multi-row delete plus the
+// same ghost-reference pruning, for a multi-select delete instead of one
+// round trip (and one prune pass) per fitting.
+export function useBulkDeleteSetoutFittings(planId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (ids: string[]) => {
+      if (ids.length === 0) return;
+      const { error } = await sb.from("setout_fittings").delete().in("id", ids);
+      if (error) throw error;
+      await pruneDeletedFittingReferences(planId, ids, queryClient);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
+    },
+  });
+}
+
+// Bulk-assigns (or clears, with circuitId: null) a circuit across a
+// multi-select of fittings in one round trip.
+export function useBulkAssignSetoutFittingCircuit(planId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: { ids: string[]; circuitId: string | null }) => {
+      if (input.ids.length === 0) return;
+      const { error } = await sb.from("setout_fittings").update({ circuit_id: input.circuitId }).in("id", input.ids);
       if (error) throw error;
     },
     onSuccess: () => {

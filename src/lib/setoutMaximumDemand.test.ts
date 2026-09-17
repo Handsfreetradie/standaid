@@ -211,4 +211,32 @@ describe("calculateMaximumDemand — 15A/20A socket-outlet note", () => {
     expect(result.groups.find((g) => g.key === "socket_15a_present")?.amps).toBe(0);
     expect(result.groups.find((g) => g.key === "socket_20a_present")?.amps).toBe(15);
   });
+
+  it("excludes 15A/20A/32A GPOs from the socket_10a point tally — they're already covered by the flat (b)(ii)/(b)(iii) allowances, not counted again as points", () => {
+    const result = calculateMaximumDemand(
+      [
+        fitting("gpo"), // 10A, count 1 -> 1 point
+        fitting("gpo", { count: 2 }), // 10A double -> 2 points
+        fitting("gpo", { ratingAmps: 15 }),
+        fitting("gpo", { ratingAmps: 20 }),
+        fitting("gpo", { ratingAmps: 32 }),
+        fitting("gpo", { ratingAmps: 32, threePhase: true }),
+      ],
+      [],
+    );
+    expect(result.groups.find((g) => g.key === "socket_10a")?.points).toBe(3);
+  });
+});
+
+describe("calculateMaximumDemand — EV charging equipment (AS/NZS 3000:2018 Amdt 2)", () => {
+  it("counts a placed EV charger's own kW at 100% (no diversity), under its own group, not 'other'", () => {
+    const result = calculateMaximumDemand([fitting("ev_charger", { evChargerKw: 7.4 })], []);
+    expect(result.groups.find((g) => g.key === "ev_charging_equipment")?.amps).toBeCloseTo((7400 / 230) * 1, 2);
+    expect(result.groups.find((g) => g.key === "other_load")?.amps).toBe(0);
+  });
+
+  it("an EV charger with no kW set contributes nothing", () => {
+    const result = calculateMaximumDemand([fitting("ev_charger")], []);
+    expect(result.groups.find((g) => g.key === "ev_charging_equipment")?.amps).toBe(0);
+  });
 });
