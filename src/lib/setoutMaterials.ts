@@ -22,6 +22,13 @@ import {
   type SetoutFitting,
 } from "./setoutTypes";
 import type { FittingType } from "@/components/setout/symbols";
+import {
+  estimateCableRuns,
+  type CableRunCanvas,
+  type CableRunCircuit,
+  type CableRunFitting,
+  type CircuitCableEstimate,
+} from "./setoutCableRuns";
 
 export interface MaterialLine {
   item: string; // e.g. "GPO mech, double" / "LED extrusion, 2m length"
@@ -354,11 +361,32 @@ export function aggregateMaterials(
   const totals = new Map<string, MaterialLine>();
   for (const fitting of fittings) {
     for (const line of materialsForFitting(fitting, job)) {
-      const key = `${line.group} ${line.item} ${line.unit}`;
+      const key = `${line.group}\u0000${line.item}\u0000${line.unit}`;
       const existing = totals.get(key);
       if (existing) existing.qty += line.qty;
       else totals.set(key, { ...line });
     }
   }
   return Array.from(totals.values()).sort((a, b) => a.group.localeCompare(b.group) || a.item.localeCompare(b.item));
+}
+
+/**
+ * Same fitting-hardware rollup as aggregateMaterials, PLUS cable metres —
+ * per circuit, grouped by size/type — from setoutCableRuns.ts. A separate
+ * function rather than a change to aggregateMaterials itself: every existing
+ * caller of aggregateMaterials (the PDF materials page today) keeps getting
+ * exactly the same MaterialLine[] it always has, unchanged, while a caller
+ * that also has circuits/canvases in hand can opt into the cable estimate
+ * through this one instead. See setoutCableRuns.ts for the run-length model.
+ */
+export function aggregateMaterialsWithCableRuns(
+  fittings: CableRunFitting[],
+  circuits: CableRunCircuit[],
+  canvases: CableRunCanvas[],
+  job: MaterialsJobSettings = {},
+  ceilingHeightM?: number
+): { lines: MaterialLine[]; cableRuns: CircuitCableEstimate[] } {
+  const lines = aggregateMaterials(fittings, job);
+  const { perCircuit, materialLines } = estimateCableRuns({ fittings, circuits, canvases, ceilingHeightM });
+  return { lines: [...lines, ...materialLines], cableRuns: perCircuit };
 }
