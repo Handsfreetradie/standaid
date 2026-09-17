@@ -60,11 +60,13 @@ serve(async (req) => {
     if (userError || !user) return json({ error: "Unauthorized" }, 401);
     const userId = user.id;
 
-    // ── Setout add-on gate (mirrors src/App.tsx's SetoutRoute) ──
+    // ── Setout add-on gate (mirrors src/App.tsx's SetoutRoute) — electrical
+    // or HVAC, same allowlist as public.has_setout_access() ──
     const { data: profile } = await supabase.from("profiles").select("has_setout_addon, trade_type").eq("user_id", userId).single();
     const trades = profile?.trade_type ? String(profile.trade_type).split(",").filter(Boolean) : [];
-    if (!trades.includes("electrical") || !profile?.has_setout_addon) {
-      return json({ error: "Rough-In Setout is a paid add-on for electrical trades." }, 403);
+    const hasSetoutTrade = trades.includes("electrical") || trades.includes("hvac");
+    if (!hasSetoutTrade || !profile?.has_setout_addon) {
+      return json({ error: "Rough-In Setout is a paid add-on for electrical and HVAC trades." }, 403);
     }
 
     // ── Atomic rate limit — lower cap than photo audits since this is a

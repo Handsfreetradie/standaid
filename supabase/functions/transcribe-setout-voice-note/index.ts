@@ -38,6 +38,24 @@ serve(async (req) => {
     const { data: { user }, error: userError } = await supabase.auth.getUser(token);
     if (userError || !user) return json({ error: "Unauthorized" }, 401);
 
+    // ── Setout add-on gate (mirrors extract-setout-plan/index.ts) —
+    // electrical or HVAC, same allowlist as public.has_setout_access() ──
+    const { data: profile } = await supabase.from("profiles").select("has_setout_addon, trade_type").eq("user_id", user.id).single();
+    const trades = profile?.trade_type ? String(profile.trade_type).split(",").filter(Boolean) : [];
+    const hasSetoutTrade = trades.includes("electrical") || trades.includes("hvac");
+    if (!hasSetoutTrade || !profile?.has_setout_addon) {
+      return json({ error: "Rough-In Setout is a paid add-on for electrical and HVAC trades." }, 403);
+    }
+
+    // ── Atomic rate limit — same shape as extract-setout-plan's, own kind
+    // since this hits Deepgram rather than the Anthropic API ──
+    const { data: used } = await supabase.rpc("check_and_record_ai_usage", {
+      p_user_id: user.id, p_kind: "setout_voice_transcribe", p_max: 30, p_window_seconds: 3600,
+    });
+    if (typeof used === "number" && used < 0) {
+      return json({ error: "Hourly limit reached — please try again later." }, 429);
+    }
+
     const { voice_note_id } = await req.json();
     if (!voice_note_id) return json({ error: "voice_note_id is required" }, 400);
 
