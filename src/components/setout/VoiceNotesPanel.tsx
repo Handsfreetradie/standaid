@@ -174,7 +174,15 @@ export default function VoiceNotesPanel({ planId }: VoiceNotesPanelProps) {
         {recording ? (
           <>
             <p className="text-2xl font-mono font-bold text-destructive tabular-nums">{formatElapsed(elapsed)}</p>
-            <p className="text-xs text-muted-foreground">Recording — auto-stops at 20:00</p>
+            <div className="w-full h-1 rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full bg-destructive"
+                style={{ width: `${Math.min(100, (elapsed / MAX_RECORDING_SECONDS) * 100)}%` }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {formatElapsed(Math.max(0, MAX_RECORDING_SECONDS - elapsed))} left — auto-stops at 20:00
+            </p>
             <Button variant="destructive" className="gap-1.5" onClick={stopRecording}>
               <Square className="h-3.5 w-3.5" /> Stop
             </Button>

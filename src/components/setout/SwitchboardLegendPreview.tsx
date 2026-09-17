@@ -53,7 +53,16 @@ export default function SwitchboardLegendPreview({ open, onOpenChange, plan }: S
   const codes = buildFittingCodes(fittings);
   const unassigned = fittings.filter((f) => !f.circuit_id);
 
-  const p = (profile as any) || {};
+  // profiles gained these columns after the Supabase types were generated —
+  // same narrow cast SetoutPlan.tsx uses for the export block.
+  const p =
+    (profile as {
+      business_name?: string | null;
+      display_name?: string | null;
+      licence_number?: string | null;
+      business_phone?: string | null;
+      business_email?: string | null;
+    } | null) || {};
   const businessLines = [
     p.business_name || p.display_name,
     p.licence_number ? `Licence No. ${p.licence_number}` : null,

@@ -1,13 +1,24 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import SetoutCanvas from "./SetoutCanvas";
 import { supabase } from "@/integrations/supabase/client";
 import { useUpdateSetoutCanvasGeometry } from "@/hooks/useSetoutCanvases";
+import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import { distance, type Point, type SetoutCanvas as SetoutCanvasRow, type WallOpening, type WallSegment } from "@/lib/setoutTypes";
 import { nextOpeningId, nextWallId, wallLength } from "@/lib/setoutGeometry";
 
@@ -34,7 +45,27 @@ export default function EditWallsFlow({ canvas: plan, onClose }: EditWallsFlowPr
   const [selectedEraseWallId, setSelectedEraseWallId] = useState<string | null>(null);
   const [openingKind, setOpeningKind] = useState<"door" | "window" | "sliding_door">("door");
   const [draftStart, setDraftStart] = useState<Point | null>(null);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const saveGeometry = useUpdateSetoutCanvasGeometry(plan.id, plan.plan_id);
+
+  // Snapshot of what was already saved, taken once on mount, so a Back tap
+  // can tell "nothing changed" from "there's a wall or opening still sitting
+  // here unsaved" without re-deriving it from the plan prop each time.
+  const initialInteriorWallsRef = useRef(interiorWalls);
+  const initialOpeningsRef = useRef(openings);
+  const dirty =
+    draftStart !== null ||
+    JSON.stringify(interiorWalls) !== JSON.stringify(initialInteriorWallsRef.current) ||
+    JSON.stringify(openings) !== JSON.stringify(initialOpeningsRef.current);
+  useUnsavedChangesGuard(dirty);
+
+  const handleBackTap = () => {
+    if (dirty) {
+      setShowDiscardConfirm(true);
+    } else {
+      onClose();
+    }
+  };
 
   // The originally-uploaded plan raster, shown behind the walls being
   // edited — same signed-URL + natural-dimension lookup as the main
@@ -99,9 +130,24 @@ export default function EditWallsFlow({ canvas: plan, onClose }: EditWallsFlowPr
 
   return (
     <div className="flex flex-col h-full overflow-y-auto px-5 py-6 max-w-6xl mx-auto w-full">
-      <button onClick={onClose} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
+      <button onClick={handleBackTap} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
         <ArrowLeft className="h-4 w-4" /> Back
       </button>
+
+      <AlertDialog open={showDiscardConfirm} onOpenChange={setShowDiscardConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The walls and openings added here haven't been saved yet. Leaving now will lose them.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <AlertDialogAction onClick={onClose}>Discard</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Edit walls</h2>
       <p className="text-xs text-muted-foreground mb-4">
         Add internal walls or doors/windows that were missed — drag an existing door/window to reposition it. To fix the outer

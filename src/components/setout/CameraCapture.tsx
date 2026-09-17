@@ -22,7 +22,12 @@ export default function CameraCapture({ open, onClose, onCapture, capturing }: C
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
 
   useEffect(() => {
-    if (!open) return;
+    // Stop the live feed the moment there's a captured shot to review — a
+    // phone's camera stays a scarce resource (other apps/tabs can't use it,
+    // and it keeps the device warm) for as long as something holds it open,
+    // and the review screen has no use for a live feed anyway. Clearing
+    // capturedImage (Retake) re-runs this effect and re-acquires it.
+    if (!open || capturedImage) return;
 
     let cancelled = false;
 
@@ -61,7 +66,7 @@ export default function CameraCapture({ open, onClose, onCapture, capturing }: C
       cancelled = true;
       stopCamera();
     };
-  }, [open, facingMode]);
+  }, [open, facingMode, capturedImage]);
 
   // Start on the live view again next time it opens, not on the last shot.
   useEffect(() => {

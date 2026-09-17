@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Trash2, ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -140,14 +140,24 @@ export default function PhotoPointDialog({
   const containerRef = useRef<HTMLDivElement>(null);
   const panStartRef = useRef<{ x: number; y: number } | null>(null);
 
-  const handleZoom = (direction: number) => {
+  const handleZoom = useCallback((direction: number) => {
     setZoom((prev) => Math.max(1, Math.min(4, prev + direction * 0.5)));
-  };
+  }, []);
 
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    handleZoom(e.deltaY > 0 ? -1 : 1);
-  };
+  // React's onWheel is a passive listener, so e.preventDefault() inside it
+  // silently does nothing and the page scrolls under the zoom regardless —
+  // same issue and same fix as SetoutCanvas's own wheel handling.
+  useEffect(() => {
+    if (photoType === "360") return;
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      handleZoom(e.deltaY > 0 ? -1 : 1);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [photoType, handleZoom]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (zoom > 1) {
@@ -199,7 +209,6 @@ export default function PhotoPointDialog({
             "rounded-lg overflow-hidden bg-muted flex items-center justify-center flex-1 relative",
             photoType !== "360" && "cursor-grab active:cursor-grabbing"
           )}
-          onWheel={photoType === "360" ? undefined : handleWheel}
           onPointerDown={photoType === "360" ? undefined : handlePointerDown}
           onPointerMove={photoType === "360" ? undefined : handlePointerMove}
           onPointerUp={photoType === "360" ? undefined : handlePointerUp}

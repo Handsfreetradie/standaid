@@ -405,15 +405,27 @@ export default function SetoutCanvas({
     setViewBox(vb);
   }, [backgroundImage, walls]);
   const [panMode, setPanMode] = useState(false);
-  const panState = useRef<{ clientX: number; clientY: number; vb: ViewBox; scale: number } | null>(null);
-  const dragState = useRef<{ fittingId: string; type: FittingType; clientX: number; clientY: number; scale: number; origin: Point } | null>(null);
+  // `pointerId`/`el` are the pointer and element a gesture captured via
+  // setPointerCapture, kept alongside the gesture state so a second finger
+  // landing mid-pan/drag (see cancelPanAndDrag below) can release that
+  // capture instead of leaving it dangling on an abandoned gesture.
+  const panState = useRef<{ clientX: number; clientY: number; vb: ViewBox; scale: number; pointerId: number; el: Element } | null>(null);
+  const dragState = useRef<{ fittingId: string; type: FittingType; clientX: number; clientY: number; scale: number; origin: Point; pointerId: number; el: Element } | null>(null);
   const [dragPreview, setDragPreview] = useState<{ id: string; position: Point } | null>(null);
   const [alignGuides, setAlignGuides] = useState<{ x?: number; y?: number } | null>(null);
   // Shown while aiming near the halfway point between two fittings, so it's
   // clear WHICH two the centre is being taken from before committing to it.
   const [midpointGuide, setMidpointGuide] = useState<{ a: Point; b: Point; at: Point } | null>(null);
-  const openingDragState = useRef<{ openingId: string; wall: WallSegment; width: number } | null>(null);
+  const openingDragState = useRef<{ openingId: string; wall: WallSegment; width: number; pointerId: number; el: Element } | null>(null);
   const [openingDragPreview, setOpeningDragPreview] = useState<{ id: string; offset: number } | null>(null);
+  // Touch pointers currently down anywhere on the canvas (background,
+  // fittings, openings). Updated by a capture-phase native listener (below)
+  // so it stays accurate even when a pointerdown lands on a fitting/opening
+  // and its React handler calls stopPropagation — a second finger going down
+  // must hand the whole gesture to the native pinch handler regardless of
+  // what the first finger landed on.
+  const activeTouchPointerIds = useRef<Set<number>>(new Set());
+  const touchPointerPositions = useRef<Map<number, { x: number; y: number }>>(new Map());
   // Tracks the previous interior-wall tap so a second one landing close in
   // time and space to it can be recognised as a double-click/double-tap
   // (browsers don't reliably surface dblclick for touch on a manually
@@ -634,6 +646,78 @@ export default function SetoutCanvas({
     };
   }, [handleWheel, handleTouchStart, handleTouchMove, handleTouchEnd]);
 
+  // Capture-phase so it sees every touch pointer down/up on the canvas
+  // regardless of a target's own stopPropagation (fittings and openings both
+  // call it) — this is what lets a second finger anywhere hand the gesture
+  // to the pinch handler above rather than only when it lands on open
+  // background. Pointer Events run alongside the native Touch events used
+  // for the actual pinch math; this listener only keeps the "how many
+  // fingers are down" bookkeeping in sync, it never zooms anything itself.
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const onPointerDownCapture = (e: PointerEvent) => {
+      if (e.pointerType !== "touch") return;
+      activeTouchPointerIds.current.add(e.pointerId);
+      touchPointerPositions.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    };
+    const onPointerMoveCapture = (e: PointerEvent) => {
+      if (e.pointerType !== "touch" || !activeTouchPointerIds.current.has(e.pointerId)) return;
+      touchPointerPositions.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    };
+    const onPointerEndCapture = (e: PointerEvent) => {
+      if (e.pointerType !== "touch") return;
+      activeTouchPointerIds.current.delete(e.pointerId);
+      touchPointerPositions.current.delete(e.pointerId);
+    };
+    svg.addEventListener("pointerdown", onPointerDownCapture, { capture: true });
+    svg.addEventListener("pointermove", onPointerMoveCapture, { capture: true });
+    svg.addEventListener("pointerup", onPointerEndCapture, { capture: true });
+    svg.addEventListener("pointercancel", onPointerEndCapture, { capture: true });
+    return () => {
+      svg.removeEventListener("pointerdown", onPointerDownCapture, { capture: true });
+      svg.removeEventListener("pointermove", onPointerMoveCapture, { capture: true });
+      svg.removeEventListener("pointerup", onPointerEndCapture, { capture: true });
+      svg.removeEventListener("pointercancel", onPointerEndCapture, { capture: true });
+    };
+  }, []);
+
+  // Releases a pointer capture a cancelled gesture was holding. Swallows the
+  // error a browser throws for a pointer that was never captured (or was
+  // already released) — this is best-effort cleanup, not something the
+  // gesture's correctness depends on.
+  const releasePointerCaptureSafe = (pointerId: number, el: Element) => {
+    try {
+      el.releasePointerCapture(pointerId);
+    } catch {
+      // Not captured (or already released) — nothing to do.
+    }
+  };
+
+  // A second touch point has just gone down: the native pinch handler above
+  // owns the gesture now. Any pan or drag the first finger had already
+  // started is abandoned here WITHOUT committing — a fitting mid-drag snaps
+  // back to wherever it actually is in `fittings` (dragPreview is cleared,
+  // and onFittingDrag is never called), and a pan simply stops where it was.
+  const cancelPanAndDrag = useCallback(() => {
+    if (panState.current) {
+      releasePointerCaptureSafe(panState.current.pointerId, panState.current.el);
+      panState.current = null;
+    }
+    pendingTapRef.current = null;
+    if (dragState.current) {
+      releasePointerCaptureSafe(dragState.current.pointerId, dragState.current.el);
+      dragState.current = null;
+    }
+    if (openingDragState.current) {
+      releasePointerCaptureSafe(openingDragState.current.pointerId, openingDragState.current.el);
+      openingDragState.current = null;
+    }
+    setDragPreview(null);
+    setOpeningDragPreview(null);
+    setAlignGuides(null);
+  }, []);
+
   const sceneFromClient = useCallback((clientX: number, clientY: number): Point => {
     const svg = svgRef.current;
     if (!svg) return { x: 0, y: 0 };
@@ -648,6 +732,13 @@ export default function SetoutCanvas({
 
   const handleBackgroundPointerDown = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
+      // A second (or third) finger just went down — the native pinch handler
+      // owns the gesture now. Abandon whatever the first finger had already
+      // started rather than also starting a pan/tap from this one.
+      if (e.pointerType === "touch" && activeTouchPointerIds.current.size >= 2) {
+        cancelPanAndDrag();
+        return;
+      }
       if (dragState.current || openingDragState.current) return;
       // Allow panning in several cases:
       // 1. Pan mode is explicitly enabled
@@ -656,13 +747,13 @@ export default function SetoutCanvas({
       const isActivelyPlacing = (mode === "place-fittings" && selectedFittingType) || mode === "place-photo-points";
       const isSketchingMode = mode === "place-opening" || mode === "sketch-walls" || mode === "sketch-interior-wall";
       if (panMode || mode === "view") {
-        panState.current = { clientX: e.clientX, clientY: e.clientY, vb: viewBox, scale: px2scene() };
+        panState.current = { clientX: e.clientX, clientY: e.clientY, vb: viewBox, scale: px2scene(), pointerId: e.pointerId, el: e.target as Element };
         (e.target as Element).setPointerCapture(e.pointerId);
         return;
       }
       // Allow panning on empty canvas (SVG background) when not actively placing/sketching
       if (!isActivelyPlacing && !isSketchingMode && e.target === e.currentTarget) {
-        panState.current = { clientX: e.clientX, clientY: e.clientY, vb: viewBox, scale: px2scene() };
+        panState.current = { clientX: e.clientX, clientY: e.clientY, vb: viewBox, scale: px2scene(), pointerId: e.pointerId, el: e.target as Element };
         (e.target as Element).setPointerCapture(e.pointerId);
         return;
       }
@@ -670,11 +761,11 @@ export default function SetoutCanvas({
       // press-and-drag moves the plan, and hold the intended tap until the
       // pointer lifts — if it barely moved it was a tap, if it travelled it
       // was a drag and no point should be dropped.
-      panState.current = { clientX: e.clientX, clientY: e.clientY, vb: viewBox, scale: px2scene() };
+      panState.current = { clientX: e.clientX, clientY: e.clientY, vb: viewBox, scale: px2scene(), pointerId: e.pointerId, el: e.target as Element };
       pendingTapRef.current = { clientX: e.clientX, clientY: e.clientY };
       (e.target as Element).setPointerCapture(e.pointerId);
     },
-    [panMode, mode, viewBox, px2scene, selectedFittingType]
+    [panMode, mode, viewBox, px2scene, selectedFittingType, cancelPanAndDrag]
   );
 
   // The actual placement, run on pointer UP rather than DOWN: pressing and
@@ -883,9 +974,7 @@ export default function SetoutCanvas({
       }
     },
     [
-      panMode,
       mode,
-      viewBox,
       px2scene,
       sceneFromClient,
       sketchPoints,
@@ -922,12 +1011,21 @@ export default function SetoutCanvas({
       fittings,
       measureDraft,
       onMeasurePointAdd,
+      stripDraft,
+      onStripPointAdd,
+      wallThickness.exterior,
+      wallThickness.interior,
     ]
   );
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
+      // A pinch is in progress — the native touchmove handler owns panning
+      // and zooming entirely while a second finger is down, so a pan/drag
+      // computed off just one of these pointers would fight it.
+      if (e.pointerType === "touch" && activeTouchPointerIds.current.size >= 2) return;
       if (panState.current) {
+        const { pointerId, el } = panState.current;
         const pending = pendingTapRef.current;
         if (pending) {
           // A tap is still in the running. Hold the plan completely still
@@ -940,7 +1038,7 @@ export default function SetoutCanvas({
           // plan starts moving from where the finger is now instead of jumping
           // by the slop distance the moment the threshold is crossed.
           pendingTapRef.current = null;
-          panState.current = { clientX: e.clientX, clientY: e.clientY, vb: viewBox, scale: px2scene() };
+          panState.current = { clientX: e.clientX, clientY: e.clientY, vb: viewBox, scale: px2scene(), pointerId, el };
           return;
         }
         const { clientX, clientY, vb, scale } = panState.current;
@@ -1040,6 +1138,13 @@ export default function SetoutCanvas({
   const handleFittingPointerDown = useCallback(
     (e: React.PointerEvent<SVGGElement>, fitting: SetoutFitting) => {
       e.stopPropagation();
+      // A second finger landing on a fitting mid-pinch must not start a new
+      // drag — hand off to the pinch handler the same way the background
+      // handler does.
+      if (e.pointerType === "touch" && activeTouchPointerIds.current.size >= 2) {
+        cancelPanAndDrag();
+        return;
+      }
       if (fitting.type === "switch" && onSwitchDoubleTap) {
         const DOUBLE_TAP_MS = 400;
         const now = Date.now();
@@ -1087,6 +1192,8 @@ export default function SetoutCanvas({
         clientY: e.clientY,
         scale: px2scene(),
         origin: fitting.position,
+        pointerId: e.pointerId,
+        el: e.target as Element,
       };
       setDragPreview({ id: fitting.id, position: fitting.position });
       (e.target as Element).setPointerCapture(e.pointerId);
@@ -1103,9 +1210,11 @@ export default function SetoutCanvas({
       linkActiveCabinetId,
       onCabinetTap,
       onDataLinkTargetTap,
+      onMultiSelectToggle,
       selectedFittingId,
       fittings,
       onMeasurementRefPick,
+      cancelPanAndDrag,
     ]
   );
 
@@ -1117,11 +1226,15 @@ export default function SetoutCanvas({
     (e: React.PointerEvent, opening: WallOpening, wall: WallSegment) => {
       if (mode !== "place-opening") return;
       e.stopPropagation();
-      openingDragState.current = { openingId: opening.id, wall, width: opening.width };
+      if (e.pointerType === "touch" && activeTouchPointerIds.current.size >= 2) {
+        cancelPanAndDrag();
+        return;
+      }
+      openingDragState.current = { openingId: opening.id, wall, width: opening.width, pointerId: e.pointerId, el: e.target as Element };
       setOpeningDragPreview({ id: opening.id, offset: opening.offset });
       (e.target as Element).setPointerCapture(e.pointerId);
     },
-    [mode]
+    [mode, cancelPanAndDrag]
   );
 
   // Selecting (not deleting) a wall is not destructive, so unlike the old
@@ -1191,15 +1304,25 @@ export default function SetoutCanvas({
     return groupPhotosByPosition(photoPoints);
   }, [photoPoints, layerVisibility]);
 
-  const lightPools = useMemo(() => {
+  // Cheap live override for a single dragged fitting's position, so the
+  // expensive grouping/scanning memos below can key off `fittings` alone
+  // (only recomputed when a fitting is actually added/removed/committed)
+  // instead of rebuilding on every pointermove of a drag. Recreated each
+  // render (dragPreview changes constantly while dragging), but it's an O(1)
+  // lookup, not a rescan.
+  const positionOf = useCallback((id: string, fallback: Point): Point => (dragPreview?.id === id ? dragPreview.position : fallback), [dragPreview]);
+
+  // A twin downlight is two real lamps, each throwing its own pool from its
+  // own offset position — not one pool centred on the fixture (see
+  // downlightLampPositions). Flattened here so overlap is checked lamp
+  // against lamp, not fixture against fixture. Kept as an `offset` from the
+  // fixture's own position (rather than a fixed lamp position) so a drag can
+  // translate it cheaply below instead of re-running downlightLampPositions
+  // for every downlight on every pointermove.
+  const lightPoolsBase = useMemo(() => {
     if (!layerVisibility?.coverage) return [];
     const downlights = fittings.filter((f) => f.type === "downlight");
-    // A twin downlight is two real lamps, each throwing its own pool from its
-    // own offset position — not one pool centred on the fixture (see
-    // downlightLampPositions). Flattened here so overlap is checked lamp
-    // against lamp, not fixture against fixture.
-    const lampPools = downlights.flatMap((f) => {
-      const pos = dragPreview?.id === f.id ? dragPreview.position : f.position;
+    return downlights.flatMap((f) => {
       // A downlight placed before ceiling height was a real per-fitting spec
       // has no mountingHeight of its own — fall back to this job's ceiling
       // height default rather than the hardcoded 2.4m inside lightPoolRadius,
@@ -1207,38 +1330,51 @@ export default function SetoutCanvas({
       // the tradie sets after the fact just like a newly placed one would.
       const specs = f.specs.mountingHeight != null ? f.specs : { ...f.specs, mountingHeight: ceilingHeightDefaultM };
       const radius = lightPoolRadius(specs);
-      return downlightLampPositions({ position: pos, specs: f.specs }).map((lampPosition, i) => ({
+      return downlightLampPositions({ position: f.position, specs: f.specs }).map((lampPosition, i) => ({
         id: `${f.id}-${i}`,
         fittingId: f.id,
-        position: lampPosition,
+        offset: { x: lampPosition.x - f.position.x, y: lampPosition.y - f.position.y },
+        fittingPosition: f.position,
         radius,
       }));
     });
-    return lampPools.map((pool) => {
+  }, [fittings, layerVisibility?.coverage, ceilingHeightDefaultM]);
+
+  const lightPools = useMemo(() => {
+    const withPositions = lightPoolsBase.map((pool) => {
+      const fittingPos = positionOf(pool.fittingId, pool.fittingPosition);
+      return { ...pool, position: { x: fittingPos.x + pool.offset.x, y: fittingPos.y + pool.offset.y } };
+    });
+    return withPositions.map((pool) => {
       // A twin's own two lamps sit deliberately close together — that's not
       // a placement mistake, so only another fixture's lamp can trigger the
       // overlap warning, never a fixture's own sibling lamp.
-      const overlapsAnother = lampPools.some(
+      const overlapsAnother = withPositions.some(
         (other) => other.fittingId !== pool.fittingId && poolsSignificantlyOverlap(pool.position, pool.radius, other.position, other.radius)
       );
       return { ...pool, overlapsAnother };
     });
-  }, [fittings, layerVisibility?.coverage, dragPreview, ceilingHeightDefaultM]);
+  }, [lightPoolsBase, positionOf]);
 
   // Same overlay toggle as the downlight light pools, since it's the same
   // "how far does this actually reach" concept — but unlike a light pool,
   // two APs' circles overlapping is normal (that's roaming coverage, not a
   // mistake), so this deliberately has no overlap-warning styling.
-  const wifiPools = useMemo(() => {
+  const wifiPoolsBase = useMemo(() => {
     if (!layerVisibility?.coverage) return [];
     return fittings
       .filter((f) => f.type === "wifi_ap")
       .map((f) => ({
         id: f.id,
-        position: dragPreview?.id === f.id ? dragPreview.position : f.position,
+        position: f.position,
         radius: f.specs.wifiRangeM ?? DEFAULT_WIFI_RANGE_M,
       }));
-  }, [fittings, layerVisibility?.coverage, dragPreview]);
+  }, [fittings, layerVisibility?.coverage]);
+
+  const wifiPools = useMemo(
+    () => wifiPoolsBase.map((p) => ({ ...p, position: positionOf(p.id, p.position) })),
+    [wifiPoolsBase, positionOf]
+  );
 
   // Each gang of a switch plate is its own loop-in chain, not a star — the
   // cable runs switch -> first light -> second light -> ... in tap order
@@ -1249,59 +1385,71 @@ export default function SetoutCanvas({
   // each independently link it (see wayCountForTarget) — no separate
   // switch-to-switch step, so a gang only ever targets lights, never
   // another switch.
-  const switchLinks = useMemo(() => {
+  const switchLinksBase = useMemo(() => {
     if (layerVisibility && !layerVisibility.switches) return [];
     const switches = fittings.filter((f) => f.type === "switch");
-    const links: { key: string; switchPos: Point; targetPos: Point; active: boolean; wayCount: number }[] = [];
+    const links: { key: string; fromId: string; targetId: string; switchPos: Point; targetPos: Point; active: boolean; wayCount: number }[] = [];
     for (const sw of switches) {
-      const swPos = dragPreview?.id === sw.id ? dragPreview.position : sw.position;
       const gangs = gangsFor(sw);
       gangs.forEach((gang, gangIndex) => {
-        let fromPos = swPos;
+        let fromPos = sw.position;
         let fromId = sw.id;
         for (const targetId of gang) {
           const target = fittings.find((f) => f.id === targetId);
           // Leftover switch ids from the older chain-based model don't draw
           // as a link target any more — a gang only points at lights now.
           if (!target || target.type === "switch") continue;
-          const targetPos = dragPreview?.id === target.id ? dragPreview.position : target.position;
           links.push({
             key: `${sw.id}-g${gangIndex}-${fromId}-${targetId}`,
+            fromId,
+            targetId,
             switchPos: fromPos,
-            targetPos,
+            targetPos: target.position,
             active: sw.id === linkActiveSwitchId && gangIndex === linkActiveGangIndex,
             wayCount: wayCountForTarget(targetId, switches),
           });
-          fromPos = targetPos;
+          fromPos = target.position;
           fromId = targetId;
         }
       });
     }
     return links;
-  }, [fittings, layerVisibility?.switches, dragPreview, linkActiveSwitchId, linkActiveGangIndex]);
+  }, [fittings, layerVisibility, linkActiveSwitchId, linkActiveGangIndex]);
+
+  // Positions patched in per-render for whichever single fitting is being
+  // dragged, rather than re-walking every switch's gangs on each pointermove.
+  const switchLinks = useMemo(
+    () => switchLinksBase.map((l) => ({ ...l, switchPos: positionOf(l.fromId, l.switchPos), targetPos: positionOf(l.targetId, l.targetPos) })),
+    [switchLinksBase, positionOf]
+  );
 
   // Data cabling is always a home run, never a loop-in chain — no
   // gangs/N-way concept, just "does this point's dataCabinetId match this
   // cabinet". Far simpler than switchLinks above.
-  const dataCabinetLinks = useMemo(() => {
+  const dataCabinetLinksBase = useMemo(() => {
     if (layerVisibility && !layerVisibility.data) return [];
     const cabinets = fittings.filter((f) => f.type === "data_cabinet");
-    const links: { key: string; cabinetPos: Point; targetPos: Point; active: boolean }[] = [];
+    const links: { key: string; cabinetId: string; targetId: string; cabinetPos: Point; targetPos: Point; active: boolean }[] = [];
     for (const cabinet of cabinets) {
-      const cabinetPos = dragPreview?.id === cabinet.id ? dragPreview.position : cabinet.position;
       for (const f of fittings) {
         if (f.type !== "data" || f.specs.dataCabinetId !== cabinet.id) continue;
-        const targetPos = dragPreview?.id === f.id ? dragPreview.position : f.position;
         links.push({
           key: `${cabinet.id}-${f.id}`,
-          cabinetPos,
-          targetPos,
+          cabinetId: cabinet.id,
+          targetId: f.id,
+          cabinetPos: cabinet.position,
+          targetPos: f.position,
           active: cabinet.id === linkActiveCabinetId,
         });
       }
     }
     return links;
-  }, [fittings, layerVisibility?.data, dragPreview, linkActiveCabinetId]);
+  }, [fittings, layerVisibility, linkActiveCabinetId]);
+
+  const dataCabinetLinks = useMemo(
+    () => dataCabinetLinksBase.map((l) => ({ ...l, cabinetPos: positionOf(l.cabinetId, l.cabinetPos), targetPos: positionOf(l.targetId, l.targetPos) })),
+    [dataCabinetLinksBase, positionOf]
+  );
 
   // Selecting any one member of a 2-way/3-way/4-way run — a switch's active
   // gang (while linking) or a light (its usual selection elsewhere) —
@@ -1330,70 +1478,95 @@ export default function SetoutCanvas({
     return runGroupFittingIds(triggerId, switches, mode === "link-switches" ? linkActiveGangIndex : undefined);
   }, [mode, linkActiveSwitchId, linkActiveGangIndex, linkActiveCabinetId, selectedFittingId, fittings]);
 
-  const measurementLines = useMemo(() => {
-    if (!layerVisibility?.measurements) return [];
-    const wallById = new Map(walls.map((w) => [w.id, w]));
-    const fittingById = new Map(fittings.map((f) => [f.id, f]));
-    const openingById = new Map(openings?.map((o) => [o.id, o]) ?? []);
-    const lines: {
-      key: string;
-      from: Point;
-      to: Point;
-      label: string;
-      note?: string;
-      // Carried so a tap on the line knows which measurement of which fitting
-      // it belongs to, rather than working it back out from geometry.
-      fittingId: string;
-      slot: "refA" | "refB";
-    }[] = [];
-    // visibleFittings, not the raw fittings list — a fitting whose category
-    // layer is toggled off should have its measurement line disappear too,
-    // otherwise a hidden GPO still leaves a dangling wall-measurement line
-    // with nothing visibly attached to it.
-    for (const f of visibleFittings) {
-      if (!f.measurement_lock) continue;
-      const dragging = dragPreview?.id === f.id;
-      const pos = dragging ? dragPreview.position : f.position;
-      // While dragging, show what the measurement WILL be at the position
-      // under the finger, not what it was before the drag started.
-      const lock = (dragging ? measurementPreviewFor?.(f, pos) : null) ?? f.measurement_lock;
+  // Hoisted so resolveMeasurementLinesFor below doesn't rebuild a wall/opening
+  // lookup map for every fitting it's called for.
+  const wallByIdMap = useMemo(() => new Map(walls.map((w) => [w.id, w])), [walls]);
+  const openingByIdMap = useMemo(() => new Map((openings ?? []).map((o) => [o.id, o])), [openings]);
+
+  // Resolves one fitting's measurement lines at a given position — shared by
+  // the stable base pass below (every fitting, at its stored position) and
+  // the live per-render override (just the fitting currently being dragged,
+  // at the position under the finger). `refFittingId` is carried on a
+  // fitting-to-fitting reference so a drag on the OTHER end of it can patch
+  // just that line's `to` without re-deriving the reference.
+  const resolveMeasurementLinesFor = useCallback(
+    (f: SetoutFitting, pos: Point, lock: MeasurementLock) => {
+      const lines: { key: string; from: Point; to: Point; label: string; note?: string; fittingId: string; slot: "refA" | "refB"; refFittingId?: string }[] = [];
       const slotted = ([["refA", lock.refA], ["refB", lock.refB]] as const).filter(
         (entry): entry is readonly ["refA" | "refB", MeasurementRef] => !!entry[1]
       );
       for (const [slot, ref] of slotted) {
         let to: Point | null = null;
+        let refFittingId: string | undefined;
         if (ref.kind === "wall") {
-          const wall = wallById.get(ref.wallId);
+          const wall = wallByIdMap.get(ref.wallId);
           if (!wall) continue;
           to = closestPointOnWall(pos, wall);
         } else if (ref.kind === "opening") {
-          const opening = openingById.get(ref.openingId);
+          const opening = openingByIdMap.get(ref.openingId);
           if (!opening) continue;
-          const wall = wallById.get(opening.wallId);
+          const wall = wallByIdMap.get(opening.wallId);
           if (!wall) continue;
           const len = wallLength(wall);
           const edgeOffset = ref.edge === "start" ? opening.offset : Math.min(len, opening.offset + opening.width);
-          let edgePoint = pointAtOffset(wall, edgeOffset);
+          const edgePoint = pointAtOffset(wall, edgeOffset);
           // Apply same offset as door/window rendering
           const thickness = wall.kind === "interior" ? wallThickness.interior : wallThickness.exterior;
-          const normal = roomFacingNormal(wall, edgePoint, wallsCentroid(walls));
+          const normal = roomFacingNormal(wall, edgePoint, wallCentroid);
           to = { x: edgePoint.x + normal.x * (thickness / 2), y: edgePoint.y + normal.y * (thickness / 2) };
         } else if (ref.kind === "stroke") {
           // A line on the imported drawing: the point it was measured to was
           // frozen when the fitting was placed, because the drawing can't move.
           to = ref.point;
         } else {
-          const other = fittingById.get(ref.fittingId);
+          const other = fittings.find((ff) => ff.id === ref.fittingId);
           if (!other) continue;
-          to = dragPreview?.id === other.id ? dragPreview.position : other.position;
+          to = other.position;
+          refFittingId = other.id;
         }
         const label = formatMm(ref.distance);
         const refKey = measurementRefId(ref);
-        lines.push({ key: `${f.id}-${ref.kind}-${refKey}`, from: pos, to, label, note: lock.note, fittingId: f.id, slot });
+        lines.push({ key: `${f.id}-${ref.kind}-${refKey}`, from: pos, to, label, note: lock.note, fittingId: f.id, slot, refFittingId });
       }
+      return lines;
+    },
+    [wallByIdMap, openingByIdMap, wallCentroid, wallThickness, fittings]
+  );
+
+  // The expensive pass: every visible fitting's measurement, at its stored
+  // (non-dragged) position. Keyed only on stable inputs, so it does NOT
+  // re-run on every pointermove of a drag.
+  const measurementLinesBase = useMemo(() => {
+    if (!layerVisibility?.measurements) return [];
+    const lines: ReturnType<typeof resolveMeasurementLinesFor> = [];
+    // visibleFittings, not the raw fittings list — a fitting whose category
+    // layer is toggled off should have its measurement line disappear too,
+    // otherwise a hidden GPO still leaves a dangling wall-measurement line
+    // with nothing visibly attached to it.
+    for (const f of visibleFittings) {
+      if (!f.measurement_lock) continue;
+      lines.push(...resolveMeasurementLinesFor(f, f.position, f.measurement_lock));
     }
     return lines;
-  }, [visibleFittings, walls, openings, layerVisibility?.measurements, dragPreview, measurementPreviewFor, wallThickness]);
+  }, [visibleFittings, layerVisibility?.measurements, resolveMeasurementLinesFor]);
+
+  // Cheap per-render patch for the one fitting actually being dragged: its
+  // own lines are recomputed live (so the dimension shown tracks the
+  // position under the finger), and any other fitting's line that measures
+  // TO it follows along too. Everything else is passed through unchanged.
+  const measurementLines = useMemo(() => {
+    if (!dragPreview) return measurementLinesBase;
+    const draggedFitting = fittings.find((f) => f.id === dragPreview.id);
+    const others = measurementLinesBase
+      .filter((l) => l.fittingId !== dragPreview.id)
+      .map((l) => (l.refFittingId === dragPreview.id ? { ...l, to: dragPreview.position } : l));
+    if (!draggedFitting?.measurement_lock) return others;
+    // While dragging, show what the measurement WILL be at the position
+    // under the finger, not what it was before the drag started.
+    const liveLock = measurementPreviewFor?.(draggedFitting, dragPreview.position) ?? draggedFitting.measurement_lock;
+    const own = resolveMeasurementLinesFor(draggedFitting, dragPreview.position, liveLock);
+    return [...others, ...own];
+  }, [measurementLinesBase, dragPreview, fittings, measurementPreviewFor, resolveMeasurementLinesFor]);
 
   /**
    * Where each measurement's label goes, nudged clear of the others.
@@ -1435,7 +1608,7 @@ export default function SetoutCanvas({
       const w = widthOf(line.label);
       const h = lineHeight;
 
-      let best = { x: midX, y: midY };
+      const best = { x: midX, y: midY };
       // Alternate above and below, widening each time, and take the first spot
       // that's clear. Six steps is enough for the densest run of downlights;
       // beyond that the label stays put rather than flying off somewhere

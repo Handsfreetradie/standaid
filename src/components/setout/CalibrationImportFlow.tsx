@@ -6,16 +6,45 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import SetoutCanvas, { type BackgroundTile } from "./SetoutCanvas";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useUpdateSetoutCanvasGeometry } from "@/hooks/useSetoutCanvases";
+import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import { distance, type PathPoint, type Point, type SetoutCanvas as SetoutCanvasRow, type WallOpening, type WallSegment } from "@/lib/setoutTypes";
 import { applyWallLengths, nextOpeningId, nextWallId, polygonToWalls, wallLength } from "@/lib/setoutGeometry";
 import { detectPlanEdges, type PlanEdges } from "@/lib/edgeDetection";
 import { extractPlanLines, PlanVectorIndex, type PdfPageForVector } from "@/lib/planVector";
 import { fromMm, mmValue } from "@/lib/units";
 import { BASE_PDF_SCALE, renderPdfTile, type PdfPage } from "@/lib/planRender";
+import { compressImageToBlob } from "@/lib/image";
+
+// A photographed plan is read for fine line/text detail while tracing — the
+// same higher cap the equirectangular 360 photos use (see SetoutPlan.tsx),
+// well above the flat-photo default, so a phone's 12MP shot doesn't turn a
+// dimension string into mush once zoomed in to trace it.
+const PLAN_IMAGE_MAX_DIM = 4096;
+
+// Downscale + re-encode a photographed plan before it's ever rendered or
+// uploaded — a phone photo can be 10+ MB, and both loadImageFile and
+// uploadPlanImage would otherwise work with that full-size original twice
+// over. Not used for a PDF, which is vector and rasterised at whatever the
+// tradie actually zooms to (see renderPdfFirstPage/renderPdfTile).
+async function compressPlanImageFile(file: File): Promise<File> {
+  const blob = await compressImageToBlob(file, PLAN_IMAGE_MAX_DIM);
+  const name = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+  return new File([blob], name, { type: "image/jpeg" });
+}
 
 // Standard Australian residential door/window widths — used as the default
 // when a door/window is placed, then editable per-opening afterward.
@@ -126,6 +155,49 @@ export default function CalibrationImportFlow({ canvas, planId, onBack, onComple
   const tileRequestRef = useRef(0);
   const fileRef = useRef<HTMLInputElement>(null);
   const saveGeometry = useUpdateSetoutCanvasGeometry(canvas.id, planId);
+
+  // Once a plan has been picked (or a corner tapped before it), leaving the
+  // import loses real work — the uploaded raster, the calibration, or
+  // whatever's been traced so far. Stays true across every step until the
+  // final save, since none of the state it's built from is cleared by
+  // stepping between them.
+  const dirty =
+    raster !== null || calibPoints.length > 0 || sketchPoints.length > 0 || interiorWalls.length > 0 || wallOpenings.length > 0;
+  useUnsavedChangesGuard(dirty);
+
+  // Holds whichever "go back" action was interrupted so it can run once the
+  // tradie actually confirms discarding — a step-back and leaving the whole
+  // import are both just "an action" here, only the wording in the dialog
+  // is shared between them.
+  const [pendingBack, setPendingBack] = useState<(() => void) | null>(null);
+  const guardedBack = (action: () => void) => {
+    if (dirty) setPendingBack(() => action);
+    else action();
+  };
+  const discardDialog = (
+    <AlertDialog open={pendingBack !== null} onOpenChange={(open) => { if (!open) setPendingBack(null); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Discard changes?</AlertDialogTitle>
+          <AlertDialogDescription>
+            The plan you've loaded — and anything traced or calibrated so far — hasn't been saved. Leaving now will lose it.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Keep editing</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              const action = pendingBack;
+              setPendingBack(null);
+              action?.();
+            }}
+          >
+            Discard
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
 
   useEffect(() => {
     return () => {
@@ -298,13 +370,19 @@ export default function CalibrationImportFlow({ canvas, planId, onBack, onComple
     if (!file) return;
     setStep("loading");
     try {
-      const source = file.type === "application/pdf" ? await renderPdfFirstPage(file) : await loadImageFile(file);
+      const isPdf = file.type === "application/pdf";
+      // Compress a photographed plan once, up front, and use that same
+      // smaller file everywhere below — both for the working raster and for
+      // what gets uploaded. A PDF is vector and re-rasterised on demand
+      // (renderPdfFirstPage/renderPdfTile), so it's left exactly as chosen.
+      const fileForImport = isPdf ? file : await compressPlanImageFile(file);
+      const source = isPdf ? await renderPdfFirstPage(fileForImport) : await loadImageFile(fileForImport);
       setRaster(source);
       tileRequestRef.current++;
       tileCleanupRef.current?.();
       tileCleanupRef.current = null;
       setTile(null);
-      await uploadPlanImage(source, file);
+      await uploadPlanImage(source, fileForImport);
       setStep("calibrate");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not load that file");
@@ -397,7 +475,7 @@ export default function CalibrationImportFlow({ canvas, planId, onBack, onComple
   if (step === "select-file") {
     return (
       <div className="px-5 py-6 max-w-md mx-auto">
-        <button onClick={onBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-6">
+        <button onClick={() => guardedBack(onBack)} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-6">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
         <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Upload the builder's plan</h2>
@@ -414,6 +492,7 @@ export default function CalibrationImportFlow({ canvas, planId, onBack, onComple
           <p className="text-sm font-semibold text-foreground mb-1">Tap to select a file</p>
           <p className="text-xs text-muted-foreground">PDF or image</p>
         </Card>
+        {discardDialog}
       </div>
     );
   }
@@ -430,7 +509,7 @@ export default function CalibrationImportFlow({ canvas, planId, onBack, onComple
   if (step === "calibrate" && raster) {
     return (
       <div className="flex flex-col h-full overflow-y-auto px-5 py-6 max-w-6xl mx-auto w-full">
-        <button onClick={() => setStep("select-file")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
+        <button onClick={() => guardedBack(() => setStep("select-file"))} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
         <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Calibrate scale</h2>
@@ -482,6 +561,7 @@ export default function CalibrationImportFlow({ canvas, planId, onBack, onComple
         <Button className="w-full h-12 font-bold rounded-xl" disabled={!canConfirmCalibration} onClick={confirmCalibration}>
           Continue to wall tracing
         </Button>
+        {discardDialog}
       </div>
     );
   }
@@ -524,7 +604,7 @@ export default function CalibrationImportFlow({ canvas, planId, onBack, onComple
 
     return (
       <div className="flex flex-col h-full overflow-y-auto px-5 py-6 max-w-6xl mx-auto w-full">
-        <button onClick={() => setStep("calibrate")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
+        <button onClick={() => guardedBack(() => setStep("calibrate"))} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
         <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">
@@ -784,6 +864,7 @@ export default function CalibrationImportFlow({ canvas, planId, onBack, onComple
             </Button>
           )}
         </div>
+        {discardDialog}
       </div>
     );
   }

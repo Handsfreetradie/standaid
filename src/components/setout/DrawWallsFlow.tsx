@@ -5,8 +5,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import SetoutCanvas from "./SetoutCanvas";
 import { useUpdateSetoutCanvasGeometry } from "@/hooks/useSetoutCanvases";
+import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import type { PathPoint, SetoutCanvas as SetoutCanvasRow, WallSegment } from "@/lib/setoutTypes";
 import { applyWallLengths, polygonToWalls, wallLength } from "@/lib/setoutGeometry";
 
@@ -26,7 +37,21 @@ export default function DrawWallsFlow({ canvas, onBack, onComplete }: DrawWallsF
   // Previously hardcoded on with no toggle — a diagonal wall genuinely
   // couldn't be drawn from scratch at all.
   const [squareWalls, setSquareWalls] = useState(true);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const saveGeometry = useUpdateSetoutCanvasGeometry(canvas.id, canvas.plan_id);
+
+  // Drawn from scratch, so there's no "initial" shape to diff against —
+  // any point at all is a corner the tradie tapped in that isn't saved yet.
+  const dirty = sketchPoints.length > 0;
+  useUnsavedChangesGuard(dirty);
+
+  const handleBackTap = () => {
+    if (dirty) {
+      setShowDiscardConfirm(true);
+    } else {
+      onBack();
+    }
+  };
 
   const persistWalls = async (walls: WallSegment[]) => {
     try {
@@ -72,9 +97,24 @@ export default function DrawWallsFlow({ canvas, onBack, onComplete }: DrawWallsF
   if (step === "sketch") {
     return (
       <div className="flex flex-col h-full overflow-y-auto px-5 py-6 max-w-6xl mx-auto w-full">
-        <button onClick={onBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
+        <button onClick={handleBackTap} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
+
+        <AlertDialog open={showDiscardConfirm} onOpenChange={setShowDiscardConfirm}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Discard changes?</AlertDialogTitle>
+              <AlertDialogDescription>
+                The corners you've tapped so far haven't been saved. Leaving now will lose them.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Keep editing</AlertDialogCancel>
+              <AlertDialogAction onClick={onBack}>Discard</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Sketch the room</h2>
         <p className="text-xs text-muted-foreground mb-4">
           Tap each corner as you see it on the frame, in order. Tap the first corner again (or the button below) to close the shape.
