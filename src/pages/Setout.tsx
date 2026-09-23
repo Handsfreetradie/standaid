@@ -10,6 +10,7 @@ import DrawWallsFlow from "@/components/setout/DrawWallsFlow";
 import { useCreateSetoutPlan, useDeleteSetoutPlan, useSetoutPlans } from "@/hooks/useSetoutPlans";
 import { usePrimarySetoutCanvases } from "@/hooks/useSetoutCanvases";
 import type { PlanSourceType, SetoutCanvas as SetoutCanvasRow, SetoutPlan as SetoutPlanRow } from "@/lib/setoutTypes";
+import { OfflineSyncBanner } from "@/components/setout/OfflineSyncBanner";
 
 type ViewState = { kind: "list" } | { kind: "create" } | { kind: "setup"; plan: SetoutPlanRow; canvas: SetoutCanvasRow };
 
@@ -56,8 +57,9 @@ const Setout = () => {
   }
 
   return (
-    <div className="h-full overflow-y-auto px-5 py-6 pb-24 md:pb-10">
-      <div className="max-w-2xl mx-auto">
+    <div className="h-full overflow-y-auto pb-24 md:pb-10">
+      <OfflineSyncBanner />
+      <div className="max-w-2xl mx-auto px-5 py-6">
         <div className="flex items-center justify-between mb-1">
           <h1 className="text-2xl font-extrabold text-foreground flex items-center gap-2">
             <Zap className="h-5 w-5 text-primary" /> Rough-In Setout

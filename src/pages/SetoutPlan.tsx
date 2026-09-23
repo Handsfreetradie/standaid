@@ -23,6 +23,7 @@ import LayerVisibilityToggle from "@/components/setout/LayerVisibilityToggle";
 import SwitchLinksPanel from "@/components/setout/SwitchLinksPanel";
 import DuplicateAlongWallPopover from "@/components/setout/DuplicateAlongWallPopover";
 import ShareReportDialog from "@/components/setout/ShareReportDialog";
+import { OfflineSyncBanner } from "@/components/setout/OfflineSyncBanner";
 import DataCabinetLinksPanel from "@/components/setout/DataCabinetLinksPanel";
 import PhotoPointDialog from "@/components/setout/PhotoPointDialog";
 import CameraCapture from "@/components/setout/CameraCapture";
@@ -1924,6 +1925,7 @@ const SetoutPlan = () => {
 
   return (
     <div className="h-full overflow-y-auto">
+      <OfflineSyncBanner />
       {/* No max-width cap here — the canvas+sidebar workspace should use the
           full viewport width. A max-w-7xl cap used to centre this and leave
           blank gutters on wide monitors instead of letting the (now

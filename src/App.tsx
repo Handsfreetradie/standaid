@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
@@ -24,14 +24,13 @@ import Onboarding from "./pages/Onboarding";
 import Legal from "./pages/Legal";
 import NotFound from "./pages/NotFound";
 import React, { Suspense } from "react";
+import { queryClient, setoutPersister, shouldDehydrateSetoutMutation, shouldDehydrateSetoutQuery } from "@/lib/setoutOfflineQueryClient";
 
 // Setout is a paid add-on only a slice of tradies (electrical/HVAC with the
 // add-on) ever open, and its page pulls in the canvas/PDF-export machinery —
 // lazy-loaded so that weight isn't in every other tradie's main bundle.
 const Setout = React.lazy(() => import("./pages/Setout"));
 const SetoutPlan = React.lazy(() => import("./pages/SetoutPlan"));
-
-const queryClient = new QueryClient();
 
 // Error boundary to catch crashes and show something instead of a blank screen
 class ErrorBoundary extends React.Component<
@@ -165,7 +164,24 @@ const AppRoutes = () => (
 
 const App = () => (
   <ErrorBoundary>
-    <QueryClientProvider client={queryClient}>
+    <PersistQueryClientProvider
+      client={queryClient}
+      persistOptions={{
+        persister: setoutPersister,
+        dehydrateOptions: {
+          shouldDehydrateQuery: shouldDehydrateSetoutQuery,
+          shouldDehydrateMutation: shouldDehydrateSetoutMutation,
+        },
+      }}
+      // Restoring from IndexedDB after an app restart rehydrates a queued
+      // setout mutation back into a paused state — it doesn't fire on its
+      // own. This flushes it immediately if already online; if still
+      // offline, TanStack's built-in onlineManager (no extra code needed
+      // here) resumes it automatically the moment the browser reports it's
+      // back — that auto-resume-on-reconnect behaviour is the default for
+      // every mutation in this app already, restore or not.
+      onSuccess={() => queryClient.resumePausedMutations()}
+    >
       <TooltipProvider>
         <Toaster />
         <Sonner />
@@ -177,7 +193,7 @@ const App = () => (
           </ProgressProvider>
         </AuthProvider>
       </TooltipProvider>
-    </QueryClientProvider>
+    </PersistQueryClientProvider>
   </ErrorBoundary>
 );
 
