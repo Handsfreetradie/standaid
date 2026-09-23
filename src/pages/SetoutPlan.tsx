@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download, Undo2, PencilRuler, Pencil, Ruler, Image as ImageIcon, EyeOff, Camera, Plus, Minus, Trash2, Network, GripHorizontal, ChevronLeft, ChevronRight, Layers, Columns3, Rows3, Gauge, Zap, Sun, Mic, Share2 } from "lucide-react";
+import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download, Undo2, PencilRuler, Pencil, Ruler, Image as ImageIcon, EyeOff, Camera, Plus, Minus, Trash2, Network, GripHorizontal, ChevronLeft, ChevronRight, Layers, Columns3, Rows3, Gauge, Zap, Sun, Mic, Share2, MessageSquare } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -26,15 +26,16 @@ import ShareReportDialog from "@/components/setout/ShareReportDialog";
 import DataCabinetLinksPanel from "@/components/setout/DataCabinetLinksPanel";
 import PhotoPointDialog from "@/components/setout/PhotoPointDialog";
 import CameraCapture from "@/components/setout/CameraCapture";
-import type { FittingType } from "@/components/setout/symbols";
+import { FITTING_LABELS, type FittingType } from "@/components/setout/symbols";
 import { pathLength } from "@/lib/setoutPathGeometry";
+import { formatCircuitDevice, formatCircuitCable, circuitHasRcd } from "@/lib/setoutCircuitSchedule";
 import {
   DEFAULT_EXTRUSION_STOCK_LENGTH_M,
   DEFAULT_LED_WATTS_PER_METRE,
   DEFAULT_DRIVER_HEADROOM_PCT,
   DEFAULT_DRIVER_SIZES_W,
 } from "@/lib/setoutMaterials";
-import { DEFAULT_LAYER_VISIBILITY, DEFAULT_TWIN_SPACING_MM, distance, gangsFor, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type MeasurementRef, type PathPoint, type Point, type SetoutFitting, type SetoutCanvas as SetoutCanvasRow } from "@/lib/setoutTypes";
+import { DEFAULT_LAYER_VISIBILITY, DEFAULT_TWIN_SPACING_MM, distance, gangsFor, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type MeasurementRef, type PathPoint, type Point, type SetoutFitting, type SetoutCircuit, type SetoutCanvas as SetoutCanvasRow } from "@/lib/setoutTypes";
 import {
   autoRotationForWallMount,
   computeMeasurementLock,
@@ -156,6 +157,85 @@ function parseDriverSizes(text: string): number[] {
     .map((part) => Number(part.trim()))
     .filter((n) => Number.isFinite(n) && n > 0);
   return Array.from(new Set(sizes)).sort((a, b) => a - b);
+}
+
+// Fitting types that are, as a matter of common Australian domestic
+// practice, normally wired on their own dedicated final subcircuit rather
+// than shared with other points — fixed appliances and known high-load
+// equipment. Not a stored flag on the fitting (there isn't one), just a
+// judgement call for the seed question below; the chat answer, not this
+// list, is what actually confirms it against AS/NZS 3000.
+const TYPICALLY_DEDICATED_CIRCUIT_TYPES = new Set<FittingType>([
+  "cooktop",
+  "cooktop_isolator",
+  "oven",
+  "hot_water_unit",
+  "spa_pool_heater",
+  "ev_charger",
+  "solar_inverter",
+  "ac_condenser",
+  "ac_head_unit",
+  "rev_cycle_unit",
+  "cooling_unit",
+  "evap_cooling_unit",
+  "ducted_heating_unit",
+  "heated_towel_rail",
+  "underfloor_heating_stat",
+]);
+
+// "a GPO" vs "a downlight" — an acronym-led label (all-caps/slash first
+// word, e.g. "GPO", "TV point", "NBN box") reads oddly lowercased, so only
+// plain-word labels get their leading letter lowercased for a mid-sentence
+// fit.
+function toMidSentence(label: string): string {
+  const firstWord = label.split(" ")[0];
+  if (/^[A-Z0-9/]+$/.test(firstWord)) return label;
+  return label.charAt(0).toLowerCase() + label.slice(1);
+}
+
+// The fitting's own rated load/current, read off whichever spec field its
+// type actually carries — never guessed for a type that doesn't have one.
+function fittingRatingText(fitting: Pick<SetoutFitting, "type" | "specs">): string | null {
+  const { type, specs } = fitting;
+  if (type === "ev_charger" && specs.evChargerKw) return `${specs.evChargerKw} kW`;
+  if ((type === "gpo" || type === "gpo_switch_combo") && specs.ratingAmps) return `${specs.ratingAmps} A`;
+  if (type === "solar_inverter" && specs.inverterOutputAmps) return `${specs.inverterOutputAmps} A`;
+  if (specs.ratingW) {
+    return specs.ratingW >= 1000
+      ? `${(specs.ratingW % 1000 === 0 ? specs.ratingW / 1000 : Math.round((specs.ratingW / 1000) * 10) / 10)} kW`
+      : `${specs.ratingW} W`;
+  }
+  return null;
+}
+
+// Builds a natural, first-person seed question for the "Ask the Standards
+// chat" action — real data from the selected fitting (type, rating, whether
+// it's the kind normally on its own circuit, and its actual assigned
+// circuit's device/cable/RCD if one is set), never a generic template, and
+// never asserting the answer itself — that's what the chat is for.
+function buildAskStandardsQuestion(fitting: SetoutFitting, circuits: SetoutCircuit[]): string {
+  const label = toMidSentence(FITTING_LABELS[fitting.type]);
+  const rating = fittingRatingText(fitting);
+  const ratingClause = rating ? ` rated at ${rating}` : "";
+  const dedicated = TYPICALLY_DEDICATED_CIRCUIT_TYPES.has(fitting.type);
+
+  const circuit = fitting.circuit_id ? circuits.find((c) => c.id === fitting.circuit_id) ?? null : null;
+  let circuitClause: string;
+  if (circuit) {
+    const device = formatCircuitDevice(circuit);
+    const cable = formatCircuitCable(circuit);
+    const rcd = circuitHasRcd(circuit);
+    const details = [device !== "—" ? device : null, cable !== "—" ? cable : null].filter(Boolean).join(", ");
+    circuitClause = details
+      ? ` It's currently on the "${circuit.label}" circuit (${details}${rcd === true ? ", RCD-protected" : rcd === false ? ", no RCD recorded" : ""}).`
+      : ` It's currently on the "${circuit.label}" circuit, but I haven't set the device or cable details yet.`;
+  } else {
+    circuitClause = dedicated
+      ? " It's not yet assigned to a circuit on my plan — I think it needs its own dedicated one."
+      : " It's not yet assigned to a circuit on my plan.";
+  }
+
+  return `I've got a ${label}${ratingClause} on my rough-in plan.${circuitClause} What circuit protection, cable size and RCD requirements apply under AS/NZS 3000?`;
 }
 
 const SetoutPlan = () => {
@@ -857,6 +937,16 @@ const SetoutPlan = () => {
   const handleAssignCircuit = (circuitId: string | null) => {
     if (!selectedFittingId) return;
     assignFittingCircuit.mutate({ fittingId: selectedFittingId, circuitId });
+  };
+
+  // Hands off to the Standards chat with a specific, pre-filled first
+  // question built from this fitting's real data — pure navigation with
+  // route state, so nothing is sent and no network call happens until the
+  // tradie actually hits send on the chat screen (same as the ?q= and
+  // Learn's "Ask AI Tutor" seed paths already in Chat.tsx).
+  const handleAskStandardsChat = () => {
+    if (!selectedFitting) return;
+    navigate("/chat", { state: { seedMessage: buildAskStandardsQuestion(selectedFitting, circuits) } });
   };
 
   const handleRotate = () => {
@@ -1719,6 +1809,17 @@ const SetoutPlan = () => {
             onWall={!!repeatAlongWallInfo?.onWall}
             onConfirm={handleConfirmRepeatAlongWall}
           />
+          {selectedFitting && multiSelectIds.size === 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full gap-2"
+              onClick={handleAskStandardsChat}
+            >
+              <MessageSquare className="h-4 w-4" />
+              Ask the Standards chat about this
+            </Button>
+          )}
         </>
       ) : workspaceMode === "draw-led-strip" ? (
         stripPanelUI

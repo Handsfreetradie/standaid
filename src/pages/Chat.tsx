@@ -270,7 +270,7 @@ const Chat = () => {
       setMessages([{
         id: crypto.randomUUID(),
         role: "ai",
-        content: "What would you like to know about this question? I can explain why the answer's right, walk through the calculation, or point you to the exact clause — just ask.",
+        content: "What would you like to know? I can point you to the exact clause, explain the requirement, or walk through the calculation.",
       }]);
       navigate(location.pathname, { replace: true, state: {} });
     }
