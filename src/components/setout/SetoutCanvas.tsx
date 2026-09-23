@@ -46,6 +46,14 @@ import {
   offsetSymbolIntoRoom,
   groupPhotosByPosition,
 } from "@/lib/setoutGeometry";
+import {
+  isSanitaryFittingType,
+  wetZonePolygonsFor,
+  wetZoneWarningsFor,
+  DEFAULT_SANITARY_FOOTPRINT_MM,
+  type SanitaryFootprintFitting,
+  type WetZonePolygon,
+} from "@/lib/setoutWetZones";
 
 interface ViewBox {
   x: number;
@@ -1376,6 +1384,82 @@ export default function SetoutCanvas({
     [wifiPoolsBase, positionOf]
   );
 
+  // Bath/shower/basin fittings, reshaped into the minimal SanitaryFootprintFitting
+  // shape setoutWetZones.ts's pure geometry functions take — sanitary types
+  // aren't part of the real FittingType union yet (see the comment on
+  // CATEGORY_FOR_TYPE in setoutTypes.ts), hence the casts. Not gated by any
+  // layer toggle itself — visibleFittings (via layerVisibility.sanitary)
+  // already decides whether these fittings are drawn at all; this is just
+  // "which of the currently-loaded fittings are sanitary ones", independent
+  // of visibility.
+  const sanitaryFittingsBase = useMemo((): SanitaryFootprintFitting[] => {
+    return fittings
+      .filter((f) => isSanitaryFittingType(f.type))
+      .map((f) => {
+        const type = f.type as unknown as SanitaryFootprintFitting["type"];
+        const defaults = DEFAULT_SANITARY_FOOTPRINT_MM[type];
+        return {
+          id: f.id,
+          type,
+          position: f.position,
+          rotationDeg: f.specs.rotation ?? 0,
+          footprintWidthMm: f.specs.footprintWidthMm ?? defaults.widthMm,
+          footprintDepthMm: f.specs.footprintDepthMm ?? defaults.depthMm,
+        };
+      });
+  }, [fittings]);
+
+  // AS/NZS 3000 Cl 6.2 wet-area zone overlay — same base/patched split as
+  // the light-pool coverage overlay above: `wetZonePolygonsBase` only
+  // recomputes (rotation trig included) when a sanitary fitting is actually
+  // added/removed/edited, gated entirely off when the layer is hidden so a
+  // plan with no wet areas shown pays nothing for this. `wetZonePolygons`
+  // is the cheap per-frame layer on top — while a sanitary fitting is being
+  // dragged, it just translates that fitting's already-computed polygons by
+  // the drag delta instead of re-deriving them (no trig on every
+  // pointermove).
+  const wetZonePolygonsBase = useMemo((): WetZonePolygon[] => {
+    if (!layerVisibility?.wetZones) return [];
+    return sanitaryFittingsBase.flatMap((f) => wetZonePolygonsFor(f));
+  }, [sanitaryFittingsBase, layerVisibility?.wetZones]);
+
+  const wetZonePolygons = useMemo(() => {
+    if (wetZonePolygonsBase.length === 0) return wetZonePolygonsBase;
+    return wetZonePolygonsBase.map((zone) => {
+      const source = sanitaryFittingsBase.find((f) => f.id === zone.fittingId);
+      if (!source) return zone;
+      const live = positionOf(zone.fittingId, source.position);
+      const dx = live.x - source.position.x;
+      const dy = live.y - source.position.y;
+      if (dx === 0 && dy === 0) return zone;
+      return { ...zone, polygon: zone.polygon.map((p) => ({ x: p.x + dx, y: p.y + dy })) };
+    });
+  }, [wetZonePolygonsBase, sanitaryFittingsBase, positionOf]);
+
+  // Non-sanitary fittings flagged as sitting inside a Zone 1/2 polygon — see
+  // wetZoneWarningsFor's own header for the "verify against the standard"
+  // phrasing this always carries. Recomputed off the committed `fittings`
+  // list (not live-patched per drag frame like the polygons above) — a
+  // warning badge updating only once a drag settles, rather than flickering
+  // every pointermove, is the same trade-off status/locked badges already
+  // make elsewhere on this canvas.
+  const wetZoneWarningsBase = useMemo(() => {
+    if (!layerVisibility?.wetZones || sanitaryFittingsBase.length === 0) return [];
+    const others = fittings.filter((f) => !isSanitaryFittingType(f.type)).map((f) => ({ id: f.id, type: f.type as string, position: f.position }));
+    return wetZoneWarningsFor(sanitaryFittingsBase, others);
+  }, [sanitaryFittingsBase, fittings, layerVisibility?.wetZones]);
+
+  // Worst (lowest-numbered = most restrictive) zone warning per fitting id,
+  // for the O(1) badge lookup in the fitting render loop below.
+  const wetZoneWarningByFittingId = useMemo(() => {
+    const map = new Map<string, (typeof wetZoneWarningsBase)[number]>();
+    for (const w of wetZoneWarningsBase) {
+      const existing = map.get(w.fittingId);
+      if (!existing || w.zone < existing.zone) map.set(w.fittingId, w);
+    }
+    return map;
+  }, [wetZoneWarningsBase]);
+
   // Each gang of a switch plate is its own loop-in chain, not a star — the
   // cable runs switch -> first light -> second light -> ... in tap order
   // within that gang, same as a real 2-core-and-earth loop threaded through
@@ -2064,6 +2148,53 @@ export default function SetoutCanvas({
           </g>
         )}
 
+        {/* AS/NZS 3000 Cl 6.2 wet-area zones (see setoutWetZones.ts header for
+            the stated model/confidence per zone — this is guidance to
+            verify on site, not a certified boundary). Zone 1 (tightest,
+            around the bath/shower itself) in destructive red, Zone 2 in
+            warning amber, Zone 3 (lowest confidence — see header) in a
+            lighter accent tone, each drawn behind Zone 1 so the nested
+            rectangles read as rings rather than one stacking swallowing the
+            others. Rendered in zone-3-first order so Zone 1 ends up on top,
+            same reasoning. */}
+        {wetZonePolygons.length > 0 && (
+          <g pointerEvents="none">
+            {([3, 2, 1] as const).map((zoneNumber) => {
+              const zoneClass =
+                zoneNumber === 1 ? "fill-destructive/10 stroke-destructive/50" : zoneNumber === 2 ? "fill-warning/10 stroke-warning/60" : "fill-accent/10 stroke-accent/50";
+              return (
+                <g key={zoneNumber}>
+                  {wetZonePolygons
+                    .filter((z) => z.zone === zoneNumber)
+                    .map((z) => {
+                      const points = z.polygon.map((p) => `${p.x},${p.y}`).join(" ");
+                      // Deterministic label spot: the polygon's own
+                      // "top-right-most" corner (max x-y), nudged slightly
+                      // toward the centre — since Zone 1/2/3 share a centre,
+                      // this is what keeps their three number labels from
+                      // landing on top of each other (each zone's rectangle
+                      // is bigger, so this corner is further out each time).
+                      const centre = {
+                        x: z.polygon.reduce((s, p) => s + p.x, 0) / z.polygon.length,
+                        y: z.polygon.reduce((s, p) => s + p.y, 0) / z.polygon.length,
+                      };
+                      const corner = z.polygon.reduce((best, p) => (p.x - p.y > best.x - best.y ? p : best), z.polygon[0]);
+                      const labelPos = { x: corner.x * 0.85 + centre.x * 0.15, y: corner.y * 0.85 + centre.y * 0.15 };
+                      return (
+                        <g key={`${z.fittingId}-${z.zone}`}>
+                          <polygon points={points} className={zoneClass} strokeWidth={1} strokeDasharray={zoneNumber === 3 ? "0.15 0.1" : undefined} vectorEffect="non-scaling-stroke" />
+                          <text x={labelPos.x} y={labelPos.y} fontSize={12 * px2scene()} fontWeight="bold" textAnchor="middle" className={zoneNumber === 1 ? "fill-destructive" : zoneNumber === 2 ? "fill-warning" : "fill-accent-foreground"}>
+                            {z.zone}
+                          </text>
+                        </g>
+                      );
+                    })}
+                </g>
+              );
+            })}
+          </g>
+        )}
+
         {switchLinks.length > 0 && (
           <g>
             {switchLinks.map((link) => {
@@ -2367,8 +2498,13 @@ export default function SetoutCanvas({
         )}
 
         {visibleFittings.map((f) => {
+          const isSanitary = isSanitaryFittingType(f.type);
           const Icon = FITTING_SYMBOLS[f.type];
-          if (!Icon) return null;
+          // Sanitary types (bath/shower/basin) have no FITTING_SYMBOLS entry
+          // — see the comment on CATEGORY_FOR_TYPE in setoutTypes.ts — so
+          // they're drawn to scale as a rotated footprint rectangle below
+          // instead of the fixed-size Icon every other fitting uses.
+          if (!isSanitary && !Icon) return null;
           // Already drawn as a run above — a strip has no icon on the plan.
           if (f.type === "led_strip") return null;
           let pos = dragPreview?.id === f.id ? dragPreview.position : f.position;
@@ -2402,6 +2538,99 @@ export default function SetoutCanvas({
           // doesn't require opening the circuits panel. Selection/active
           // states still win over the circuit tint since they're transient.
           const circuitColor = colorForCircuit(circuits, f.circuit_id);
+          // Flagged by wetZoneWarningsFor as sitting inside a bath/shower's
+          // Zone 1/2 — never set for a sanitary fitting itself (see that
+          // function's own exclusion of sanitary-on-sanitary checks).
+          const wetWarning = wetZoneWarningByFittingId.get(f.id);
+          const wetWarningBadge = wetWarning && (
+            <g>
+              <circle r={5} fill="hsl(var(--warning))" stroke="hsl(var(--background))" strokeWidth={1} />
+              <text x={0} y={2.4} fontSize={7} fontWeight="bold" textAnchor="middle" fill="hsl(var(--warning-foreground))">
+                !
+              </text>
+            </g>
+          );
+
+          if (isSanitary) {
+            // Drawn to real-world scale (a bath/shower footprint is far
+            // bigger than the fixed 24-unit icon glyph every other fitting
+            // uses), so this branch works in scene units (metres) directly
+            // rather than the icon's own 24x24 coordinate space — badges
+            // below use `scale(px2scene())` to reuse the exact same
+            // icon-unit glyph paths as the confirmed/rotate/locked badges
+            // above at the same constant on-screen size.
+            const sanitaryType = f.type as unknown as "bath" | "shower" | "basin";
+            const defaults = DEFAULT_SANITARY_FOOTPRINT_MM[sanitaryType];
+            const widthM = (f.specs.footprintWidthMm ?? defaults.widthMm) / 1000;
+            const depthM = (f.specs.footprintDepthMm ?? defaults.depthMm) / 1000;
+            const halfW = widthM / 2;
+            const halfD = depthM / 2;
+            const cornerRadius = Math.min(0.03, halfW * 0.25, halfD * 0.25);
+            const strokeWidthScene = (selected ? 2 : 1.5) * px2scene();
+            return (
+              <g
+                key={f.id}
+                transform={`translate(${pos.x} ${pos.y}) rotate(${rotation})`}
+                onPointerDown={(e) => handleFittingPointerDown(e, f)}
+                className={cn(mode === "place-fittings" && !panMode && "cursor-grab", "cursor-pointer")}
+              >
+                <rect
+                  x={-halfW}
+                  y={-halfD}
+                  width={widthM}
+                  height={depthM}
+                  rx={cornerRadius}
+                  fill="hsl(var(--primary) / 0.08)"
+                  stroke={circuitColor && !selected ? circuitColor : "hsl(var(--primary))"}
+                  strokeOpacity={selected ? 1 : 0.55}
+                  strokeWidth={strokeWidthScene}
+                  vectorEffect="non-scaling-stroke"
+                  pointerEvents="all"
+                />
+                {/* A simple inset glyph so bath/shower/basin read apart from
+                    each other at a glance — not a detailed fixture drawing. */}
+                {sanitaryType === "shower" ? (
+                  <circle cx={0} cy={0} r={Math.min(halfW, halfD) * 0.4} fill="none" stroke="hsl(var(--primary) / 0.5)" strokeWidth={px2scene()} vectorEffect="non-scaling-stroke" />
+                ) : sanitaryType === "basin" ? (
+                  <ellipse cx={0} cy={0} rx={halfW * 0.55} ry={halfD * 0.55} fill="none" stroke="hsl(var(--primary) / 0.5)" strokeWidth={px2scene()} vectorEffect="non-scaling-stroke" />
+                ) : (
+                  <rect x={-halfW * 0.6} y={-halfD * 0.45} width={halfW * 1.2} height={halfD * 0.9} rx={cornerRadius} fill="none" stroke="hsl(var(--primary) / 0.5)" strokeWidth={px2scene()} vectorEffect="non-scaling-stroke" />
+                )}
+                {f.status === "confirmed" && (
+                  <g transform={`translate(${halfW} ${-halfD}) scale(${px2scene()})`}>
+                    <circle r={5} fill="hsl(var(--primary))" />
+                    <path d="M-2 0l1.5 1.5L2.5 -2" stroke="hsl(var(--primary-foreground))" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                  </g>
+                )}
+                {selected && (
+                  <g
+                    transform={`translate(${halfW + 12 * px2scene()} ${-halfD}) scale(${px2scene()})`}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      onFittingRotate?.(f.id);
+                    }}
+                    style={{ cursor: "pointer" }}
+                    pointerEvents="all"
+                  >
+                    <circle r={5} fill="hsl(var(--primary))" pointerEvents="all" />
+                    <path d="M-2 -1a2.5 2.5 0 0 1 3 0M0.5 1v-2M0.5 -1h2" stroke="hsl(var(--primary-foreground))" strokeWidth={1} strokeLinecap="round" fill="none" pointerEvents="all" />
+                  </g>
+                )}
+                {f.specs.locked && (
+                  <g transform={`translate(${-halfW} ${halfD}) scale(${px2scene()})`}>
+                    <circle r={5} fill="hsl(var(--muted-foreground))" />
+                    <rect x={-2} y={-0.5} width={4} height={3} rx={0.5} fill="hsl(var(--background))" />
+                    <path d="M-1.3 -0.5v-1.2a1.3 1.3 0 0 1 2.6 0v1.2" stroke="hsl(var(--background))" strokeWidth={1} fill="none" />
+                  </g>
+                )}
+                {wetWarningBadge && <g transform={`translate(${-halfW} ${-halfD}) scale(${px2scene()})`}>{wetWarningBadge}</g>}
+                <text x={0} y={halfD + 11 * px2scene()} fontSize={10 * px2scene()} textAnchor="middle" fill="hsl(var(--muted-foreground))" pointerEvents="none">
+                  {sanitaryType === "bath" ? "Bath" : sanitaryType === "shower" ? "Shower" : "Basin"}
+                </text>
+              </g>
+            );
+          }
+
           return (
             <g
               key={f.id}
@@ -2472,6 +2701,7 @@ export default function SetoutCanvas({
                   <path d="M-1.3 -0.5v-1.2a1.3 1.3 0 0 1 2.6 0v1.2" stroke="hsl(var(--background))" strokeWidth={1} fill="none" />
                 </g>
               )}
+              {wetWarningBadge && <g transform="translate(-3 -3)">{wetWarningBadge}</g>}
             </g>
           );
         })}

@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import AcCondenserSymbol from "./AcCondenserSymbol";
 import AcHeadUnitSymbol from "./AcHeadUnitSymbol";
+import { BasinSymbol, BathSymbol, ShowerSymbol } from "./SanitaryFixtureSymbols";
 import BattenHolderSymbol from "./BattenHolderSymbol";
 import CeilingFanLightSymbol from "./CeilingFanLightSymbol";
 import CeilingFanSymbol from "./CeilingFanSymbol";
@@ -113,6 +114,10 @@ export const FITTING_SYMBOLS: Record<FittingType, ComponentType<SetoutSymbolProp
   underfloor_heating_stat: UnderfloorHeatingStatSymbol,
   // Network
   wifi_ap: WifiApSymbol,
+  // Sanitary
+  bath: BathSymbol,
+  shower: ShowerSymbol,
+  basin: BasinSymbol,
 };
 
 export const FITTING_LABELS: Record<FittingType, string> = {
@@ -175,4 +180,8 @@ export const FITTING_LABELS: Record<FittingType, string> = {
   underfloor_heating_stat: "Underfloor heating stat",
   // Network
   wifi_ap: "WiFi access point",
+  // Sanitary
+  bath: "Bath",
+  shower: "Shower",
+  basin: "Basin",
 };

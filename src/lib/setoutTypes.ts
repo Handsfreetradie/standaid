@@ -1,8 +1,33 @@
 import type { FittingType } from "@/components/setout/symbols";
 
-export type FittingCategory = "lighting" | "power" | "switches" | "data" | "safety" | "heatCool" | "network";
+export type FittingCategory = "lighting" | "power" | "switches" | "data" | "safety" | "heatCool" | "network" | "sanitary";
 
-export const CATEGORY_FOR_TYPE: Record<FittingType, FittingCategory> = {
+// Bath/shower/basin — a wet-area fitting placed on the plan like any other
+// (footprint + rotation, see FittingSpecs.footprintWidthMm/footprintDepthMm
+// below) so setoutWetZones.ts can derive AS/NZS 3000 Cl 6.2 zones from it.
+// SanitaryFittingType/isSanitaryFittingType/SANITARY_FITTING_TYPES/
+// DEFAULT_SANITARY_FOOTPRINT_MM live in setoutWetZones.ts (import from
+// there directly) — only imported here, not re-exported, for
+// CATEGORY_FOR_TYPE's own typing below. Not yet part of the shared
+// FittingType union in src/components/setout/symbols/types.ts — see the
+// comment on CATEGORY_FOR_TYPE just below for why, and the report on this
+// change for the follow-up needed to fold it in natively.
+import type { SanitaryFittingType } from "./setoutWetZones";
+
+// Widened to `FittingType | SanitaryFittingType` (rather than the plain
+// `Record<FittingType, FittingCategory>` this started as) so a sanitary
+// fitting — placed with `type: "bath" | "shower" | "basin" as FittingType`
+// (a cast, since those three aren't part of the real FittingType union yet
+// — see SanitaryFittingType above) — still gets a real category back from
+// `CATEGORY_FOR_TYPE[fitting.type]` everywhere that's called (notably
+// useCreateSetoutFitting in useSetoutPlans.ts, which would otherwise insert
+// a fitting with `category: undefined` and fail the DB's NOT NULL
+// constraint). Every existing FittingType key/value below is untouched —
+// only the three sanitary keys and the index type are new.
+export const CATEGORY_FOR_TYPE: Record<FittingType | SanitaryFittingType, FittingCategory> = {
+  bath: "sanitary",
+  shower: "sanitary",
+  basin: "sanitary",
   // Lighting
   downlight: "lighting",
   batten_holder: "lighting",
@@ -238,6 +263,17 @@ export interface FittingSpecs {
   // since that's how EV chargers are actually rated/sold.
   evChargerKw?: number;
   evChargerPhase?: "single" | "three";
+  // Real-world footprint (mm) for a fitting drawn to scale as a rectangle
+  // rather than a fixed-size point icon — currently only bath/shower/basin
+  // (see SanitaryFittingType in setoutWetZones.ts and
+  // DEFAULT_SANITARY_FOOTPRINT_MM for their starting sizes), but deliberately
+  // generic rather than sanitary-specific, since nothing else on the plan
+  // models a true-to-scale footprint yet either (switchboard/cooktop etc
+  // are fixed-size glyphs, not scaled rectangles — see SetoutCanvas.tsx's
+  // sanitary-fitting render branch). `rotation` above is reused for these —
+  // no separate rotation field needed.
+  footprintWidthMm?: number;
+  footprintDepthMm?: number;
 }
 
 // Centre-to-centre spacing for a twin downlight when the plan has no default
@@ -600,6 +636,18 @@ export interface LayerVisibility {
   coverage: boolean;
   measurements: boolean;
   photoPoints: boolean;
+  // Bath/shower/basin fixtures themselves — a fitting category like any
+  // other (see FittingCategory), toggled the same way visibleFittings
+  // filters every other category in SetoutCanvas.tsx.
+  sanitary: boolean;
+  // The AS/NZS 3000 Cl 6.2 wet-area zone overlay derived FROM those
+  // fixtures (see setoutWetZones.ts) — a separate toggle from `sanitary`
+  // itself, same relationship as `coverage` is to the downlight/AP layers
+  // it's drawn from: you can see the bath without the zone shading, or hide
+  // the bath but keep the zone reference lines. Defaults on (true), unlike
+  // `coverage`, since this is compliance-relevant guidance a tradie
+  // generally wants visible by default, not an opt-in extra.
+  wetZones: boolean;
 }
 
 export const DEFAULT_LAYER_VISIBILITY: LayerVisibility = {
@@ -613,6 +661,8 @@ export const DEFAULT_LAYER_VISIBILITY: LayerVisibility = {
   coverage: false,
   measurements: true,
   photoPoints: true,
+  sanitary: true,
+  wetZones: true,
 };
 
 export const LAYER_LABELS: Record<keyof LayerVisibility, string> = {
@@ -626,6 +676,8 @@ export const LAYER_LABELS: Record<keyof LayerVisibility, string> = {
   coverage: "Coverage overlay",
   measurements: "Measurements",
   photoPoints: "Photo points",
+  sanitary: "Sanitary",
+  wetZones: "Wet-area zones",
 };
 
 // Real-world wall thickness (metres), one value per wall kind rather than
@@ -738,7 +790,7 @@ export interface SetoutCanvas {
 // legend) — mirrors the reference sheet's grouping (Lighting, Heat/Cool,
 // Power, Ducted Vacuum) with Switches/Data/Safety, which this app tracks
 // as their own categories, slotted in alongside.
-export const FITTING_CATEGORY_ORDER: FittingCategory[] = ["lighting", "switches", "power", "data", "safety", "heatCool", "network"];
+export const FITTING_CATEGORY_ORDER: FittingCategory[] = ["lighting", "switches", "power", "data", "safety", "heatCool", "network", "sanitary"];
 
 // "standard" covers everything the app already handled (lighting/power/etc
 // circuits via breaker_rating). "solar" is the first circuit type that needs

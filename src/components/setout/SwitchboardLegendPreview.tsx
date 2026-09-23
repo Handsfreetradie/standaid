@@ -52,7 +52,9 @@ export default function SwitchboardLegendPreview({ open, onOpenChange, plan }: S
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const codes = buildFittingCodes(fittings);
-  const unassigned = fittings.filter((f) => !f.circuit_id);
+  // Sanitary fixtures (bath/shower/basin) are a Cl 6.2 zone reference on the
+  // plan, not an electrical point — never a real "unassigned circuit" gap.
+  const unassigned = fittings.filter((f) => !f.circuit_id && f.category !== "sanitary");
 
   // profiles gained these columns after the Supabase types were generated —
   // same narrow cast SetoutPlan.tsx uses for the export block.

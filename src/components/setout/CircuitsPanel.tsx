@@ -300,7 +300,9 @@ export default function CircuitsPanel({ planId }: CircuitsPanelProps) {
     }
   };
 
-  const unassignedFittings = fittings.filter((f) => !f.circuit_id);
+  // Sanitary fixtures (bath/shower/basin) are a Cl 6.2 zone reference, not an
+  // electrical point — never a real "unassigned circuit" gap.
+  const unassignedFittings = fittings.filter((f) => !f.circuit_id && f.category !== "sanitary");
   const fittingsByCircuit = (circuitId: string) => fittings.filter((f) => f.circuit_id === circuitId);
 
   if (isLoading) {

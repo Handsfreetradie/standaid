@@ -327,6 +327,11 @@ export const BASE_MATERIALS_BY_TYPE: Record<TableFittingType, BaseLine[]> = {
   ],
 
   // Network
+  // Sanitary — placed only as a Cl 6.2 wet-area zone reference on the plan;
+  // the fixture itself isn't electrical rough-in material.
+  bath: [],
+  shower: [],
+  basin: [],
   wifi_ap: [
     { item: "WiFi access point", qty: 1, unit: "ea" }, // TODO: confirm — often supplied by the network/IT installer, not the sparky
     { item: "Data outlet (PoE run to AP)", qty: 1, unit: "ea" },

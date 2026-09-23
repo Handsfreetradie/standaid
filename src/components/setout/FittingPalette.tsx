@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { useProfile } from "@/hooks/useData";
 import { useUpdateSetoutQuickPicks } from "@/hooks/useSetoutQuickPicks";
 import { cn } from "@/lib/utils";
-import { FITTING_LABELS, FITTING_SYMBOLS, type FittingType } from "@/components/setout/symbols";
+import { FITTING_LABELS, FITTING_SYMBOLS, type FittingType, type SetoutSymbolProps } from "@/components/setout/symbols";
 import { BEAM_ANGLE_OPTIONS, DEFAULT_BEAM_ANGLE, DEFAULT_MOUNTING_HEIGHT, defaultHeightForType } from "@/lib/setoutGeometry";
 import { fromMm, toMm } from "@/lib/units";
 import {
@@ -28,8 +28,49 @@ import {
 import { pathLength } from "@/lib/setoutPathGeometry";
 import { DEFAULT_EXTRUSION_STOCK_LENGTH_M, DEFAULT_LED_WATTS_PER_METRE } from "@/lib/setoutMaterials";
 import { CABLE_TYPES, type CableMaterial } from "@/components/tools/electricalData";
+import { isSanitaryFittingType, DEFAULT_SANITARY_FOOTPRINT_MM, type SanitaryFittingType } from "@/lib/setoutWetZones";
 
-const FITTING_TYPES = Object.keys(FITTING_SYMBOLS) as FittingType[];
+// Bath/shower/basin aren't in the shared FittingType union yet (see the
+// comment on CATEGORY_FOR_TYPE in setoutTypes.ts) — cast once here rather
+// than scattering `as FittingType` through this file. They flow through the
+// exact same selection/placement/creation path as every real FittingType
+// from here on.
+const SANITARY_TYPES_AS_FITTING_TYPE = ["bath", "shower", "basin"] as unknown as FittingType[];
+
+// Simple to-scale rectangle glyph shown wherever a sanitary type has no real
+// FITTING_SYMBOLS entry (the palette list/dropdown/search) — the actual
+// on-plan footprint rendering lives in SetoutCanvas.tsx, this is just the
+// small icon-sized stand-in for list rows.
+function SanitaryGlyph({ size = 24, className, strokeWidth = 1.5 }: SetoutSymbolProps) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <rect x="3" y="6" width="18" height="12" rx="2" />
+      <path d="M7 6v-1a2 2 0 0 1 4 0v1" />
+    </svg>
+  );
+}
+
+const SANITARY_LABELS: Record<SanitaryFittingType, string> = { bath: "Bath", shower: "Shower", basin: "Basin" };
+
+// FITTING_SYMBOLS/FITTING_LABELS are keyed by the real FittingType union and
+// don't have entries for bath/shower/basin — these fall back to the
+// sanitary-only lookups above rather than throwing on an undefined icon.
+function iconFor(type: FittingType): React.ComponentType<SetoutSymbolProps> {
+  return FITTING_SYMBOLS[type] ?? SanitaryGlyph;
+}
+function labelFor(type: FittingType): string {
+  return FITTING_LABELS[type] ?? SANITARY_LABELS[type as unknown as SanitaryFittingType] ?? type;
+}
+// Takes a plain FittingType (never the narrowed-to-`never` type TS infers
+// for `selectedFitting.type` inside an `isSanitaryFittingType(...)` guard,
+// since FittingType and SanitaryFittingType are disjoint unions) — routing
+// through a function parameter sidesteps that narrowing, since `never` is
+// assignable to any parameter type.
+function sanitaryFootprintDefaults(type: FittingType) {
+  return DEFAULT_SANITARY_FOOTPRINT_MM[type as unknown as SanitaryFittingType];
+}
+
+const FITTING_TYPES = [...(Object.keys(FITTING_SYMBOLS) as FittingType[]), ...SANITARY_TYPES_AS_FITTING_TYPE];
 const TYPES_BY_CATEGORY = FITTING_CATEGORY_ORDER.map((category) => ({
   category,
   types: FITTING_TYPES.filter((type) => CATEGORY_FOR_TYPE[type] === category),
@@ -323,7 +364,7 @@ const FittingPalette = ({
   const filteredTypesByCategory = typeSearchQuery
     ? TYPES_BY_CATEGORY.map(({ category, types }) => ({
         category,
-        types: types.filter((type) => FITTING_LABELS[type].toLowerCase().includes(typeSearchQuery)),
+        types: types.filter((type) => labelFor(type).toLowerCase().includes(typeSearchQuery)),
       })).filter((group) => group.types.length > 0)
     : TYPES_BY_CATEGORY;
 
@@ -966,6 +1007,49 @@ const FittingPalette = ({
             </div>
           )}
 
+          {selectedFitting && isSanitaryFittingType(selectedFitting.type) && onUpdateSpecs && (
+            <div className="border-t border-destructive/10 pt-2 space-y-2">
+              <p className="text-[11px] font-medium text-muted-foreground">Footprint (mm) — draws to scale, rotate with the button above</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <p className="text-[10px] text-muted-foreground mb-0.5">Width</p>
+                  <DraftNumberInput
+                    key={`sanitary-w-${selectedFitting.id}-${selectedFitting.specs.footprintWidthMm ?? sanitaryFootprintDefaults(selectedFitting.type).widthMm}`}
+                    type="number"
+                    inputMode="decimal"
+                    min="1"
+                    step="10"
+                    className="h-8 text-xs"
+                    initialValue={selectedFitting.specs.footprintWidthMm ?? sanitaryFootprintDefaults(selectedFitting.type).widthMm}
+                    onCommit={(value) =>
+                      onUpdateSpecs({ ...selectedFitting.specs, footprintWidthMm: value > 0 ? value : sanitaryFootprintDefaults(selectedFitting.type).widthMm })
+                    }
+                  />
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground mb-0.5">Depth</p>
+                  <DraftNumberInput
+                    key={`sanitary-d-${selectedFitting.id}-${selectedFitting.specs.footprintDepthMm ?? sanitaryFootprintDefaults(selectedFitting.type).depthMm}`}
+                    type="number"
+                    inputMode="decimal"
+                    min="1"
+                    step="10"
+                    className="h-8 text-xs"
+                    initialValue={selectedFitting.specs.footprintDepthMm ?? sanitaryFootprintDefaults(selectedFitting.type).depthMm}
+                    onCommit={(value) =>
+                      onUpdateSpecs({ ...selectedFitting.specs, footprintDepthMm: value > 0 ? value : sanitaryFootprintDefaults(selectedFitting.type).depthMm })
+                    }
+                  />
+                </div>
+              </div>
+              {(selectedFitting.type as unknown as string) !== "basin" && (
+                <p className="text-[10px] text-muted-foreground">
+                  Draws its AS/NZS 3000 Cl 6.2 wet-area zones from this footprint — see the "Wet-area zones" layer. Verify zone boundaries against the standard before relying on them.
+                </p>
+              )}
+            </div>
+          )}
+
           {selectedFitting?.measurement_lock && onUpdateMeasurementLock && (
             <div className="space-y-2 border-t border-destructive/10 pt-2">
               <p className="text-[11px] font-medium text-muted-foreground">
@@ -1159,7 +1243,17 @@ const FittingPalette = ({
             // pick would still carry the twin spec across silently. A plain
             // GPO pick still defaults to a double, matching the quick pick —
             // a single is one tap away in the spec editor below instead.
-            onSelectPreset?.(value as FittingType, value === "gpo" ? { count: 2 } : {});
+            // A sanitary pick (bath/shower/basin) seeds its default
+            // real-world footprint the same way, so it doesn't land with no
+            // size at all — see DEFAULT_SANITARY_FOOTPRINT_MM.
+            onSelectPreset?.(
+              value as FittingType,
+              value === "gpo"
+                ? { count: 2 }
+                : isSanitaryFittingType(value)
+                  ? { footprintWidthMm: DEFAULT_SANITARY_FOOTPRINT_MM[value].widthMm, footprintDepthMm: DEFAULT_SANITARY_FOOTPRINT_MM[value].depthMm }
+                  : {}
+            );
           }}
         >
           <SelectTrigger className="h-11 flex-1">
@@ -1167,10 +1261,10 @@ const FittingPalette = ({
               {selectedType && (
                 <span className="flex items-center gap-2">
                   {(() => {
-                    const Icon = FITTING_SYMBOLS[selectedType];
+                    const Icon = iconFor(selectedType);
                     return <Icon size={16} className="text-primary flex-shrink-0" strokeWidth={1.5} />;
                   })()}
-                  {FITTING_LABELS[selectedType]}
+                  {labelFor(selectedType)}
                 </span>
               )}
             </SelectValue>
@@ -1183,12 +1277,12 @@ const FittingPalette = ({
                 <SelectGroup key={category}>
                   <SelectLabel>{LAYER_LABELS[category]}</SelectLabel>
                   {types.map((type) => {
-                    const Icon = FITTING_SYMBOLS[type];
+                    const Icon = iconFor(type);
                     return (
                       <SelectItem key={type} value={type}>
                         <span className="flex items-center gap-2">
                           <Icon size={16} className="text-foreground flex-shrink-0" strokeWidth={1.5} />
-                          {FITTING_LABELS[type]}
+                          {labelFor(type)}
                         </span>
                       </SelectItem>
                     );

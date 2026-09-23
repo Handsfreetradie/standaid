@@ -207,6 +207,11 @@ const CODE_PREFIX: Record<FittingType, string> = {
   underfloor_heating_stat: "UFH",
   // Network
   wifi_ap: "AP",
+  // Sanitary — not electrical points, never actually numbered (see
+  // buildFittingCodes below); entries exist only so this map stays exhaustive.
+  bath: "BATH",
+  shower: "SHR",
+  basin: "BSN",
 };
 
 // Numbers fittings per-type in array order, e.g. first downlight = "DL1".
@@ -217,6 +222,10 @@ export function buildFittingCodes(fittings: SetoutFitting[]): Map<string, string
   const counters: Partial<Record<FittingType, number>> = {};
   const codes = new Map<string, string>();
   for (const f of fittings) {
+    // Sanitary fixtures (bath/shower/basin) are a Cl 6.2 zone reference, not
+    // an electrical point — they never get a switchboard legend code and are
+    // excluded from the unassigned list (see SwitchboardLegendPreview.tsx).
+    if (f.category === "sanitary") continue;
     const n = (counters[f.type] ?? 0) + 1;
     counters[f.type] = n;
     codes.set(f.id, `${CODE_PREFIX[f.type]}${n}`);

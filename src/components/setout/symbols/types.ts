@@ -64,4 +64,8 @@ export type FittingType =
   | "heated_towel_rail"
   | "underfloor_heating_stat"
   // Network
-  | "wifi_ap";
+  | "wifi_ap"
+  // Sanitary (wet-area zone reference fittings — AS/NZS 3000 Cl 6.2)
+  | "bath"
+  | "shower"
+  | "basin";
