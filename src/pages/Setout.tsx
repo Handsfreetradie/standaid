@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, ChevronRight, Loader2, Trash2, FileImage, PencilRuler, Zap } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ type ViewState = { kind: "list" } | { kind: "create" } | { kind: "setup"; plan: 
 
 const Setout = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { data: plans, isLoading } = useSetoutPlans();
   const { data: primaryCanvases } = usePrimarySetoutCanvases();
   const createPlan = useCreateSetoutPlan();
@@ -25,6 +26,17 @@ const Setout = () => {
   const [jobReference, setJobReference] = useState("");
   const [sourceType, setSourceType] = useState<PlanSourceType>("draw");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Deep-linked here from another app (e.g. "Open in StandAId" on a job) with
+  // ?jobReference=<value> — prefill and jump straight to the create form.
+  useEffect(() => {
+    const ref = searchParams.get("jobReference");
+    if (ref) {
+      setJobReference(ref);
+      setView({ kind: "create" });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleCreate = async () => {
     if (!name.trim()) return;
