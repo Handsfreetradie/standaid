@@ -1252,7 +1252,7 @@ export default function SetoutCanvas({
   const switchLinks = useMemo(() => {
     if (layerVisibility && !layerVisibility.switches) return [];
     const switches = fittings.filter((f) => f.type === "switch");
-    const links: { key: string; switchPos: Point; targetPos: Point; active: boolean; wayCount: number }[] = [];
+    const links: { key: string; switchPos: Point; targetPos: Point; active: boolean; wayCount: number; fromId: string; targetId: string }[] = [];
     for (const sw of switches) {
       const swPos = dragPreview?.id === sw.id ? dragPreview.position : sw.position;
       const gangs = gangsFor(sw);
@@ -1271,6 +1271,8 @@ export default function SetoutCanvas({
             targetPos,
             active: sw.id === linkActiveSwitchId && gangIndex === linkActiveGangIndex,
             wayCount: wayCountForTarget(targetId, switches),
+            fromId,
+            targetId,
           });
           fromPos = targetPos;
           fromId = targetId;
@@ -1331,7 +1333,7 @@ export default function SetoutCanvas({
   }, [mode, linkActiveSwitchId, linkActiveGangIndex, linkActiveCabinetId, selectedFittingId, fittings]);
 
   const measurementLines = useMemo(() => {
-    if (!layerVisibility?.measurements) return [];
+    if (!layerVisibility?.measurements && !selectedFittingId) return [];
     const wallById = new Map(walls.map((w) => [w.id, w]));
     const fittingById = new Map(fittings.map((f) => [f.id, f]));
     const openingById = new Map(openings?.map((o) => [o.id, o]) ?? []);
@@ -1352,6 +1354,11 @@ export default function SetoutCanvas({
     // with nothing visibly attached to it.
     for (const f of visibleFittings) {
       if (!f.measurement_lock) continue;
+      // With the Measurements layer off, a dense job stays decluttered by
+      // default — but selecting one fitting still surfaces its own
+      // distances rather than showing nothing at all. Toggling the layer
+      // back on is still how you see every fitting's measurement at once.
+      if (!layerVisibility?.measurements && f.id !== selectedFittingId) continue;
       const dragging = dragPreview?.id === f.id;
       const pos = dragging ? dragPreview.position : f.position;
       // While dragging, show what the measurement WILL be at the position
@@ -1393,7 +1400,7 @@ export default function SetoutCanvas({
       }
     }
     return lines;
-  }, [visibleFittings, walls, openings, layerVisibility?.measurements, dragPreview, measurementPreviewFor, wallThickness]);
+  }, [visibleFittings, walls, openings, layerVisibility?.measurements, selectedFittingId, dragPreview, measurementPreviewFor, wallThickness]);
 
   /**
    * Where each measurement's label goes, nudged clear of the others.
@@ -1912,8 +1919,14 @@ export default function SetoutCanvas({
               // highlightSwitchLinks is the "check the wiring" toggle — every
               // run shows in red (the same styling the actively-edited gang
               // already gets), not just the one gang is currently being
-              // worked on.
-              const highlighted = link.active || highlightSwitchLinks;
+              // worked on. selectionGroupIds covers the plain "select a
+              // light or switch" case too — both ends of this link being in
+              // that set means it's part of the run the user just tapped,
+              // so its wire should stand out the same way the fitting icons
+              // already do, not just while the dedicated link-switches flow
+              // is active.
+              const inSelectedRun = selectionGroupIds.has(link.fromId) && selectionGroupIds.has(link.targetId);
+              const highlighted = link.active || highlightSwitchLinks || inSelectedRun;
               return (
                 <g key={link.key}>
                   <path
