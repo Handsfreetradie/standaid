@@ -96,6 +96,7 @@ export function useCreateSetoutPhotoPoint(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "photo_point", "create"],
     mutationFn: async (input: { canvas_id: string; position: Point; storage_path: string; photo_type?: PhotoPointType }) => {
       const { data, error } = await sb
         .from("setout_photo_points")
@@ -111,7 +112,37 @@ export function useCreateSetoutPhotoPoint(planId: string) {
       if (error) throw error;
       return data as SetoutPhotoPoint;
     },
-    onSuccess: () => {
+    // Optimistic create: build a full row client-side (temp id) so the pin
+    // shows up on the plan immediately, whether or not the tradie has
+    // signal. onSuccess swaps the temp row for the server-confirmed one.
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_photo_points", planId] });
+      const previousPhotoPoints = queryClient.getQueryData<SetoutPhotoPoint[]>(["setout_photo_points", planId]);
+      const optimisticId = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const optimisticPhotoPoint: SetoutPhotoPoint = {
+        id: optimisticId,
+        plan_id: planId,
+        canvas_id: input.canvas_id,
+        position: input.position,
+        storage_path: input.storage_path,
+        direction_degrees: null,
+        photo_type: input.photo_type ?? "flat",
+        created_at: now,
+        updated_at: now,
+      };
+      queryClient.setQueryData<SetoutPhotoPoint[]>(["setout_photo_points", planId], (old) => [...(old ?? []), optimisticPhotoPoint]);
+      return { previousPhotoPoints, optimisticId };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previousPhotoPoints) {
+        queryClient.setQueryData(["setout_photo_points", planId], context.previousPhotoPoints);
+      }
+    },
+    onSuccess: (data, _input, context) => {
+      queryClient.setQueryData<SetoutPhotoPoint[]>(["setout_photo_points", planId], (old) =>
+        old?.map((p) => (p.id === context?.optimisticId ? data : p))
+      );
       queryClient.invalidateQueries({ queryKey: ["setout_photo_points", planId] });
     },
   });
@@ -121,6 +152,7 @@ export function useUpdateSetoutPhotoPointDirection(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "photo_point", "update_direction"],
     mutationFn: async (input: { photoPointId: string; direction_degrees: number | null }) => {
       const { error } = await sb
         .from("setout_photo_points")
@@ -128,7 +160,20 @@ export function useUpdateSetoutPhotoPointDirection(planId: string) {
         .eq("id", input.photoPointId);
       if (error) throw error;
     },
-    onSuccess: () => {
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_photo_points", planId] });
+      const previousPhotoPoints = queryClient.getQueryData<SetoutPhotoPoint[]>(["setout_photo_points", planId]);
+      queryClient.setQueryData<SetoutPhotoPoint[]>(["setout_photo_points", planId], (old) =>
+        old?.map((p) => (p.id === input.photoPointId ? { ...p, direction_degrees: input.direction_degrees } : p))
+      );
+      return { previousPhotoPoints };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previousPhotoPoints) {
+        queryClient.setQueryData(["setout_photo_points", planId], context.previousPhotoPoints);
+      }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_photo_points", planId] });
     },
   });
@@ -142,10 +187,24 @@ export function useDeleteSetoutPhotoPoint(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "photo_point", "delete"],
     mutationFn: async (photoPoint: SetoutPhotoPoint) => {
       const { error } = await sb.from("setout_photo_points").delete().eq("id", photoPoint.id);
       if (error) throw error;
       await supabase.storage.from("setout-photo-points").remove([photoPoint.storage_path]);
+    },
+    onMutate: async (photoPoint) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_photo_points", planId] });
+      const previousPhotoPoints = queryClient.getQueryData<SetoutPhotoPoint[]>(["setout_photo_points", planId]);
+      queryClient.setQueryData<SetoutPhotoPoint[]>(["setout_photo_points", planId], (old) =>
+        old?.filter((p) => p.id !== photoPoint.id)
+      );
+      return { previousPhotoPoints };
+    },
+    onError: (_err, _photoPoint, context) => {
+      if (context?.previousPhotoPoints) {
+        queryClient.setQueryData(["setout_photo_points", planId], context.previousPhotoPoints);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_photo_points", planId] });
@@ -164,6 +223,7 @@ export function useCreateSetoutPlan() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "plan", "create"],
     mutationFn: async (input: { name: string; job_reference?: string; source_type: PlanSourceType }) => {
       if (!user) throw new Error("Not signed in");
       const { data: plan, error } = await sb
@@ -200,7 +260,52 @@ export function useCreateSetoutPlan() {
       }
       return { plan: plan as SetoutPlan, canvas };
     },
-    onSuccess: () => {
+    // Optimistic create: build a full SetoutPlan row client-side (temp id,
+    // every job-wide field the DB would otherwise default) so a new job
+    // shows up in the list immediately even with no signal. Note: the
+    // canvas half of this mutation has no cache to update optimistically
+    // (canvases aren't read through this file's hooks), so only the plan
+    // row is optimistic here.
+    onMutate: async (input) => {
+      if (!user) return {};
+      await queryClient.cancelQueries({ queryKey: ["setout_plans", user.id] });
+      const previousPlans = queryClient.getQueryData<SetoutPlan[]>(["setout_plans", user.id]);
+      const optimisticId = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const optimisticPlan: SetoutPlan = {
+        id: optimisticId,
+        user_id: user.id,
+        name: input.name,
+        job_reference: input.job_reference || null,
+        source_type: input.source_type,
+        scale_calibration: null,
+        walls: [],
+        openings: [],
+        layer_visibility: DEFAULT_LAYER_VISIBILITY,
+        wall_thickness: DEFAULT_WALL_THICKNESS,
+        background_image_path: null,
+        source_file_path: null,
+        source_file_content_type: null,
+        background_image_content_type: null,
+        plan_defaults: {},
+        export_token: crypto.randomUUID().replace(/-/g, ""),
+        created_at: now,
+        updated_at: now,
+      };
+      queryClient.setQueryData<SetoutPlan[]>(["setout_plans", user.id], (old) => [optimisticPlan, ...(old ?? [])]);
+      return { previousPlans, optimisticId };
+    },
+    onError: (_err, _input, context) => {
+      if (user && context?.previousPlans) {
+        queryClient.setQueryData(["setout_plans", user.id], context.previousPlans);
+      }
+    },
+    onSuccess: (data, _input, context) => {
+      if (user) {
+        queryClient.setQueryData<SetoutPlan[]>(["setout_plans", user.id], (old) =>
+          old?.map((p) => (p.id === context?.optimisticId ? data.plan : p))
+        );
+      }
       queryClient.invalidateQueries({ queryKey: ["setout_plans"] });
     },
   });
@@ -210,9 +315,11 @@ export function useCreateSetoutPlan() {
 // ever read when a fitting is placed — see PlanDefaults — so saving these
 // never has to touch the fittings already on the plan.
 export function useUpdateSetoutPlanDefaults(planId: string) {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "plan", "update_defaults"],
     mutationFn: async (planDefaults: PlanDefaults) => {
       const { error } = await sb
         .from("setout_plans")
@@ -220,7 +327,26 @@ export function useUpdateSetoutPlanDefaults(planId: string) {
         .eq("id", planId);
       if (error) throw error;
     },
-    onSuccess: () => {
+    onMutate: async (planDefaults) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_plan", planId] });
+      await queryClient.cancelQueries({ queryKey: ["setout_plans", user?.id] });
+      const previousPlan = queryClient.getQueryData<SetoutPlan>(["setout_plan", planId]);
+      const previousPlans = queryClient.getQueryData<SetoutPlan[]>(["setout_plans", user?.id]);
+      queryClient.setQueryData<SetoutPlan>(["setout_plan", planId], (old) => (old ? { ...old, plan_defaults: planDefaults } : old));
+      queryClient.setQueryData<SetoutPlan[]>(["setout_plans", user?.id], (old) =>
+        old?.map((p) => (p.id === planId ? { ...p, plan_defaults: planDefaults } : p))
+      );
+      return { previousPlan, previousPlans };
+    },
+    onError: (_err, _planDefaults, context) => {
+      if (context?.previousPlan) {
+        queryClient.setQueryData(["setout_plan", planId], context.previousPlan);
+      }
+      if (context?.previousPlans) {
+        queryClient.setQueryData(["setout_plans", user?.id], context.previousPlans);
+      }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_plan", planId] });
       queryClient.invalidateQueries({ queryKey: ["setout_plans"] });
     },
@@ -239,6 +365,7 @@ export function useRotateSetoutExportToken(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "plan", "rotate_export_token"],
     mutationFn: async (currentExportToken: string | null | undefined) => {
       if (!user) throw new Error("Not signed in");
       if (currentExportToken) {
@@ -262,6 +389,32 @@ export function useRotateSetoutExportToken(planId: string) {
       if (error) throw error;
       return data as SetoutPlan;
     },
+    // Optimistic: generate our own placeholder token (same 32-hex shape as
+    // the real one) so the share dialog's link/QR updates immediately;
+    // onSuccess below overwrites it with the server-confirmed token once
+    // the round trip actually completes.
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ["setout_plan", planId] });
+      await queryClient.cancelQueries({ queryKey: ["setout_plans", user?.id] });
+      const previousPlan = queryClient.getQueryData<SetoutPlan>(["setout_plan", planId]);
+      const previousPlans = queryClient.getQueryData<SetoutPlan[]>(["setout_plans", user?.id]);
+      const bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      const optimisticToken = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+      queryClient.setQueryData<SetoutPlan>(["setout_plan", planId], (old) => (old ? { ...old, export_token: optimisticToken } : old));
+      queryClient.setQueryData<SetoutPlan[]>(["setout_plans", user?.id], (old) =>
+        old?.map((p) => (p.id === planId ? { ...p, export_token: optimisticToken } : p))
+      );
+      return { previousPlan, previousPlans };
+    },
+    onError: (_err, _currentExportToken, context) => {
+      if (context?.previousPlan) {
+        queryClient.setQueryData(["setout_plan", planId], context.previousPlan);
+      }
+      if (context?.previousPlans) {
+        queryClient.setQueryData(["setout_plans", user?.id], context.previousPlans);
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_plan", planId] });
       queryClient.invalidateQueries({ queryKey: ["setout_plans"] });
@@ -273,6 +426,7 @@ export function useUpdateSetoutFittingSpecs(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "fitting", "update_specs"],
     mutationFn: async (input: { fittingId: string; specs: FittingSpecs }) => {
       const { error } = await sb
         .from("setout_fittings")
@@ -280,7 +434,20 @@ export function useUpdateSetoutFittingSpecs(planId: string) {
         .eq("id", input.fittingId);
       if (error) throw error;
     },
-    onSuccess: () => {
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_fittings", planId] });
+      const previousFittings = queryClient.getQueryData<SetoutFitting[]>(["setout_fittings", planId]);
+      queryClient.setQueryData<SetoutFitting[]>(["setout_fittings", planId], (old) =>
+        old?.map((f) => (f.id === input.fittingId ? { ...f, specs: input.specs } : f))
+      );
+      return { previousFittings };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previousFittings) {
+        queryClient.setQueryData(["setout_fittings", planId], context.previousFittings);
+      }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
     },
   });
@@ -344,6 +511,7 @@ export function useDeleteSetoutPlan() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "plan", "delete"],
     mutationFn: async (planId: string) => {
       if (user) {
         await cleanupSetoutPlanStorage(planId, user.id);
@@ -351,6 +519,17 @@ export function useDeleteSetoutPlan() {
       }
       const { error } = await sb.from("setout_plans").delete().eq("id", planId);
       if (error) throw error;
+    },
+    onMutate: async (planId) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_plans", user?.id] });
+      const previousPlans = queryClient.getQueryData<SetoutPlan[]>(["setout_plans", user?.id]);
+      queryClient.setQueryData<SetoutPlan[]>(["setout_plans", user?.id], (old) => old?.filter((p) => p.id !== planId));
+      return { previousPlans };
+    },
+    onError: (_err, _planId, context) => {
+      if (context?.previousPlans) {
+        queryClient.setQueryData(["setout_plans", user?.id], context.previousPlans);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_plans"] });
@@ -362,6 +541,7 @@ export function useCreateSetoutFitting(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "fitting", "create"],
     mutationFn: async (input: { canvas_id: string; type: FittingType; position: Point; measurement_lock?: MeasurementLock | null; specs?: FittingSpecs }) => {
       const category: FittingCategory = CATEGORY_FOR_TYPE[input.type];
       const { data, error } = await sb
@@ -380,7 +560,41 @@ export function useCreateSetoutFitting(planId: string) {
       if (error) throw error;
       return data as SetoutFitting;
     },
-    onSuccess: () => {
+    // Optimistic create: a placed fitting should appear on the canvas
+    // instantly. Temp id + every DB-defaulted field filled in client-side;
+    // onSuccess swaps it for the server-confirmed row.
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_fittings", planId] });
+      const previousFittings = queryClient.getQueryData<SetoutFitting[]>(["setout_fittings", planId]);
+      const optimisticId = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const optimisticFitting: SetoutFitting = {
+        id: optimisticId,
+        plan_id: planId,
+        canvas_id: input.canvas_id,
+        type: input.type,
+        position: input.position,
+        category: CATEGORY_FOR_TYPE[input.type],
+        specs: input.specs ?? {},
+        measurement_lock: input.measurement_lock ?? null,
+        status: "placed",
+        circuit_id: null,
+        linked_to: [],
+        created_at: now,
+        updated_at: now,
+      };
+      queryClient.setQueryData<SetoutFitting[]>(["setout_fittings", planId], (old) => [...(old ?? []), optimisticFitting]);
+      return { previousFittings, optimisticId };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previousFittings) {
+        queryClient.setQueryData(["setout_fittings", planId], context.previousFittings);
+      }
+    },
+    onSuccess: (data, _input, context) => {
+      queryClient.setQueryData<SetoutFitting[]>(["setout_fittings", planId], (old) =>
+        old?.map((f) => (f.id === context?.optimisticId ? data : f))
+      );
       queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
     },
   });
@@ -394,6 +608,7 @@ export function useBulkCreateSetoutFittings(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "fitting", "bulk_create"],
     mutationFn: async (inputs: { canvas_id: string; type: FittingType; position: Point; measurement_lock?: MeasurementLock | null; specs?: FittingSpecs }[]) => {
       if (inputs.length === 0) return [] as SetoutFitting[];
       const rows = inputs.map((input) => ({
@@ -405,11 +620,44 @@ export function useBulkCreateSetoutFittings(planId: string) {
         specs: input.specs ?? {},
         measurement_lock: input.measurement_lock ?? null,
       }));
+      // A single multi-row insert — Postgres/PostgREST return the inserted
+      // rows in the same order as the VALUES list, so onSuccess below can
+      // zip the returned rows back onto the optimistic temp ids positionally.
       const { data, error } = await sb.from("setout_fittings").insert(rows).select();
       if (error) throw error;
       return data as SetoutFitting[];
     },
-    onSuccess: () => {
+    onMutate: async (inputs) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_fittings", planId] });
+      const previousFittings = queryClient.getQueryData<SetoutFitting[]>(["setout_fittings", planId]);
+      const now = new Date().toISOString();
+      const optimisticFittings: SetoutFitting[] = inputs.map((input) => ({
+        id: crypto.randomUUID(),
+        plan_id: planId,
+        canvas_id: input.canvas_id,
+        type: input.type,
+        position: input.position,
+        category: CATEGORY_FOR_TYPE[input.type],
+        specs: input.specs ?? {},
+        measurement_lock: input.measurement_lock ?? null,
+        status: "placed",
+        circuit_id: null,
+        linked_to: [],
+        created_at: now,
+        updated_at: now,
+      }));
+      queryClient.setQueryData<SetoutFitting[]>(["setout_fittings", planId], (old) => [...(old ?? []), ...optimisticFittings]);
+      return { previousFittings, optimisticIds: optimisticFittings.map((f) => f.id) };
+    },
+    onError: (_err, _inputs, context) => {
+      if (context?.previousFittings) {
+        queryClient.setQueryData(["setout_fittings", planId], context.previousFittings);
+      }
+    },
+    onSuccess: (data, _inputs, context) => {
+      if (!context) return;
+      const realById = new Map(context.optimisticIds.map((id, i) => [id, data[i]]));
+      queryClient.setQueryData<SetoutFitting[]>(["setout_fittings", planId], (old) => old?.map((f) => realById.get(f.id) ?? f));
       queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
     },
   });
@@ -423,6 +671,7 @@ export function useRestoreSetoutFitting(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "fitting", "restore"],
     mutationFn: async (fitting: SetoutFitting) => {
       const { error } = await sb.from("setout_fittings").insert({
         id: fitting.id,
@@ -439,6 +688,19 @@ export function useRestoreSetoutFitting(planId: string) {
       });
       if (error) throw error;
     },
+    // Optimistic create, but no id generation — the fitting being restored
+    // already carries its original id/fields, so that's the "optimistic" row.
+    onMutate: async (fitting) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_fittings", planId] });
+      const previousFittings = queryClient.getQueryData<SetoutFitting[]>(["setout_fittings", planId]);
+      queryClient.setQueryData<SetoutFitting[]>(["setout_fittings", planId], (old) => [...(old ?? []), fitting]);
+      return { previousFittings };
+    },
+    onError: (_err, _fitting, context) => {
+      if (context?.previousFittings) {
+        queryClient.setQueryData(["setout_fittings", planId], context.previousFittings);
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
     },
@@ -453,6 +715,7 @@ export function useBulkRestoreSetoutFittings(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "fitting", "bulk_restore"],
     mutationFn: async (fittings: SetoutFitting[]) => {
       if (fittings.length === 0) return;
       const rows = fittings.map((fitting) => ({
@@ -471,6 +734,19 @@ export function useBulkRestoreSetoutFittings(planId: string) {
       const { error } = await sb.from("setout_fittings").insert(rows);
       if (error) throw error;
     },
+    // Same as useRestoreSetoutFitting — the fittings being restored already
+    // carry their original ids/fields, so they ARE the optimistic rows.
+    onMutate: async (fittings) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_fittings", planId] });
+      const previousFittings = queryClient.getQueryData<SetoutFitting[]>(["setout_fittings", planId]);
+      queryClient.setQueryData<SetoutFitting[]>(["setout_fittings", planId], (old) => [...(old ?? []), ...fittings]);
+      return { previousFittings };
+    },
+    onError: (_err, _fittings, context) => {
+      if (context?.previousFittings) {
+        queryClient.setQueryData(["setout_fittings", planId], context.previousFittings);
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
     },
@@ -488,6 +764,7 @@ export function useToggleGangLink(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "fitting", "toggle_gang_link"],
     mutationFn: async (input: { switchFitting: SetoutFitting; gangIndex: number; targetId: string }) => {
       const gangs = gangsFor(input.switchFitting).map((gang) => [...gang]);
       while (gangs.length <= input.gangIndex) gangs.push([]);
@@ -498,6 +775,23 @@ export function useToggleGangLink(planId: string) {
         .update({ specs: { ...input.switchFitting.specs, gangs } })
         .eq("id", input.switchFitting.id);
       if (error) throw error;
+    },
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_fittings", planId] });
+      const previousFittings = queryClient.getQueryData<SetoutFitting[]>(["setout_fittings", planId]);
+      const gangs = gangsFor(input.switchFitting).map((gang) => [...gang]);
+      while (gangs.length <= input.gangIndex) gangs.push([]);
+      const gang = gangs[input.gangIndex];
+      gangs[input.gangIndex] = gang.includes(input.targetId) ? gang.filter((id) => id !== input.targetId) : [...gang, input.targetId];
+      queryClient.setQueryData<SetoutFitting[]>(["setout_fittings", planId], (old) =>
+        old?.map((f) => (f.id === input.switchFitting.id ? { ...f, specs: { ...f.specs, gangs } } : f))
+      );
+      return { previousFittings };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previousFittings) {
+        queryClient.setQueryData(["setout_fittings", planId], context.previousFittings);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
@@ -512,6 +806,7 @@ export function useAddSwitchGang(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "fitting", "add_switch_gang"],
     mutationFn: async (switchFitting: SetoutFitting) => {
       const gangs = [...gangsFor(switchFitting), []];
       const { error } = await sb
@@ -519,6 +814,23 @@ export function useAddSwitchGang(planId: string) {
         .update({ specs: { ...switchFitting.specs, gangs, count: gangs.length } })
         .eq("id", switchFitting.id);
       if (error) throw error;
+    },
+    onMutate: async (switchFitting) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_fittings", planId] });
+      const previousFittings = queryClient.getQueryData<SetoutFitting[]>(["setout_fittings", planId]);
+      const gangs = [...gangsFor(switchFitting), []];
+      // count is typed as the discrete glyph count (1 | 2 | 4); gangs.length
+      // is a plain number here, same as the untyped Supabase update payload
+      // above — cast to line up with FittingSpecs for this typed cache write.
+      queryClient.setQueryData<SetoutFitting[]>(["setout_fittings", planId], (old) =>
+        old?.map((f) => (f.id === switchFitting.id ? { ...f, specs: { ...f.specs, gangs, count: gangs.length as 1 | 2 | 4 } } : f))
+      );
+      return { previousFittings };
+    },
+    onError: (_err, _switchFitting, context) => {
+      if (context?.previousFittings) {
+        queryClient.setQueryData(["setout_fittings", planId], context.previousFittings);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
@@ -532,6 +844,7 @@ export function useRemoveSwitchGang(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "fitting", "remove_switch_gang"],
     mutationFn: async (input: { switchFitting: SetoutFitting; gangIndex: number }) => {
       const gangs = gangsFor(input.switchFitting).filter((_, i) => i !== input.gangIndex);
       const { error } = await sb
@@ -539,6 +852,25 @@ export function useRemoveSwitchGang(planId: string) {
         .update({ specs: { ...input.switchFitting.specs, gangs, count: Math.max(1, gangs.length) } })
         .eq("id", input.switchFitting.id);
       if (error) throw error;
+    },
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_fittings", planId] });
+      const previousFittings = queryClient.getQueryData<SetoutFitting[]>(["setout_fittings", planId]);
+      const gangs = gangsFor(input.switchFitting).filter((_, i) => i !== input.gangIndex);
+      // Same cast as useAddSwitchGang's onMutate — count is 1 | 2 | 4.
+      queryClient.setQueryData<SetoutFitting[]>(["setout_fittings", planId], (old) =>
+        old?.map((f) =>
+          f.id === input.switchFitting.id
+            ? { ...f, specs: { ...f.specs, gangs, count: Math.max(1, gangs.length) as 1 | 2 | 4 } }
+            : f
+        )
+      );
+      return { previousFittings };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previousFittings) {
+        queryClient.setQueryData(["setout_fittings", planId], context.previousFittings);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
@@ -550,9 +882,23 @@ export function useUpdateSetoutFittingStatus(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "fitting", "update_status"],
     mutationFn: async (input: { fittingId: string; status: "placed" | "confirmed" }) => {
       const { error } = await sb.from("setout_fittings").update({ status: input.status }).eq("id", input.fittingId);
       if (error) throw error;
+    },
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_fittings", planId] });
+      const previousFittings = queryClient.getQueryData<SetoutFitting[]>(["setout_fittings", planId]);
+      queryClient.setQueryData<SetoutFitting[]>(["setout_fittings", planId], (old) =>
+        old?.map((f) => (f.id === input.fittingId ? { ...f, status: input.status } : f))
+      );
+      return { previousFittings };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previousFittings) {
+        queryClient.setQueryData(["setout_fittings", planId], context.previousFittings);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
@@ -615,12 +961,26 @@ export function useUpdateSetoutFittingMeasurementLock(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "fitting", "update_measurement_lock"],
     mutationFn: async (input: { fittingId: string; measurement_lock: MeasurementLock }) => {
       const { error } = await sb
         .from("setout_fittings")
         .update({ measurement_lock: input.measurement_lock })
         .eq("id", input.fittingId);
       if (error) throw error;
+    },
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_fittings", planId] });
+      const previousFittings = queryClient.getQueryData<SetoutFitting[]>(["setout_fittings", planId]);
+      queryClient.setQueryData<SetoutFitting[]>(["setout_fittings", planId], (old) =>
+        old?.map((f) => (f.id === input.fittingId ? { ...f, measurement_lock: input.measurement_lock } : f))
+      );
+      return { previousFittings };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previousFittings) {
+        queryClient.setQueryData(["setout_fittings", planId], context.previousFittings);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
@@ -681,10 +1041,22 @@ export function useDeleteSetoutFitting(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "fitting", "delete"],
     mutationFn: async (fittingId: string) => {
       const { error } = await sb.from("setout_fittings").delete().eq("id", fittingId);
       if (error) throw error;
       await pruneDeletedFittingReferences(planId, [fittingId], queryClient);
+    },
+    onMutate: async (fittingId) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_fittings", planId] });
+      const previousFittings = queryClient.getQueryData<SetoutFitting[]>(["setout_fittings", planId]);
+      queryClient.setQueryData<SetoutFitting[]>(["setout_fittings", planId], (old) => old?.filter((f) => f.id !== fittingId));
+      return { previousFittings };
+    },
+    onError: (_err, _fittingId, context) => {
+      if (context?.previousFittings) {
+        queryClient.setQueryData(["setout_fittings", planId], context.previousFittings);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
@@ -699,11 +1071,24 @@ export function useBulkDeleteSetoutFittings(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "fitting", "bulk_delete"],
     mutationFn: async (ids: string[]) => {
       if (ids.length === 0) return;
       const { error } = await sb.from("setout_fittings").delete().in("id", ids);
       if (error) throw error;
       await pruneDeletedFittingReferences(planId, ids, queryClient);
+    },
+    onMutate: async (ids) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_fittings", planId] });
+      const previousFittings = queryClient.getQueryData<SetoutFitting[]>(["setout_fittings", planId]);
+      const idSet = new Set(ids);
+      queryClient.setQueryData<SetoutFitting[]>(["setout_fittings", planId], (old) => old?.filter((f) => !idSet.has(f.id)));
+      return { previousFittings };
+    },
+    onError: (_err, _ids, context) => {
+      if (context?.previousFittings) {
+        queryClient.setQueryData(["setout_fittings", planId], context.previousFittings);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
@@ -717,10 +1102,25 @@ export function useBulkAssignSetoutFittingCircuit(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "fitting", "bulk_assign_circuit"],
     mutationFn: async (input: { ids: string[]; circuitId: string | null }) => {
       if (input.ids.length === 0) return;
       const { error } = await sb.from("setout_fittings").update({ circuit_id: input.circuitId }).in("id", input.ids);
       if (error) throw error;
+    },
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_fittings", planId] });
+      const previousFittings = queryClient.getQueryData<SetoutFitting[]>(["setout_fittings", planId]);
+      const idSet = new Set(input.ids);
+      queryClient.setQueryData<SetoutFitting[]>(["setout_fittings", planId], (old) =>
+        old?.map((f) => (idSet.has(f.id) ? { ...f, circuit_id: input.circuitId } : f))
+      );
+      return { previousFittings };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previousFittings) {
+        queryClient.setQueryData(["setout_fittings", planId], context.previousFittings);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
