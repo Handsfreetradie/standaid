@@ -442,12 +442,13 @@ async function drawPlanPage(
   // just marks each point with a plain circle-and-cross rather than a
   // distinct shape per type (see the marker-drawing loop above).
   //
-  // Laid out in two columns rather than one — a job with a dozen-plus
-  // fitting types used to run the legend down the page and onto extra
-  // pages on its own; two columns roughly halves that. Left column fills
-  // first; once it runs out of room the right column picks up, and only
-  // once BOTH columns are full does a new page start (mirroring how a
-  // printed schedule reads: down, then across, then over the page).
+  // Laid out in two columns, BALANCED by total content height up front —
+  // not just split on page overflow. Most jobs' legends are well under a
+  // single page tall, so a fill-left-then-overflow-to-right approach never
+  // actually reaches the right column and still prints as one column; here
+  // the whole list is measured first and divided roughly in half between
+  // the two columns, with any leftover past a page's height rolling onto a
+  // fresh two-column page.
   const LEGEND_ICON_MM = 4;
   const LEGEND_ROW_H = 5.5;
   const LEGEND_CATEGORY_HEADING_H = 4.4;
@@ -455,70 +456,123 @@ async function drawPlanPage(
   const LEGEND_COL_GAP = 8;
   const LEGEND_COL_W = (CONTENT_W - LEGEND_COL_GAP) / 2;
   const legendColX = [MARGIN, MARGIN + LEGEND_COL_W + LEGEND_COL_GAP];
-  const legendTop = ly;
-  let col = 0;
-  let colY = [legendTop, legendTop];
 
-  const ensureLegendSpace = (needed: number) => {
-    if (colY[col] + needed > PAGE_H - MARGIN) {
-      if (col === 0) {
-        col = 1;
-      } else {
-        doc.addPage();
-        colY = [MARGIN, MARGIN];
-        col = 0;
-      }
+  type LegendEntry =
+    | { kind: "heading"; label: string; topGap: number; height: number }
+    | { kind: "row"; type: FittingType; items: SetoutFitting[]; height: number };
+
+  const legendEntries: LegendEntry[] = [];
+  let firstCategory = true;
+  for (const category of FITTING_CATEGORY_ORDER) {
+    const inGroup = fittings.filter((f) => CATEGORY_FOR_TYPE[f.type] === category);
+    if (inGroup.length === 0) continue;
+
+    const byType = new Map<FittingType, SetoutFitting[]>();
+    for (const f of inGroup) {
+      const list = byType.get(f.type) ?? [];
+      list.push(f);
+      byType.set(f.type, list);
     }
+
+    const topGap = firstCategory ? 0 : LEGEND_CATEGORY_GAP;
+    firstCategory = false;
+    legendEntries.push({ kind: "heading", label: LAYER_LABELS[category], topGap, height: topGap + LEGEND_CATEGORY_HEADING_H });
+    for (const [type, ofType] of byType) {
+      legendEntries.push({ kind: "row", type, items: ofType, height: LEGEND_ROW_H });
+    }
+  }
+
+  const drawLegendEntry = async (entry: LegendEntry, x: number, yTop: number) => {
+    if (entry.kind === "heading") {
+      const y = yTop + entry.topGap;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      doc.setTextColor(20);
+      doc.text(entry.label, x, y);
+      doc.setFont("helvetica", "normal");
+      return;
+    }
+    // Drawn upright and in a neutral colour regardless of how any particular
+    // instance sits on the plan or which circuit it's on — this row
+    // represents the type, not one specific fitting.
+    const representative = { ...entry.items[0], specs: { ...entry.items[0].specs, rotation: 0 } };
+    await drawFittingSymbol(
+      doc,
+      representative,
+      { x: x + 3 + LEGEND_ICON_MM / 2, y: yTop + LEGEND_ROW_H / 2 + 1 },
+      "#1a1a1a",
+      svg2pdf,
+      renderToStaticMarkup,
+    );
+    doc.setFontSize(7.5);
+    doc.setTextColor(60);
+    const count = entry.items.length;
+    doc.text(
+      `${FITTING_LABELS[entry.type]}${count > 1 ? ` (×${count})` : ""}`,
+      x + 3 + LEGEND_ICON_MM + 3,
+      yTop + LEGEND_ROW_H / 2 + 1,
+    );
   };
 
   if (fittings.length === 0) {
     doc.setTextColor(120);
-    doc.text("No fittings placed yet.", legendColX[col], colY[col]);
+    doc.text("No fittings placed yet.", MARGIN, ly);
   } else {
-    for (const category of FITTING_CATEGORY_ORDER) {
-      const inGroup = fittings.filter((f) => CATEGORY_FOR_TYPE[f.type] === category);
-      if (inGroup.length === 0) continue;
+    let idx = 0;
+    let pageTop = ly;
+    while (idx < legendEntries.length) {
+      const avail = PAGE_H - MARGIN - pageTop;
+      let remainingHeight = 0;
+      for (let j = idx; j < legendEntries.length; j++) remainingHeight += legendEntries[j].height;
+      const targetHalf = Math.min(remainingHeight / 2, avail);
 
-      const byType = new Map<FittingType, SetoutFitting[]>();
-      for (const f of inGroup) {
-        const list = byType.get(f.type) ?? [];
-        list.push(f);
-        byType.set(f.type, list);
+      // Fill the left column up to roughly half the remaining content (or
+      // the page bottom, whichever is smaller), then extend past that point
+      // rather than stop if doing so would otherwise strand a category
+      // heading as the last line in the column with none of its rows.
+      let col0End = idx;
+      let h0 = 0;
+      while (col0End < legendEntries.length) {
+        const e = legendEntries[col0End];
+        if (h0 > 0 && h0 + e.height > targetHalf) break;
+        h0 += e.height;
+        col0End++;
+      }
+      while (col0End < legendEntries.length && col0End > idx && legendEntries[col0End - 1].kind === "heading") {
+        h0 += legendEntries[col0End].height;
+        col0End++;
       }
 
-      ensureLegendSpace(LEGEND_CATEGORY_HEADING_H + LEGEND_ROW_H);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(7);
-      doc.setTextColor(20);
-      doc.text(LAYER_LABELS[category], legendColX[col], colY[col]);
-      doc.setFont("helvetica", "normal");
-      colY[col] += LEGEND_CATEGORY_HEADING_H;
-
-      for (const [type, ofType] of byType) {
-        ensureLegendSpace(LEGEND_ROW_H);
-        // Drawn upright and in a neutral colour regardless of how any
-        // particular instance sits on the plan or which circuit it's on —
-        // this row represents the type, not one specific fitting.
-        const representative = { ...ofType[0], specs: { ...ofType[0].specs, rotation: 0 } };
-        await drawFittingSymbol(
-          doc,
-          representative,
-          { x: legendColX[col] + 3 + LEGEND_ICON_MM / 2, y: colY[col] + LEGEND_ROW_H / 2 + 1 },
-          "#1a1a1a",
-          svg2pdf,
-          renderToStaticMarkup,
-        );
-        doc.setFontSize(7.5);
-        doc.setTextColor(60);
-        const count = ofType.length;
-        doc.text(
-          `${FITTING_LABELS[type]}${count > 1 ? ` (×${count})` : ""}`,
-          legendColX[col] + 3 + LEGEND_ICON_MM + 3,
-          colY[col] + LEGEND_ROW_H / 2 + 1,
-        );
-        colY[col] += LEGEND_ROW_H;
+      // Right column takes over from there, up to what's left on the page.
+      let col1End = col0End;
+      let h1 = 0;
+      while (col1End < legendEntries.length) {
+        const e = legendEntries[col1End];
+        if (h1 > 0 && h1 + e.height > avail) break;
+        h1 += e.height;
+        col1End++;
       }
-      colY[col] += LEGEND_CATEGORY_GAP;
+      while (col1End < legendEntries.length && col1End > col0End && legendEntries[col1End - 1].kind === "heading") {
+        h1 += legendEntries[col1End].height;
+        col1End++;
+      }
+
+      let y0 = pageTop;
+      for (let j = idx; j < col0End; j++) {
+        await drawLegendEntry(legendEntries[j], legendColX[0], y0);
+        y0 += legendEntries[j].height;
+      }
+      let y1 = pageTop;
+      for (let j = col0End; j < col1End; j++) {
+        await drawLegendEntry(legendEntries[j], legendColX[1], y1);
+        y1 += legendEntries[j].height;
+      }
+
+      idx = col1End;
+      if (idx < legendEntries.length) {
+        doc.addPage();
+        pageTop = MARGIN;
+      }
     }
   }
 }
