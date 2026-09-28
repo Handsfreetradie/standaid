@@ -441,19 +441,39 @@ async function drawPlanPage(
   // identical ones. Shows the real icon glyph, since the plan itself now
   // just marks each point with a plain circle-and-cross rather than a
   // distinct shape per type (see the marker-drawing loop above).
+  //
+  // Laid out in two columns rather than one — a job with a dozen-plus
+  // fitting types used to run the legend down the page and onto extra
+  // pages on its own; two columns roughly halves that. Left column fills
+  // first; once it runs out of room the right column picks up, and only
+  // once BOTH columns are full does a new page start (mirroring how a
+  // printed schedule reads: down, then across, then over the page).
+  const LEGEND_ICON_MM = 4;
+  const LEGEND_ROW_H = 5.5;
+  const LEGEND_CATEGORY_HEADING_H = 4.4;
+  const LEGEND_CATEGORY_GAP = 2;
+  const LEGEND_COL_GAP = 8;
+  const LEGEND_COL_W = (CONTENT_W - LEGEND_COL_GAP) / 2;
+  const legendColX = [MARGIN, MARGIN + LEGEND_COL_W + LEGEND_COL_GAP];
+  const legendTop = ly;
+  let col = 0;
+  let colY = [legendTop, legendTop];
+
   const ensureLegendSpace = (needed: number) => {
-    if (ly + needed > PAGE_H - MARGIN) {
-      doc.addPage();
-      ly = MARGIN;
+    if (colY[col] + needed > PAGE_H - MARGIN) {
+      if (col === 0) {
+        col = 1;
+      } else {
+        doc.addPage();
+        colY = [MARGIN, MARGIN];
+        col = 0;
+      }
     }
   };
 
-  const LEGEND_ICON_MM = 4;
-  const LEGEND_ROW_H = 5.5;
-
   if (fittings.length === 0) {
     doc.setTextColor(120);
-    doc.text("No fittings placed yet.", MARGIN, ly);
+    doc.text("No fittings placed yet.", legendColX[col], colY[col]);
   } else {
     for (const category of FITTING_CATEGORY_ORDER) {
       const inGroup = fittings.filter((f) => CATEGORY_FOR_TYPE[f.type] === category);
@@ -466,11 +486,13 @@ async function drawPlanPage(
         byType.set(f.type, list);
       }
 
-      ensureLegendSpace(3.6 + LEGEND_ROW_H);
+      ensureLegendSpace(LEGEND_CATEGORY_HEADING_H + LEGEND_ROW_H);
+      doc.setFont("helvetica", "bold");
       doc.setFontSize(7);
       doc.setTextColor(20);
-      doc.text(LAYER_LABELS[category], MARGIN, ly);
-      ly += 3.6;
+      doc.text(LAYER_LABELS[category], legendColX[col], colY[col]);
+      doc.setFont("helvetica", "normal");
+      colY[col] += LEGEND_CATEGORY_HEADING_H;
 
       for (const [type, ofType] of byType) {
         ensureLegendSpace(LEGEND_ROW_H);
@@ -481,7 +503,7 @@ async function drawPlanPage(
         await drawFittingSymbol(
           doc,
           representative,
-          { x: MARGIN + 3 + LEGEND_ICON_MM / 2, y: ly + LEGEND_ROW_H / 2 + 1 },
+          { x: legendColX[col] + 3 + LEGEND_ICON_MM / 2, y: colY[col] + LEGEND_ROW_H / 2 + 1 },
           "#1a1a1a",
           svg2pdf,
           renderToStaticMarkup,
@@ -491,11 +513,12 @@ async function drawPlanPage(
         const count = ofType.length;
         doc.text(
           `${FITTING_LABELS[type]}${count > 1 ? ` (×${count})` : ""}`,
-          MARGIN + 3 + LEGEND_ICON_MM + 3,
-          ly + LEGEND_ROW_H / 2 + 1,
+          legendColX[col] + 3 + LEGEND_ICON_MM + 3,
+          colY[col] + LEGEND_ROW_H / 2 + 1,
         );
-        ly += LEGEND_ROW_H;
+        colY[col] += LEGEND_ROW_H;
       }
+      colY[col] += LEGEND_CATEGORY_GAP;
     }
   }
 }
