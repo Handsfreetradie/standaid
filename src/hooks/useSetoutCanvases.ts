@@ -64,6 +64,7 @@ export function useCreateSetoutCanvas(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "canvas", "create"],
     mutationFn: async (input: { name: string; source_type: PlanSourceType; sort_order: number }) => {
       const { data, error } = await sb
         .from("setout_canvases")
@@ -81,7 +82,46 @@ export function useCreateSetoutCanvas(planId: string) {
       if (error) throw error;
       return data as SetoutCanvas;
     },
-    onSuccess: () => {
+    // Optimistic: a new tab should appear the instant it's tapped, offline or
+    // not — a client-generated id stands in for the real row until onSuccess
+    // swaps it out (see the CREATE recipe in useSetoutPlans.ts's
+    // useUpdateSetoutFittingPosition comment for the general shape this and
+    // every other optimistic mutation in this file follows).
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_canvases", planId] });
+      const previousCanvases = queryClient.getQueryData<SetoutCanvas[]>(["setout_canvases", planId]);
+      const optimisticId = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const optimisticCanvas: SetoutCanvas = {
+        id: optimisticId,
+        plan_id: planId,
+        name: input.name,
+        sort_order: input.sort_order,
+        source_type: input.source_type,
+        scale_calibration: null,
+        walls: [],
+        openings: [],
+        wall_thickness: DEFAULT_WALL_THICKNESS,
+        layer_visibility: DEFAULT_LAYER_VISIBILITY,
+        background_image_path: null,
+        background_image_content_type: null,
+        source_file_path: null,
+        source_file_content_type: null,
+        created_at: now,
+        updated_at: now,
+      };
+      queryClient.setQueryData<SetoutCanvas[]>(["setout_canvases", planId], (old) => [...(old ?? []), optimisticCanvas]);
+      return { previousCanvases, optimisticId };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previousCanvases) {
+        queryClient.setQueryData(["setout_canvases", planId], context.previousCanvases);
+      }
+    },
+    onSuccess: (data, _input, context) => {
+      queryClient.setQueryData<SetoutCanvas[]>(["setout_canvases", planId], (old) =>
+        old?.map((c) => (c.id === context?.optimisticId ? data : c))
+      );
       queryClient.invalidateQueries({ queryKey: ["setout_canvases", planId] });
     },
   });
@@ -91,11 +131,25 @@ export function useRenameSetoutCanvas(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "canvas", "rename"],
     mutationFn: async (input: { canvasId: string; name: string }) => {
       const { error } = await sb.from("setout_canvases").update({ name: input.name }).eq("id", input.canvasId);
       if (error) throw error;
     },
-    onSuccess: () => {
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_canvases", planId] });
+      const previousCanvases = queryClient.getQueryData<SetoutCanvas[]>(["setout_canvases", planId]);
+      queryClient.setQueryData<SetoutCanvas[]>(["setout_canvases", planId], (old) =>
+        old?.map((c) => (c.id === input.canvasId ? { ...c, name: input.name } : c))
+      );
+      return { previousCanvases };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previousCanvases) {
+        queryClient.setQueryData(["setout_canvases", planId], context.previousCanvases);
+      }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_canvases", planId] });
     },
   });
@@ -108,9 +162,21 @@ export function useDeleteSetoutCanvas(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "canvas", "delete"],
     mutationFn: async (canvasId: string) => {
       const { error } = await sb.from("setout_canvases").delete().eq("id", canvasId);
       if (error) throw error;
+    },
+    onMutate: async (canvasId) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_canvases", planId] });
+      const previousCanvases = queryClient.getQueryData<SetoutCanvas[]>(["setout_canvases", planId]);
+      queryClient.setQueryData<SetoutCanvas[]>(["setout_canvases", planId], (old) => old?.filter((c) => c.id !== canvasId));
+      return { previousCanvases };
+    },
+    onError: (_err, _canvasId, context) => {
+      if (context?.previousCanvases) {
+        queryClient.setQueryData(["setout_canvases", planId], context.previousCanvases);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_canvases", planId] });
@@ -124,6 +190,7 @@ export function useUpdateSetoutCanvasGeometry(canvasId: string, planId: string) 
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "canvas", "update_geometry"],
     mutationFn: async (input: {
       walls: WallSegment[];
       scale_calibration: ScaleCalibration | null;
@@ -152,7 +219,37 @@ export function useUpdateSetoutCanvasGeometry(canvasId: string, planId: string) 
       if (error) throw error;
       return data as SetoutCanvas;
     },
-    onSuccess: () => {
+    // Optimistic: the walls/openings drawing save — arguably the single most
+    // important one in this file to get right offline, since a tradie
+    // tracing walls on site needs to see them stick immediately, not sit
+    // frozen until a bar of signal shows up.
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_canvases", planId] });
+      const previousCanvases = queryClient.getQueryData<SetoutCanvas[]>(["setout_canvases", planId]);
+      queryClient.setQueryData<SetoutCanvas[]>(["setout_canvases", planId], (old) =>
+        old?.map((c) =>
+          c.id === canvasId
+            ? {
+                ...c,
+                walls: input.walls,
+                scale_calibration: input.scale_calibration,
+                openings: input.openings ?? [],
+                ...(input.background_image_path !== undefined ? { background_image_path: input.background_image_path } : {}),
+                ...(input.background_image_content_type !== undefined ? { background_image_content_type: input.background_image_content_type } : {}),
+                ...(input.source_file_path !== undefined ? { source_file_path: input.source_file_path } : {}),
+                ...(input.source_file_content_type !== undefined ? { source_file_content_type: input.source_file_content_type } : {}),
+              }
+            : c
+        )
+      );
+      return { previousCanvases };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previousCanvases) {
+        queryClient.setQueryData(["setout_canvases", planId], context.previousCanvases);
+      }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_canvases", planId] });
     },
   });
@@ -162,11 +259,25 @@ export function useUpdateSetoutCanvasLayerVisibility(canvasId: string, planId: s
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "canvas", "update_layer_visibility"],
     mutationFn: async (layerVisibility: LayerVisibility) => {
       const { error } = await sb.from("setout_canvases").update({ layer_visibility: layerVisibility }).eq("id", canvasId);
       if (error) throw error;
     },
-    onSuccess: () => {
+    onMutate: async (layerVisibility) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_canvases", planId] });
+      const previousCanvases = queryClient.getQueryData<SetoutCanvas[]>(["setout_canvases", planId]);
+      queryClient.setQueryData<SetoutCanvas[]>(["setout_canvases", planId], (old) =>
+        old?.map((c) => (c.id === canvasId ? { ...c, layer_visibility: layerVisibility } : c))
+      );
+      return { previousCanvases };
+    },
+    onError: (_err, _layerVisibility, context) => {
+      if (context?.previousCanvases) {
+        queryClient.setQueryData(["setout_canvases", planId], context.previousCanvases);
+      }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_canvases", planId] });
     },
   });
@@ -176,11 +287,25 @@ export function useUpdateSetoutCanvasWallThickness(canvasId: string, planId: str
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "canvas", "update_wall_thickness"],
     mutationFn: async (wallThickness: WallThickness) => {
       const { error } = await sb.from("setout_canvases").update({ wall_thickness: wallThickness }).eq("id", canvasId);
       if (error) throw error;
     },
-    onSuccess: () => {
+    onMutate: async (wallThickness) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_canvases", planId] });
+      const previousCanvases = queryClient.getQueryData<SetoutCanvas[]>(["setout_canvases", planId]);
+      queryClient.setQueryData<SetoutCanvas[]>(["setout_canvases", planId], (old) =>
+        old?.map((c) => (c.id === canvasId ? { ...c, wall_thickness: wallThickness } : c))
+      );
+      return { previousCanvases };
+    },
+    onError: (_err, _wallThickness, context) => {
+      if (context?.previousCanvases) {
+        queryClient.setQueryData(["setout_canvases", planId], context.previousCanvases);
+      }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_canvases", planId] });
     },
   });

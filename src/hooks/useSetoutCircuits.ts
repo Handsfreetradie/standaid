@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import type { CircuitCableType, CircuitDeviceType, CircuitSpecs, CircuitType, SetoutCircuit } from "@/lib/setoutTypes";
+import type { CircuitCableType, CircuitDeviceType, CircuitSpecs, CircuitType, SetoutCircuit, SetoutFitting } from "@/lib/setoutTypes";
 
 // Structured circuit-schedule fields (20260917020000) shared by create and
 // update — all optional so existing callers that only pass label/
@@ -40,6 +40,7 @@ export function useCreateSetoutCircuit(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "circuit", "create"],
     mutationFn: async (
       input: {
         label: string;
@@ -79,7 +80,44 @@ export function useCreateSetoutCircuit(planId: string) {
       if (error) throw error;
       return data as SetoutCircuit;
     },
-    onSuccess: () => {
+    // Optimistic: same end-of-order sort_order computation the mutationFn
+    // itself does, so the temp row lands in the right spot in the list
+    // instead of jumping once the real row comes back.
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_circuits", planId] });
+      const previousCircuits = queryClient.getQueryData<SetoutCircuit[]>(["setout_circuits", planId]);
+      const existing = previousCircuits ?? [];
+      const nextOrder = existing.reduce((max, c) => Math.max(max, c.sort_order), -1) + 1;
+      const optimisticId = crypto.randomUUID();
+      const optimisticCircuit: SetoutCircuit = {
+        id: optimisticId,
+        plan_id: planId,
+        label: input.label,
+        description: input.description || null,
+        breaker_rating: input.breaker_rating || null,
+        sort_order: nextOrder,
+        circuit_type: input.circuit_type ?? "standard",
+        specs: input.specs ?? {},
+        device_type: input.device_type ?? null,
+        rcd_protected: input.rcd_protected ?? null,
+        poles: input.poles ?? null,
+        cable_csa_mm2: input.cable_csa_mm2 ?? null,
+        cable_type: input.cable_type ?? null,
+        notes: input.notes ?? null,
+        created_at: new Date().toISOString(),
+      };
+      queryClient.setQueryData<SetoutCircuit[]>(["setout_circuits", planId], (old) => [...(old ?? []), optimisticCircuit]);
+      return { previousCircuits, optimisticId };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previousCircuits) {
+        queryClient.setQueryData(["setout_circuits", planId], context.previousCircuits);
+      }
+    },
+    onSuccess: (data, _input, context) => {
+      queryClient.setQueryData<SetoutCircuit[]>(["setout_circuits", planId], (old) =>
+        old?.map((c) => (c.id === context?.optimisticId ? data : c))
+      );
       queryClient.invalidateQueries({ queryKey: ["setout_circuits", planId] });
     },
   });
@@ -93,6 +131,7 @@ export function useReorderSetoutCircuit(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "circuit", "reorder"],
     mutationFn: async (input: { circuitId: string; direction: "up" | "down" }) => {
       const circuits = queryClient.getQueryData<SetoutCircuit[]>(["setout_circuits", planId]) ?? [];
       const index = circuits.findIndex((c) => c.id === input.circuitId);
@@ -109,7 +148,36 @@ export function useReorderSetoutCircuit(planId: string) {
       if (errA) throw errA;
       if (errB) throw errB;
     },
-    onSuccess: () => {
+    // Optimistic: swaps the same two rows' sort_order client-side that the
+    // mutationFn swaps server-side, so the arranged order re-sorts in place
+    // immediately. Snapshots/restores the whole circuits array since two
+    // rows change together.
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_circuits", planId] });
+      const previousCircuits = queryClient.getQueryData<SetoutCircuit[]>(["setout_circuits", planId]);
+      const circuits = previousCircuits ?? [];
+      const index = circuits.findIndex((c) => c.id === input.circuitId);
+      if (index === -1) return { previousCircuits };
+      const swapIndex = input.direction === "up" ? index - 1 : index + 1;
+      if (swapIndex < 0 || swapIndex >= circuits.length) return { previousCircuits }; // already at an end
+
+      const a = circuits[index];
+      const b = circuits[swapIndex];
+      queryClient.setQueryData<SetoutCircuit[]>(["setout_circuits", planId], (old) =>
+        old?.map((c) => {
+          if (c.id === a.id) return { ...c, sort_order: b.sort_order };
+          if (c.id === b.id) return { ...c, sort_order: a.sort_order };
+          return c;
+        })
+      );
+      return { previousCircuits };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previousCircuits) {
+        queryClient.setQueryData(["setout_circuits", planId], context.previousCircuits);
+      }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_circuits", planId] });
     },
   });
@@ -119,6 +187,7 @@ export function useUpdateSetoutCircuit(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "circuit", "update"],
     mutationFn: async (
       input: {
         circuitId: string;
@@ -151,7 +220,35 @@ export function useUpdateSetoutCircuit(planId: string) {
       if (error) throw error;
       return data as SetoutCircuit;
     },
-    onSuccess: () => {
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_circuits", planId] });
+      const previousCircuits = queryClient.getQueryData<SetoutCircuit[]>(["setout_circuits", planId]);
+      queryClient.setQueryData<SetoutCircuit[]>(["setout_circuits", planId], (old) =>
+        old?.map((c) => {
+          if (c.id !== input.circuitId) return c;
+          const next = { ...c };
+          if (input.label !== undefined) next.label = input.label;
+          if (input.description !== undefined) next.description = input.description || null;
+          if (input.breaker_rating !== undefined) next.breaker_rating = input.breaker_rating || null;
+          if (input.circuit_type !== undefined) next.circuit_type = input.circuit_type;
+          if (input.specs !== undefined) next.specs = input.specs;
+          if (input.device_type !== undefined) next.device_type = input.device_type;
+          if (input.rcd_protected !== undefined) next.rcd_protected = input.rcd_protected;
+          if (input.poles !== undefined) next.poles = input.poles;
+          if (input.cable_csa_mm2 !== undefined) next.cable_csa_mm2 = input.cable_csa_mm2;
+          if (input.cable_type !== undefined) next.cable_type = input.cable_type;
+          if (input.notes !== undefined) next.notes = input.notes;
+          return next;
+        })
+      );
+      return { previousCircuits };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previousCircuits) {
+        queryClient.setQueryData(["setout_circuits", planId], context.previousCircuits);
+      }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_circuits", planId] });
     },
   });
@@ -161,9 +258,21 @@ export function useDeleteSetoutCircuit(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "circuit", "delete"],
     mutationFn: async (circuitId: string) => {
       const { error } = await sb.from("setout_circuits").delete().eq("id", circuitId);
       if (error) throw error;
+    },
+    onMutate: async (circuitId) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_circuits", planId] });
+      const previousCircuits = queryClient.getQueryData<SetoutCircuit[]>(["setout_circuits", planId]);
+      queryClient.setQueryData<SetoutCircuit[]>(["setout_circuits", planId], (old) => old?.filter((c) => c.id !== circuitId));
+      return { previousCircuits };
+    },
+    onError: (_err, _circuitId, context) => {
+      if (context?.previousCircuits) {
+        queryClient.setQueryData(["setout_circuits", planId], context.previousCircuits);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_circuits", planId] });
@@ -175,10 +284,14 @@ export function useDeleteSetoutCircuit(planId: string) {
   });
 }
 
+// Writes to a FITTING's circuit_id, not a circuit row — the optimistic write
+// below touches the ["setout_fittings", planId] cache (owned by
+// useSetoutPlans.ts's useSetoutFittings), not ["setout_circuits", planId].
 export function useAssignFittingCircuit(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "fitting", "assign_circuit"],
     mutationFn: async (input: { fittingId: string; circuitId: string | null }) => {
       const { error } = await sb
         .from("setout_fittings")
@@ -186,7 +299,20 @@ export function useAssignFittingCircuit(planId: string) {
         .eq("id", input.fittingId);
       if (error) throw error;
     },
-    onSuccess: () => {
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_fittings", planId] });
+      const previousFittings = queryClient.getQueryData<SetoutFitting[]>(["setout_fittings", planId]);
+      queryClient.setQueryData<SetoutFitting[]>(["setout_fittings", planId], (old) =>
+        old?.map((f) => (f.id === input.fittingId ? { ...f, circuit_id: input.circuitId } : f))
+      );
+      return { previousFittings };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previousFittings) {
+        queryClient.setQueryData(["setout_fittings", planId], context.previousFittings);
+      }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
       queryClient.invalidateQueries({ queryKey: ["setout_circuits", planId] });
     },

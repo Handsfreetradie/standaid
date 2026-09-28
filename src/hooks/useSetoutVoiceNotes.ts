@@ -28,6 +28,7 @@ export function useCreateSetoutVoiceNote(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "voice_note", "create"],
     mutationFn: async (input: { storage_path: string; content_type: string; duration_seconds?: number }) => {
       const { data, error } = await sb
         .from("setout_voice_notes")
@@ -43,7 +44,37 @@ export function useCreateSetoutVoiceNote(planId: string) {
       if (error) throw error;
       return data as SetoutVoiceNote;
     },
-    onSuccess: () => {
+    // Optimistic: input here is just a storage_path string (the audio upload
+    // itself already happened before this mutation runs, out of scope here),
+    // so this is safe to make optimistic — same CREATE recipe as elsewhere.
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_voice_notes", planId] });
+      const previousVoiceNotes = queryClient.getQueryData<SetoutVoiceNote[]>(["setout_voice_notes", planId]);
+      const optimisticId = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const optimisticVoiceNote: SetoutVoiceNote = {
+        id: optimisticId,
+        plan_id: planId,
+        storage_path: input.storage_path,
+        content_type: input.content_type,
+        duration_seconds: input.duration_seconds ?? null,
+        transcript: null,
+        status: "pending",
+        created_at: now,
+        updated_at: now,
+      };
+      queryClient.setQueryData<SetoutVoiceNote[]>(["setout_voice_notes", planId], (old) => [...(old ?? []), optimisticVoiceNote]);
+      return { previousVoiceNotes, optimisticId };
+    },
+    onError: (_err, _input, context) => {
+      if (context?.previousVoiceNotes) {
+        queryClient.setQueryData(["setout_voice_notes", planId], context.previousVoiceNotes);
+      }
+    },
+    onSuccess: (data, _input, context) => {
+      queryClient.setQueryData<SetoutVoiceNote[]>(["setout_voice_notes", planId], (old) =>
+        old?.map((note) => (note.id === context?.optimisticId ? data : note))
+      );
       queryClient.invalidateQueries({ queryKey: ["setout_voice_notes", planId] });
     },
   });
@@ -55,10 +86,18 @@ export function useCreateSetoutVoiceNote(planId: string) {
 // own onSuccess just refetches the list to pick that up. Deepgram's
 // pre-recorded endpoint is synchronous, so a completed call already means
 // "done or failed", not "queued".
+//
+// Deliberately NO onMutate/optimistic write: there's no way to know the
+// transcript before the real network call actually runs it through
+// Deepgram. The mutationKey alone is enough to get the offline behaviour
+// that matters here — this mutation stays queued while offline (and now
+// survives an app restart while queued, via the setout mutation
+// persistence), then actually transcribes for real once back online.
 export function useTranscribeSetoutVoiceNote(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "voice_note", "transcribe"],
     mutationFn: async (voiceNoteId: string) => {
       const { data, error } = await supabase.functions.invoke("transcribe-setout-voice-note", {
         body: { voice_note_id: voiceNoteId },
@@ -79,10 +118,22 @@ export function useDeleteSetoutVoiceNote(planId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: ["setout", "voice_note", "delete"],
     mutationFn: async (voiceNote: SetoutVoiceNote) => {
       const { error } = await sb.from("setout_voice_notes").delete().eq("id", voiceNote.id);
       if (error) throw error;
       await supabase.storage.from("setout-voice-notes").remove([voiceNote.storage_path]);
+    },
+    onMutate: async (voiceNote) => {
+      await queryClient.cancelQueries({ queryKey: ["setout_voice_notes", planId] });
+      const previousVoiceNotes = queryClient.getQueryData<SetoutVoiceNote[]>(["setout_voice_notes", planId]);
+      queryClient.setQueryData<SetoutVoiceNote[]>(["setout_voice_notes", planId], (old) => old?.filter((n) => n.id !== voiceNote.id));
+      return { previousVoiceNotes };
+    },
+    onError: (_err, _voiceNote, context) => {
+      if (context?.previousVoiceNotes) {
+        queryClient.setQueryData(["setout_voice_notes", planId], context.previousVoiceNotes);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["setout_voice_notes", planId] });
