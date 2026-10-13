@@ -8,6 +8,11 @@ import {
   wallLength,
   pointAtOffset,
   closestPointOnWall,
+  projectPointOntoWall,
+  hasCurve,
+  simplifyPolyline,
+  snapPolylineToRightAngles,
+  freehandTraceToCorners,
 } from "./setoutGeometry";
 import type { FittingSpecs, SetoutFitting, WallSegment } from "./setoutTypes";
 
@@ -159,5 +164,176 @@ describe("wallLength / pointAtOffset / closestPointOnWall on a curved wall", () 
     expect(result.x).toBeGreaterThan(0.3);
     expect(result.x).toBeLessThan(1.7);
     expect(result.y).toBeGreaterThan(0.3);
+  });
+});
+
+// A freehand-drawn curve stores the literal points sampled from the drag
+// rather than a Bézier control point — these should behave like a polyline
+// through start -> curvePoints -> end, not an approximated smooth arc.
+describe("wallLength / pointAtOffset / closestPointOnWall / projectPointOntoWall on a freehand (curvePoints) wall", () => {
+  // A right-angle zigzag (0,0) -> (1,0) -> (1,1) -> (2,1), so lengths are
+  // exact integers/easy sums rather than needing calculus to verify by hand.
+  const zigzagWall: WallSegment = {
+    id: "w1",
+    start: { x: 0, y: 0 },
+    end: { x: 2, y: 1 },
+    curvePoints: [{ x: 1, y: 0 }, { x: 1, y: 1 }],
+  };
+
+  it("hasCurve is true for a curvePoints wall and false for a plain one", () => {
+    expect(hasCurve(zigzagWall)).toBe(true);
+    expect(hasCurve({})).toBe(false);
+  });
+
+  it("wallLength sums the chords through start -> curvePoints -> end, not the straight-line distance", () => {
+    // 1 + 1 + 1 = 3, vs a straight chord of sqrt(5) ~= 2.236
+    expect(wallLength(zigzagWall)).toBeCloseTo(3, 6);
+  });
+
+  it("pointAtOffset walks along the drawn chain segment by segment", () => {
+    expect(pointAtOffset(zigzagWall, 0.5)).toEqual({ x: 0.5, y: 0 });
+    expect(pointAtOffset(zigzagWall, 1.5)).toEqual({ x: 1, y: 0.5 });
+    expect(pointAtOffset(zigzagWall, 2.5)).toEqual({ x: 1.5, y: 1 });
+  });
+
+  it("pointAtOffset clamps to the endpoints outside [0, length]", () => {
+    expect(pointAtOffset(zigzagWall, -5)).toEqual(zigzagWall.start);
+    expect(pointAtOffset(zigzagWall, 999)).toEqual(zigzagWall.end);
+  });
+
+  it("closestPointOnWall finds the nearest point on whichever leg of the drawn chain, not clamped to an endpoint", () => {
+    // Directly above the middle of the vertical leg (1,0)->(1,1).
+    const result = closestPointOnWall({ x: 1.3, y: 0.5 }, zigzagWall);
+    expect(result).toEqual({ x: 1, y: 0.5 });
+  });
+
+  it("projectPointOntoWall returns the cumulative arc-length offset to the closest foot", () => {
+    // Same point as above: 1m along the first leg, then 0.5m up the second.
+    expect(projectPointOntoWall({ x: 1.3, y: 0.5 }, zigzagWall)).toBeCloseTo(1.5, 6);
+  });
+});
+
+describe("simplifyPolyline", () => {
+  it("collapses a jittery straight run down to just its two ends", () => {
+    const noisy = [
+      { x: 0, y: 0 },
+      { x: 1, y: 0.01 },
+      { x: 2, y: -0.01 },
+      { x: 3, y: 0.02 },
+      { x: 4, y: 0 },
+    ];
+    expect(simplifyPolyline(noisy, 0.05)).toEqual([
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
+    ]);
+  });
+
+  it("keeps a genuine corner that strays well past the tolerance", () => {
+    const corner = [
+      { x: 0, y: 0 },
+      { x: 2, y: 0.01 },
+      { x: 4, y: 0 },
+      { x: 4, y: 4 },
+    ];
+    // (4,0) sits ~4m off the straight line from (0,0) to (4,4) — nowhere
+    // near the 0.05m tolerance, so it must survive simplification.
+    expect(simplifyPolyline(corner, 0.05)).toEqual([
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
+      { x: 4, y: 4 },
+    ]);
+  });
+});
+
+// snapPolylineToRightAngles is freehandTraceToCorners' angle-snapping step
+// in isolation — each edge's length is kept, only its direction is forced
+// onto the nearest right angle, same split applyWallLengths makes in the
+// other direction (keep direction, replace length).
+describe("snapPolylineToRightAngles", () => {
+  it("forces each edge's direction to the nearest right angle without changing its length", () => {
+    const raw = [
+      { x: 0, y: 0 },
+      { x: 10, y: 1 }, // ~5.7° off due east — snaps to due east (0°)
+      { x: 10.5, y: 11 }, // ~87° off due east — snaps to due north (90°)
+    ];
+    const len1 = Math.hypot(10, 1);
+    const len2 = Math.hypot(0.5, 10);
+    const result = snapPolylineToRightAngles(raw);
+    expect(result).toHaveLength(3);
+    expect(result[0]).toEqual({ x: 0, y: 0 });
+    expect(result[1].x).toBeCloseTo(len1, 6);
+    expect(result[1].y).toBeCloseTo(0, 6);
+    expect(result[2].x).toBeCloseTo(result[1].x, 6);
+    expect(result[2].y).toBeCloseTo(result[1].y + len2, 6);
+  });
+
+  it("never touches the closing wall back to the first point", () => {
+    // Only the 0->1 edge is snapped; polygonToWalls adds the 1->0 wrap-
+    // around wall later, unsnapped, same as the existing tap-to-place flow.
+    const raw = [{ x: 0, y: 0 }, { x: 3, y: 4 }];
+    const result = snapPolylineToRightAngles(raw);
+    expect(result).toHaveLength(2);
+    expect(Math.hypot(result[1].x, result[1].y)).toBeCloseTo(5, 6);
+  });
+});
+
+// The full pipeline a freehand drag's sampled points get run through —
+// built from a synthetic "hand-drawn" trace of a 4m x 3m rectangle (each
+// edge densely sampled with a bit of jitter, the way a real finger-drag
+// would come out) to check the noisy trace really does collapse to a
+// clean, right-angled room outline.
+describe("freehandTraceToCorners", () => {
+  const jitter = (i: number) => (i % 2 === 0 ? 0.01 : -0.01);
+  const sampleEdge = (from: { x: number; y: number }, to: { x: number; y: number }, steps: number) => {
+    const pts: { x: number; y: number }[] = [];
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      pts.push({
+        x: from.x + (to.x - from.x) * t + jitter(i),
+        y: from.y + (to.y - from.y) * t + jitter(i + 1),
+      });
+    }
+    return pts;
+  };
+
+  it("cleans a noisy, open 3-wall trace down to 4 right-angled corners", () => {
+    // Right, then up, then left — deliberately NOT closed back to the
+    // start; that's polygonToWalls's job once this hands back corners.
+    const rawTrace = [
+      ...sampleEdge({ x: 0, y: 0 }, { x: 4, y: 0 }, 10),
+      ...sampleEdge({ x: 4, y: 0 }, { x: 4, y: 3 }, 8),
+      ...sampleEdge({ x: 4, y: 3 }, { x: 0, y: 3 }, 10),
+    ];
+    const result = freehandTraceToCorners(rawTrace, 0.05);
+    expect(result).not.toBeNull();
+    const pts = result!;
+    expect(pts).toHaveLength(4);
+    for (let i = 0; i < pts.length - 1; i++) {
+      const dx = pts[i + 1].x - pts[i].x;
+      const dy = pts[i + 1].y - pts[i].y;
+      // Every edge should be purely horizontal or purely vertical.
+      expect(Math.min(Math.abs(dx), Math.abs(dy))).toBeLessThan(1e-6);
+    }
+    expect(Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y)).toBeCloseTo(4, 1);
+    expect(Math.hypot(pts[2].x - pts[1].x, pts[2].y - pts[1].y)).toBeCloseTo(3, 1);
+    expect(Math.hypot(pts[3].x - pts[2].x, pts[3].y - pts[2].y)).toBeCloseTo(4, 1);
+  });
+
+  it("drops a last point that's really the drag returning near its own start", () => {
+    const square = [
+      { x: 0, y: 0 },
+      { x: 2, y: 0 },
+      { x: 2, y: 2 },
+      { x: 0, y: 2 },
+      { x: 0.05, y: 0.02 }, // finger lifted just short of a full loop back
+    ];
+    const result = freehandTraceToCorners(square, 0.01);
+    expect(result).not.toBeNull();
+    expect(result).toHaveLength(4);
+  });
+
+  it("returns null for a scribble with no real corners", () => {
+    const scribble = Array.from({ length: 5 }, (_, i) => ({ x: i * 0.02, y: i * 0.02 }));
+    expect(freehandTraceToCorners(scribble, 0.05)).toBeNull();
   });
 });

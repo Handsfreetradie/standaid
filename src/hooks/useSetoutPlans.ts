@@ -464,6 +464,31 @@ export function useUpdateSetoutFittingMeasurementLock(planId: string) {
   });
 }
 
+// Bulk variant of useUpdateSetoutFittingMeasurementLock — used after a
+// canvas's walls are replaced wholesale (re-imported plan), when every
+// fitting on that floor needs its measurement re-derived against the new
+// geometry at once rather than one at a time. PostgREST can't set different
+// values per row in a single .update() call, so this fires the per-row
+// updates together via Promise.all and invalidates once at the end — still
+// just one round trip's worth of latency, not one per fitting.
+export function useBulkUpdateSetoutFittingMeasurementLocks(planId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (updates: { fittingId: string; measurement_lock: MeasurementLock | null }[]) => {
+      await Promise.all(
+        updates.map(async ({ fittingId, measurement_lock }) => {
+          const { error } = await sb.from("setout_fittings").update({ measurement_lock }).eq("id", fittingId);
+          if (error) throw error;
+        })
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["setout_fittings", planId] });
+    },
+  });
+}
+
 export function useDeleteSetoutFitting(planId: string) {
   const queryClient = useQueryClient();
 

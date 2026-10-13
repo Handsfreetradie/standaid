@@ -7,6 +7,7 @@ import {
   closestPointOnPath,
   pathBounds,
   pathAngleAt,
+  pathToSvgD,
 } from "./setoutPathGeometry";
 import type { PathPoint, Point } from "./setoutTypes";
 
@@ -62,6 +63,35 @@ describe("pathLength", () => {
       { x: 5, y: 0 },
     ];
     expect(pathLength(runWithCurve)).toBeCloseTo(2.2955871506 + 3, 3);
+  });
+
+  // Freehand-drawn curve: curvePoints is the literal drawn shape, not a
+  // Bézier — a run with a zigzag curvePoints segment ((0,0) -> curvePoints
+  // (1,0),(1,1) -> (2,1), chord sum 1+1+1=3) followed by a straight 3m
+  // segment should total 3 + 3, not the straight-chord distance (sqrt(5)) + 3.
+  it("is curve-aware for a run with curvePoints on one point", () => {
+    const runWithFreehandCurve: PathPoint[] = [
+      { x: 0, y: 0 },
+      { x: 2, y: 1, curvePoints: [{ x: 1, y: 0 }, { x: 1, y: 1 }] },
+      { x: 5, y: 1 },
+    ];
+    expect(pathLength(runWithFreehandCurve)).toBeCloseTo(6, 9);
+  });
+});
+
+describe("pathToSvgD", () => {
+  it("draws a plain L-polyline for a straight run", () => {
+    expect(pathToSvgD(lShape)).toBe("M 0 0 L 2 0 L 2 2");
+  });
+
+  it("draws an L-polyline through curvePoints for a freehand-curved segment", () => {
+    const run: PathPoint[] = [{ x: 0, y: 0 }, { x: 2, y: 1, curvePoints: [{ x: 1, y: 0 }, { x: 1, y: 1 }] }];
+    expect(pathToSvgD(run)).toBe("M 0 0 L 1 0 L 1 1 L 2 1");
+  });
+
+  it("still draws a Q command for a legacy curveControl point", () => {
+    const run: PathPoint[] = [{ x: 0, y: 0 }, { x: 2, y: 0, curveControl: { x: 1, y: 1 } }];
+    expect(pathToSvgD(run)).toBe("M 0 0 Q 1 1 2 0");
   });
 });
 

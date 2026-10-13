@@ -11,7 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useUpdateSetoutCanvasGeometry } from "@/hooks/useSetoutCanvases";
 import { distance, type PathPoint, type Point, type SetoutCanvas as SetoutCanvasRow, type WallOpening, type WallSegment } from "@/lib/setoutTypes";
-import { applyWallLengths, nextOpeningId, nextWallId, polygonToWalls, wallLength } from "@/lib/setoutGeometry";
+import { applyWallLengths, hasCurve, nextOpeningId, nextWallId, polygonToWalls, wallLength } from "@/lib/setoutGeometry";
 import { detectPlanEdges, type PlanEdges } from "@/lib/edgeDetection";
 import { extractPlanLines, PlanVectorIndex, type PdfPageForVector } from "@/lib/planVector";
 import { fromMm, mmValue } from "@/lib/units";
@@ -72,7 +72,11 @@ interface CalibrationImportFlowProps {
   canvas: SetoutCanvasRow;
   planId: string;
   onBack: () => void;
-  onComplete: () => void;
+  // Passed the walls just saved (possibly empty, when tracing was skipped) —
+  // lets a caller amending an already-populated canvas re-derive anything
+  // that referenced the OLD walls (measurement locks) without waiting on a
+  // query refetch to see the new geometry.
+  onComplete: (savedWalls?: WallSegment[]) => void;
 }
 
 export default function CalibrationImportFlow({ canvas, planId, onBack, onComplete }: CalibrationImportFlowProps) {
@@ -98,6 +102,14 @@ export default function CalibrationImportFlow({ canvas, planId, onBack, onComple
   // Reset whenever the tool changes so it can't linger into an unrelated tool.
   const [curveMode, setCurveMode] = useState(false);
   useEffect(() => setCurveMode(false), [wallTool]);
+  // Trace the outer walls in one drag instead of tapping each corner —
+  // perimeter tool only (interior walls, openings keep their own tools
+  // unchanged). Mutually exclusive with squarePerimeterWalls/curveMode/
+  // snap-to-plan (all hidden while this is on): a freehand trace always
+  // comes out straightened to right angles on its own, bypassing the
+  // tap-by-tap snap machinery those control entirely.
+  const [freehandMode, setFreehandMode] = useState(false);
+  useEffect(() => setFreehandMode(false), [wallTool]);
   const [selectedEraseWallId, setSelectedEraseWallId] = useState<string | null>(null);
   const [interiorDraftStart, setInteriorDraftStart] = useState<Point | null>(null);
   const [openingKind, setOpeningKind] = useState<"door" | "window" | "sliding_door">("door");
@@ -359,10 +371,38 @@ export default function CalibrationImportFlow({ canvas, planId, onBack, onComple
     // this precision step entirely for a shape with any curve in it and
     // save exactly as traced (same call finishTrace's "Save without
     // adjusting" path already makes).
-    if (walls.some((w) => w.curveControl)) {
+    if (walls.some((w) => hasCurve(w))) {
       void finishTrace(sketchPoints);
       return;
     }
+    setLengths(walls.map((w) => mmValue(wallLength(w))));
+    setStep("adjust-lengths");
+  };
+
+  const handleFreehandModeChange = (next: boolean) => {
+    // The two input modes can't be mixed mid-shape — starting a freehand
+    // trace replaces sketchPoints wholesale once the drag finishes, so any
+    // corners already tapped would otherwise just vanish silently.
+    if (next && sketchPoints.length > 0) {
+      if (!window.confirm("Switching to freehand will clear the corners you've already tapped. Continue?")) return;
+      setSketchPoints([]);
+    }
+    setFreehandMode(next);
+  };
+
+  // Mirrors proceedToLengthAdjustment above, but acts on the corners the
+  // freehand drag just produced directly rather than reading sketchPoints
+  // off the closure — setSketchPoints here hasn't landed yet by the time
+  // this runs. Freehand corners are always plain points (no curves), so
+  // there's no equivalent to proceedToLengthAdjustment's curved-shape
+  // early-save branch to carry over.
+  const handleFreehandSketchComplete = (corners: Point[] | null) => {
+    if (!corners) {
+      toast.error("Couldn't make out clear corners in that trace — try tracing the outer walls again.");
+      return;
+    }
+    setSketchPoints(corners);
+    const walls = polygonToWalls(corners);
     setLengths(walls.map((w) => mmValue(wallLength(w))));
     setStep("adjust-lengths");
   };
@@ -388,7 +428,7 @@ export default function CalibrationImportFlow({ canvas, planId, onBack, onComple
         ...(sourceFilePath ? { source_file_path: sourceFilePath, source_file_content_type: sourceFileContentType ?? "application/octet-stream" } : {}),
       });
       toast.success(skipWalls ? "Plan saved" : "Walls saved");
-      onComplete();
+      onComplete(walls);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not save the plan");
     }
@@ -532,7 +572,9 @@ export default function CalibrationImportFlow({ canvas, planId, onBack, onComple
         </h2>
         <p className="text-xs text-muted-foreground mb-4">
           {wallTool === "perimeter"
-            ? "Tap each corner of the room in order. Tap the first corner again (or the button below) to close the shape — you'll enter the real wall lengths next."
+            ? freehandMode
+              ? "Drag roughly around the outer walls in one go, corners and all — release wherever you finish and it'll straighten up into right angles automatically. You'll enter the real wall lengths next."
+              : "Tap each corner of the room in order. Tap the first corner again (or the button below) to close the shape — you'll enter the real wall lengths next."
             : wallTool === "interior"
               ? `Tap point to point along the internal wall run — tap (or click) the same spot twice to finish it.${straightInteriorWalls ? " Each segment squares up to horizontal/vertical automatically." : ""}`
               : wallTool === "erase"
@@ -579,6 +621,15 @@ export default function CalibrationImportFlow({ canvas, planId, onBack, onComple
 
         {wallTool === "perimeter" && (
           <div className="flex items-center gap-2 mb-3">
+            <Switch id="freehand-perimeter" checked={freehandMode} onCheckedChange={handleFreehandModeChange} />
+            <Label htmlFor="freehand-perimeter" className="text-xs font-normal text-muted-foreground">
+              Draw freehand — trace the outer walls in one stroke, then straighten them
+            </Label>
+          </div>
+        )}
+
+        {wallTool === "perimeter" && !freehandMode && (
+          <div className="flex items-center gap-2 mb-3">
             <Switch id="square-perimeter-walls" checked={squarePerimeterWalls} onCheckedChange={setSquarePerimeterWalls} />
             <Label htmlFor="square-perimeter-walls" className="text-xs font-normal text-muted-foreground">
               Keep walls straight (90°) — turn off to draw an angled wall
@@ -586,18 +637,18 @@ export default function CalibrationImportFlow({ canvas, planId, onBack, onComple
           </div>
         )}
 
-        {(wallTool === "perimeter" || wallTool === "interior") && (
+        {((wallTool === "perimeter" && !freehandMode) || wallTool === "interior") && (
           <div className="flex items-center gap-2 mb-3">
             <Button size="sm" variant={curveMode ? "default" : "outline"} onClick={() => setCurveMode((v) => !v)}>
               Curve
             </Button>
             <Label className="text-xs font-normal text-muted-foreground">
-              {curveMode ? "Tap where the wall should bulge to, then the corner it ends at." : "Curve the next wall segment instead of a straight one."}
+              {curveMode ? "Press and drag to draw the curve, then release at the corner it ends at." : "Curve the next wall segment instead of a straight one."}
             </Label>
           </div>
         )}
 
-        {(wallTool === "perimeter" || wallTool === "interior") && (
+        {((wallTool === "perimeter" && !freehandMode) || wallTool === "interior") && (
           <div className="flex items-center gap-2 mb-3">
             <Switch id="snap-to-plan" checked={snapEnabled} onCheckedChange={setSnapEnabled} />
             <Label htmlFor="snap-to-plan" className="text-xs font-normal text-muted-foreground">
@@ -636,7 +687,7 @@ export default function CalibrationImportFlow({ canvas, planId, onBack, onComple
             openings={wallOpenings}
             mode={canvasMode}
             sketchPoints={sketchPoints}
-            onSketchPointAdd={(p, curveControl) => setSketchPoints((prev) => [...prev, curveControl ? { ...p, curveControl } : p])}
+            onSketchPointAdd={(p, curvePoints) => setSketchPoints((prev) => [...prev, curvePoints ? { ...p, curvePoints } : p])}
             onSketchPointUndo={() => setSketchPoints((prev) => prev.slice(0, -1))}
             backgroundTile={tile}
             onViewSettled={handleTraceViewSettled}
@@ -648,8 +699,10 @@ export default function CalibrationImportFlow({ canvas, planId, onBack, onComple
             snapInteriorWalls={straightInteriorWalls}
             curveMode={curveMode}
             onCurveControlCaptured={() => setCurveMode(false)}
-            onInteriorWallSegmentAdd={(start, end, curveControl) => {
-              setInteriorWalls((prev) => [...prev, { id: nextWallId(), start, end, kind: "interior", curveControl }]);
+            freehandSketchMode={wallTool === "perimeter" && freehandMode}
+            onFreehandSketchComplete={handleFreehandSketchComplete}
+            onInteriorWallSegmentAdd={(start, end, curvePoints) => {
+              setInteriorWalls((prev) => [...prev, { id: nextWallId(), start, end, kind: "interior", curvePoints }]);
               // Continue the chain from this segment's end rather than
               // resetting — the next tap starts a new segment from here,
               // finishing only once the tradie double-taps/double-clicks.
@@ -748,14 +801,16 @@ export default function CalibrationImportFlow({ canvas, planId, onBack, onComple
 
         <div className="flex gap-2">
           {wallTool === "perimeter" ? (
-            <>
-              <Button variant="outline" className="flex-1" disabled={sketchPoints.length === 0} onClick={() => setSketchPoints((prev) => prev.slice(0, -1))}>
-                Undo point
-              </Button>
-              <Button className="flex-1 font-bold" disabled={sketchPoints.length < 3} onClick={proceedToLengthAdjustment}>
-                Close shape
-              </Button>
-            </>
+            !freehandMode && (
+              <>
+                <Button variant="outline" className="flex-1" disabled={sketchPoints.length === 0} onClick={() => setSketchPoints((prev) => prev.slice(0, -1))}>
+                  Undo point
+                </Button>
+                <Button className="flex-1 font-bold" disabled={sketchPoints.length < 3} onClick={proceedToLengthAdjustment}>
+                  Close shape
+                </Button>
+              </>
+            )
           ) : wallTool === "interior" ? (
             <>
               <Button

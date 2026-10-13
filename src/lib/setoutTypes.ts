@@ -69,10 +69,16 @@ export interface Point {
 }
 
 // A point in a tapped-out chain (wall trace, LED-strip run) that may carry a
-// curve control point for the segment ARRIVING at it from the previous
-// point. Absent = a plain straight segment, matching every point saved
-// before curve mode existed — old data needs no migration.
+// curve for the segment ARRIVING at it from the previous point. curvePoints
+// is the freehand-drawn shape (raw points sampled from the drag, in order
+// from the previous point to this one) — current curve tool. curveControl is
+// a single quadratic Bézier control point from the old tap-tap curve tool,
+// kept only so plans/runs curved before this existed keep rendering and
+// measuring unchanged; nothing new is ever saved with it. Both absent = a
+// plain straight segment, matching every point saved before curve mode
+// existed at all.
 export interface PathPoint extends Point {
+  curvePoints?: Point[];
   curveControl?: Point;
 }
 
@@ -85,9 +91,10 @@ export interface WallSegment {
   // existed (the single-perimeter trace/draw flows) is exterior, so this
   // keeps old saved plans rendering and measuring exactly as before.
   kind?: "exterior" | "interior";
-  // Quadratic Bézier control point (start -> curveControl -> end). Absent
-  // means straight, so every wall saved before curve mode existed keeps
-  // rendering/measuring exactly as before.
+  // Freehand-drawn curve shape (start -> curvePoints[0] -> ... -> end) — see
+  // PathPoint above. curveControl is the legacy single-Bézier-point curve,
+  // kept for old data only.
+  curvePoints?: Point[];
   curveControl?: Point;
 }
 

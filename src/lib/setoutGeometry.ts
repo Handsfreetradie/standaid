@@ -44,9 +44,19 @@ export function polygonToWalls(points: PathPoint[]): WallSegment[] {
       start,
       end,
       kind: "exterior" as const,
+      curvePoints: end.curvePoints,
       curveControl: end.curveControl,
     };
   });
+}
+
+// True if this segment is curved by either mechanism — the current freehand
+// curvePoints or the legacy single-Bézier-point curveControl (kept only for
+// data drawn before freehand curves existed). Every branch elsewhere that
+// used to test `wall.curveControl` directly should test this instead, so old
+// and new curved data are both handled.
+export function hasCurve(wall: Pick<WallSegment, "curveControl" | "curvePoints">): boolean {
+  return !!wall.curveControl || !!(wall.curvePoints && wall.curvePoints.length > 0);
 }
 
 // Quadratic Bézier point at t in [0,1] (start -> control -> end).
@@ -76,9 +86,20 @@ export function quadraticBezierLength(p0: Point, c: Point, p1: Point, samples = 
 // Samples a curved wall into straight sub-segments so every straight-line
 // helper below (nearest-point, offset-along, perpendicular-foot) can run
 // against it unchanged, rather than solving exact nearest-point-on-bezier
-// (a cubic). Not stored — computed fresh whenever needed. A straight wall
-// is returned as itself, so this is a safe no-op call site for every wall.
+// (a cubic) or nearest-point-on-polyline directly. Not stored — computed
+// fresh whenever needed. A straight wall is returned as itself, so this is a
+// safe no-op call site for every wall.
 export function curveSubSegments(wall: WallSegment, samples = 16): WallSegment[] {
+  if (wall.curvePoints && wall.curvePoints.length > 0) {
+    // Freehand curve: these points ARE the drawn shape already, dense
+    // enough from capture — no re-sampling needed, just chain them.
+    const chain = [wall.start, ...wall.curvePoints, wall.end];
+    const segments: WallSegment[] = [];
+    for (let i = 0; i < chain.length - 1; i++) {
+      segments.push({ id: `${wall.id}-sub-${i}`, start: chain[i], end: chain[i + 1], kind: wall.kind });
+    }
+    return segments;
+  }
   if (!wall.curveControl) return [wall];
   const segments: WallSegment[] = [];
   let prev = wall.start;
@@ -91,6 +112,12 @@ export function curveSubSegments(wall: WallSegment, samples = 16): WallSegment[]
 }
 
 export function wallLength(wall: WallSegment): number {
+  if (wall.curvePoints && wall.curvePoints.length > 0) {
+    const chain = [wall.start, ...wall.curvePoints, wall.end];
+    let total = 0;
+    for (let i = 0; i < chain.length - 1; i++) total += distance(chain[i], chain[i + 1]);
+    return total;
+  }
   if (wall.curveControl) return quadraticBezierLength(wall.start, wall.curveControl, wall.end);
   return distance(wall.start, wall.end);
 }
@@ -125,6 +152,134 @@ export function applyWallLengths(sketchPoints: Point[], lengths: number[]): Poin
     if (i < sketchPoints.length - 1) rebuilt.push(next);
   }
   return rebuilt;
+}
+
+// Perpendicular distance from a point to the infinite line through a-b —
+// the test Ramer–Douglas–Peucker simplification below uses to decide which
+// sampled points actually matter. Falls back to plain point distance when
+// a and b coincide (a zero-length chord has no direction to measure against).
+function perpendicularDistanceToLine(point: Point, a: Point, b: Point): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared === 0) return distance(point, a);
+  const t = ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSquared;
+  const projection = { x: a.x + t * dx, y: a.y + t * dy };
+  return distance(point, projection);
+}
+
+// Ramer–Douglas–Peucker: reduces a dense, hand-jittery polyline (every
+// point sampled along a freehand drag) down to the handful of points that
+// actually describe its shape, by recursively keeping only whichever point
+// deviates furthest from the straight line between the two ends — and
+// only if that deviation exceeds `tolerance` (scene units). A generic
+// polyline utility, not sketch-specific, so it's usable wherever a drawn
+// path needs cleaning up, not just the freehand room trace below.
+export function simplifyPolyline(points: Point[], tolerance: number): Point[] {
+  if (points.length < 3) return points;
+  const end = points.length - 1;
+  let maxDistance = 0;
+  let splitIndex = 0;
+  for (let i = 1; i < end; i++) {
+    const d = perpendicularDistanceToLine(points[i], points[0], points[end]);
+    if (d > maxDistance) {
+      maxDistance = d;
+      splitIndex = i;
+    }
+  }
+  if (maxDistance <= tolerance) return [points[0], points[end]];
+  const left = simplifyPolyline(points.slice(0, splitIndex + 1), tolerance);
+  const right = simplifyPolyline(points.slice(splitIndex), tolerance);
+  return [...left.slice(0, -1), ...right];
+}
+
+// Walks an open chain of corner points edge by edge and snaps each edge's
+// direction to the nearest right angle, keeping that edge's original
+// length — the mirror image of applyWallLengths above (which keeps
+// direction and replaces length; this keeps length and replaces
+// direction). Each edge snaps independently to global horizontal/vertical,
+// same as snapOrthogonal's per-tap squaring — no "this shape's own
+// reference angle" concept. Deliberately doesn't touch the closing edge
+// back to points[0] (added later by polygonToWalls's wraparound) — the
+// existing tap-to-place flow never squares that final wrap-around wall
+// either, so a freehand trace ending up with one unsquared closing wall is
+// consistent with how sketching already behaves, not a new gap.
+export function snapPolylineToRightAngles(points: Point[]): Point[] {
+  if (points.length < 2) return points;
+  const result: Point[] = [points[0]];
+  for (let i = 0; i < points.length - 1; i++) {
+    const start = points[i];
+    const end = points[i + 1];
+    const len = distance(start, end);
+    const angle = Math.atan2(end.y - start.y, end.x - start.x);
+    const snappedAngle = Math.round(angle / (Math.PI / 2)) * (Math.PI / 2);
+    const from = result[result.length - 1];
+    result.push({ x: from.x + Math.cos(snappedAngle) * len, y: from.y + Math.sin(snappedAngle) * len });
+  }
+  return result;
+}
+
+// A wall shorter than this is treated as drag noise rather than a real
+// corner — a phone screen's worth of hand jitter easily produces a
+// millimetre-scale "corner" that was never actually there.
+export const MIN_FREEHAND_WALL_LENGTH_M = 0.1;
+
+// Drops points that landed within `minDistance` of the point already kept
+// before them — run on the RAW (pre-angle-snap) corner candidates so a
+// too-close pair never reaches snapPolylineToRightAngles in the first
+// place. Doing the filtering before snapping, rather than after, avoids
+// ever having to recompute a snapped position once lengths have already
+// been baked in.
+function dedupeNearPoints(points: Point[], minDistance: number): Point[] {
+  if (points.length === 0) return points;
+  const result: Point[] = [points[0]];
+  for (let i = 1; i < points.length; i++) {
+    if (distance(result[result.length - 1], points[i]) >= minDistance) result.push(points[i]);
+  }
+  return result;
+}
+
+// Removes a corner where the edges on either side ended up pointing in
+// exactly the same direction once snapped — not a real corner anymore,
+// just two now-collinear walls that should be one. The first and last
+// points are left alone (same reasoning as the closing-edge note on
+// snapPolylineToRightAngles above — that wrap-around wall is never
+// checked for straightness either).
+function dedupeCollinearCorners(points: Point[]): Point[] {
+  if (points.length < 3) return points;
+  const result = [...points];
+  let i = 1;
+  while (i < result.length - 1) {
+    const inAngle = Math.atan2(result[i].y - result[i - 1].y, result[i].x - result[i - 1].x);
+    const outAngle = Math.atan2(result[i + 1].y - result[i].y, result[i + 1].x - result[i].x);
+    if (Math.abs(inAngle - outAngle) < 1e-6) {
+      result.splice(i, 1);
+    } else {
+      i++;
+    }
+  }
+  return result;
+}
+
+// The freehand "sketch the room in one stroke" pipeline: takes the raw
+// points sampled along a single pencil-style drag and turns them into a
+// clean set of corners — simplify away the hand jitter, drop a last point
+// that's really just the drag returning to where it started, snap every
+// edge to a right angle, then merge away any corner that didn't survive
+// snapping as a real corner. Returns null if fewer than 3 corners survive,
+// so the caller can ask the tradie to retrace rather than save a
+// degenerate shape.
+export function freehandTraceToCorners(rawPoints: Point[], simplifyTolerance: number): Point[] | null {
+  if (rawPoints.length < 2) return null;
+  const simplified = simplifyPolyline(rawPoints, simplifyTolerance);
+  const last = simplified.length - 1;
+  const closesItself = simplified.length > 3 && distance(simplified[0], simplified[last]) <= CLOSE_SHAPE_THRESHOLD_METRES;
+  const openChain = closesItself ? simplified.slice(0, -1) : simplified;
+  const deduped = dedupeNearPoints(openChain, MIN_FREEHAND_WALL_LENGTH_M);
+  if (deduped.length < 3) return null;
+  const snapped = snapPolylineToRightAngles(deduped);
+  const cleaned = dedupeCollinearCorners(snapped);
+  return cleaned.length >= 3 ? cleaned : null;
 }
 
 // Defaults for downlights that haven't had their specs edited yet — a
@@ -228,7 +383,7 @@ function closestPointOnStraightSegment(p: Point, wall: Pick<WallSegment, "start"
 // straight sub-segments first (see curveSubSegments) and the best result
 // kept.
 export function closestPointOnWall(p: Point, wall: WallSegment): Point {
-  if (!wall.curveControl) return closestPointOnStraightSegment(p, wall);
+  if (!hasCurve(wall)) return closestPointOnStraightSegment(p, wall);
   let best = wall.start;
   let bestDist = Infinity;
   for (const seg of curveSubSegments(wall)) {
@@ -265,7 +420,7 @@ function projectPointOntoStraightSegment(p: Point, wall: Pick<WallSegment, "star
 // own length is added on so the result is still "metres from wall.start",
 // same convention pointAtOffset expects back.
 export function projectPointOntoWall(p: Point, wall: WallSegment): number {
-  if (!wall.curveControl) return projectPointOntoStraightSegment(p, wall);
+  if (!hasCurve(wall)) return projectPointOntoStraightSegment(p, wall);
   let bestOffset = 0;
   let bestDist = Infinity;
   let cumulative = 0;
@@ -286,7 +441,7 @@ export function projectPointOntoWall(p: Point, wall: WallSegment): number {
 export function pointAtOffset(wall: WallSegment, offset: number): Point {
   const len = wallLength(wall) || 1;
   const clamped = Math.max(0, Math.min(len, offset));
-  if (!wall.curveControl) {
+  if (!hasCurve(wall)) {
     const t = clamped / len;
     return { x: wall.start.x + (wall.end.x - wall.start.x) * t, y: wall.start.y + (wall.end.y - wall.start.y) * t };
   }
@@ -314,7 +469,7 @@ const OPENING_CLEARANCE_METRES = 0.1;
 // wrong for a measurement lock: that clamped distance is a diagonal to a
 // corner, not a 90° reading, and must not be offered as one.
 function hasPerpendicularFoot(p: Point, wall: WallSegment): boolean {
-  const segments = wall.curveControl ? curveSubSegments(wall) : [wall];
+  const segments = hasCurve(wall) ? curveSubSegments(wall) : [wall];
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
     const dx = seg.end.x - seg.start.x;

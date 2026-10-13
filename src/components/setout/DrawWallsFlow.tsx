@@ -7,8 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import SetoutCanvas from "./SetoutCanvas";
 import { useUpdateSetoutCanvasGeometry } from "@/hooks/useSetoutCanvases";
-import type { PathPoint, SetoutCanvas as SetoutCanvasRow, WallSegment } from "@/lib/setoutTypes";
-import { applyWallLengths, polygonToWalls, wallLength } from "@/lib/setoutGeometry";
+import type { PathPoint, Point, SetoutCanvas as SetoutCanvasRow, WallSegment } from "@/lib/setoutTypes";
+import { applyWallLengths, hasCurve, polygonToWalls, wallLength } from "@/lib/setoutGeometry";
 
 type Step = "sketch" | "lengths";
 
@@ -26,7 +26,35 @@ export default function DrawWallsFlow({ canvas, onBack, onComplete }: DrawWallsF
   // Previously hardcoded on with no toggle — a diagonal wall genuinely
   // couldn't be drawn from scratch at all.
   const [squareWalls, setSquareWalls] = useState(true);
+  // Trace the whole room outline in one drag instead of tapping each
+  // corner — see handleFreehandSketchComplete below. Mutually exclusive
+  // with tap-mode's squareWalls/curveMode (hidden while this is on): a
+  // freehand trace always comes out straightened to right angles, and
+  // only ever produces straight walls.
+  const [freehandMode, setFreehandMode] = useState(false);
   const saveGeometry = useUpdateSetoutCanvasGeometry(canvas.id, canvas.plan_id);
+
+  const handleFreehandModeChange = (next: boolean) => {
+    // The two input modes can't be mixed mid-shape — starting a freehand
+    // trace replaces sketchPoints wholesale once the drag finishes, so any
+    // corners already tapped would otherwise just vanish silently.
+    if (next && sketchPoints.length > 0) {
+      if (!window.confirm("Switching to freehand will clear the corners you've already tapped. Continue?")) return;
+      setSketchPoints([]);
+    }
+    setFreehandMode(next);
+  };
+
+  const handleFreehandSketchComplete = (corners: Point[] | null) => {
+    if (!corners) {
+      toast.error("Couldn't make out clear corners in that trace — try tracing the room outline again.");
+      return;
+    }
+    setSketchPoints(corners);
+    const walls = polygonToWalls(corners);
+    setLengths(walls.map((w) => wallLength(w).toFixed(2)));
+    setStep("lengths");
+  };
 
   const persistWalls = async (walls: WallSegment[]) => {
     try {
@@ -46,7 +74,7 @@ export default function DrawWallsFlow({ canvas, onBack, onComplete }: DrawWallsF
     // from it (see applyWallLengths) has no sound meaning once a segment
     // isn't straight, so skip that precision step entirely for a shape
     // with any curve in it and save exactly as sketched.
-    if (walls.some((w) => w.curveControl)) {
+    if (walls.some((w) => hasCurve(w))) {
       void persistWalls(walls);
       return;
     }
@@ -77,44 +105,58 @@ export default function DrawWallsFlow({ canvas, onBack, onComplete }: DrawWallsF
         </button>
         <h2 className="font-sans text-lg font-extrabold text-foreground mb-1">Sketch the room</h2>
         <p className="text-xs text-muted-foreground mb-4">
-          Tap each corner as you see it on the frame, in order. Tap the first corner again (or the button below) to close the shape.
-          {curveMode && " Tap where the wall should bulge to, then the corner it ends at."}
+          {freehandMode
+            ? "Drag roughly around the room outline in one go, corners and all — release wherever you finish and it'll straighten up into right angles automatically."
+            : "Tap each corner as you see it on the frame, in order. Tap the first corner again (or the button below) to close the shape."}
+          {curveMode && " Press and drag to draw the curve, then release at the corner it ends at."}
         </p>
         <div className="flex items-center gap-2 mb-3">
-          <Switch id="square-walls" checked={squareWalls} onCheckedChange={setSquareWalls} />
-          <Label htmlFor="square-walls" className="text-xs font-normal text-muted-foreground">
-            Keep walls straight (90°) — turn off to draw an angled wall
+          <Switch id="freehand-sketch" checked={freehandMode} onCheckedChange={handleFreehandModeChange} />
+          <Label htmlFor="freehand-sketch" className="text-xs font-normal text-muted-foreground">
+            Draw freehand — trace the room in one stroke, then straighten it
           </Label>
         </div>
+        {!freehandMode && (
+          <div className="flex items-center gap-2 mb-3">
+            <Switch id="square-walls" checked={squareWalls} onCheckedChange={setSquareWalls} />
+            <Label htmlFor="square-walls" className="text-xs font-normal text-muted-foreground">
+              Keep walls straight (90°) — turn off to draw an angled wall
+            </Label>
+          </div>
+        )}
         <div className="flex-1 min-h-[480px] mb-4">
           <SetoutCanvas
             walls={[]}
             mode="sketch-walls"
             sketchPoints={sketchPoints}
-            onSketchPointAdd={(p, curveControl) => setSketchPoints((prev) => [...prev, curveControl ? { ...p, curveControl } : p])}
+            onSketchPointAdd={(p, curvePoints) => setSketchPoints((prev) => [...prev, curvePoints ? { ...p, curvePoints } : p])}
             onSketchPointUndo={() => setSketchPoints((prev) => prev.slice(0, -1))}
             onSketchClose={closeSketch}
             snapWalls={squareWalls}
             curveMode={curveMode}
             onCurveControlCaptured={() => setCurveMode(false)}
+            freehandSketchMode={freehandMode}
+            onFreehandSketchComplete={handleFreehandSketchComplete}
           />
         </div>
-        <div className="flex gap-2">
-          <Button
-            variant={curveMode ? "default" : "outline"}
-            className="flex-1"
-            disabled={sketchPoints.length === 0}
-            onClick={() => setCurveMode((v) => !v)}
-          >
-            Curve
-          </Button>
-          <Button variant="outline" className="flex-1" disabled={sketchPoints.length === 0} onClick={() => setSketchPoints((prev) => prev.slice(0, -1))}>
-            Undo point
-          </Button>
-          <Button className="flex-1 font-bold" disabled={sketchPoints.length < 3} onClick={closeSketch}>
-            Close shape
-          </Button>
-        </div>
+        {!freehandMode && (
+          <div className="flex gap-2">
+            <Button
+              variant={curveMode ? "default" : "outline"}
+              className="flex-1"
+              disabled={sketchPoints.length === 0}
+              onClick={() => setCurveMode((v) => !v)}
+            >
+              Curve
+            </Button>
+            <Button variant="outline" className="flex-1" disabled={sketchPoints.length === 0} onClick={() => setSketchPoints((prev) => prev.slice(0, -1))}>
+              Undo point
+            </Button>
+            <Button className="flex-1 font-bold" disabled={sketchPoints.length < 3} onClick={closeSketch}>
+              Close shape
+            </Button>
+          </div>
+        )}
       </div>
     );
   }

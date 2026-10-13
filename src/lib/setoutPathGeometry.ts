@@ -3,14 +3,15 @@ import { closestPointOnWall, perpendicularDistanceToWall, pointAtOffset, wallLen
 
 // The per-wall helpers in setoutGeometry.ts (closestPointOnWall,
 // perpendicularDistanceToWall, pointAtOffset, wallLength) only ever touch a
-// WallSegment's `start`/`end`/`curveControl` — never `id` or `kind` — so a
-// run's segment can borrow all of that point-on-segment maths by wrapping it
-// in a throwaway WallSegment instead of reimplementing projection/clamping
-// here. `b`'s curveControl (the control point for the segment ARRIVING at
-// b) carries straight through, so every helper below is curve-aware for
-// free — a plain Point for `b` (no curveControl) behaves exactly as before.
+// WallSegment's `start`/`end`/`curvePoints`/`curveControl` — never `id` or
+// `kind` — so a run's segment can borrow all of that point-on-segment maths
+// by wrapping it in a throwaway WallSegment instead of reimplementing
+// projection/clamping here. `b`'s curvePoints/curveControl (the curve for the
+// segment ARRIVING at b) carry straight through, so every helper below is
+// curve-aware for free — a plain Point for `b` (no curve) behaves exactly as
+// before.
 function asSegment(a: Point, b: PathPoint): WallSegment {
-  return { id: "", start: a, end: b, curveControl: b.curveControl };
+  return { id: "", start: a, end: b, curvePoints: b.curvePoints, curveControl: b.curveControl };
 }
 
 // Total run length in metres, summing every segment. Zero-length (coincident
@@ -129,16 +130,25 @@ export function pathBounds(path: PathPoint[]): { minX: number; minY: number; max
 }
 
 // Builds an SVG path `d` string for a run: a plain `L` for a straight
-// segment, a quadratic `Q` for one carrying a curveControl (the control
-// point for the segment ARRIVING at that point). Lets SVG paint and
-// hit-test (`pointerEvents="stroke"`) the actual curve geometry natively,
-// rather than sampling it into a straight-line polyline first.
+// segment, an `L`-polyline through curvePoints for a freehand-drawn one, or
+// (for data curved before freehand curves existed) a quadratic `Q` for one
+// carrying a legacy curveControl. Lets SVG paint and hit-test
+// (`pointerEvents="stroke"`) the actual curve geometry natively, rather than
+// sampling it into a straight-line polyline first (curvePoints are already
+// exactly that — the raw drawn shape — so no sampling is needed there).
 export function pathToSvgD(path: PathPoint[]): string {
   if (path.length === 0) return "";
   let d = `M ${path[0].x} ${path[0].y}`;
   for (let i = 1; i < path.length; i++) {
     const p = path[i];
-    d += p.curveControl ? ` Q ${p.curveControl.x} ${p.curveControl.y} ${p.x} ${p.y}` : ` L ${p.x} ${p.y}`;
+    if (p.curvePoints && p.curvePoints.length > 0) {
+      for (const cp of p.curvePoints) d += ` L ${cp.x} ${cp.y}`;
+      d += ` L ${p.x} ${p.y}`;
+    } else if (p.curveControl) {
+      d += ` Q ${p.curveControl.x} ${p.curveControl.y} ${p.x} ${p.y}`;
+    } else {
+      d += ` L ${p.x} ${p.y}`;
+    }
   }
   return d;
 }

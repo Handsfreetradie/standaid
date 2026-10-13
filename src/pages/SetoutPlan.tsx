@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download, Undo2, PencilRuler, Pencil, Ruler, Image as ImageIcon, EyeOff, Camera, Plus, Minus, Trash2, Network, GripHorizontal, ChevronLeft, ChevronRight, Layers, Columns3, Rows3, Gauge, Zap, Sun, Mic } from "lucide-react";
+import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download, Undo2, PencilRuler, Pencil, Ruler, Image as ImageIcon, EyeOff, Camera, Plus, Minus, Trash2, Network, GripHorizontal, ChevronLeft, ChevronRight, Layers, Columns3, Rows3, Gauge, Zap, Sun, Mic, Upload } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -32,7 +32,7 @@ import {
   DEFAULT_DRIVER_HEADROOM_PCT,
   DEFAULT_DRIVER_SIZES_W,
 } from "@/lib/setoutMaterials";
-import { DEFAULT_LAYER_VISIBILITY, DEFAULT_TWIN_SPACING_MM, distance, gangsFor, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type MeasurementRef, type PathPoint, type Point, type SetoutFitting, type SetoutCanvas as SetoutCanvasRow } from "@/lib/setoutTypes";
+import { DEFAULT_LAYER_VISIBILITY, DEFAULT_TWIN_SPACING_MM, distance, gangsFor, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type MeasurementRef, type PathPoint, type Point, type SetoutFitting, type SetoutCanvas as SetoutCanvasRow, type WallSegment } from "@/lib/setoutTypes";
 import { autoRotationForWallMount, computeMeasurementLock, defaultHeightForType, remeasureLock, DEFAULT_MOUNTING_HEIGHT } from "@/lib/setoutGeometry";
 import { generateSetoutReportPdf, type PlanImage } from "@/lib/setoutReport";
 import { urlToBase64 } from "@/lib/auditReport";
@@ -57,6 +57,7 @@ import {
   useUpdateSetoutFittingSpecs,
   useUpdateSetoutFittingStatus,
   useUpdateSetoutFittingMeasurementLock,
+  useBulkUpdateSetoutFittingMeasurementLocks,
   useUpdateSetoutPlanDefaults,
   useToggleGangLink,
   useAddSwitchGang,
@@ -214,6 +215,7 @@ const SetoutPlan = () => {
   const updateFittingPosition = useUpdateSetoutFittingPosition(planId || "");
   const updateFittingSpecs = useUpdateSetoutFittingSpecs(planId || "");
   const updateFittingMeasurementLock = useUpdateSetoutFittingMeasurementLock(planId || "");
+  const bulkRelockFittings = useBulkUpdateSetoutFittingMeasurementLocks(planId || "");
   const updateLayerVisibility = useUpdateSetoutCanvasLayerVisibility(activeCanvas?.id || "", planId || "");
   const updateWallThickness = useUpdateSetoutCanvasWallThickness(activeCanvas?.id || "", planId || "");
   const updatePlanDefaults = useUpdateSetoutPlanDefaults(planId || "");
@@ -358,6 +360,14 @@ const SetoutPlan = () => {
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
   const pushUndo = (entry: UndoEntry) => setUndoStack((prev) => [...prev.slice(-19), entry]);
   const [editingWalls, setEditingWalls] = useState(false);
+  // True while re-uploading/replacing this canvas's plan document via the
+  // "Upload / replace plan…" action — reuses the same upload/calibrate/trace
+  // flow as first-time setup (see activeCanvasNeedsSetup below), just
+  // triggered manually on an already-populated canvas instead of gated on
+  // it being empty. Reset whenever the active canvas changes (see the
+  // background-tile-reset effect) so switching tabs mid-amend never leaves
+  // the next floor stuck in the upload flow.
+  const [amendingCanvas, setAmendingCanvas] = useState(false);
   const [pickingMeasurementSlot, setPickingMeasurementSlot] = useState<"refA" | "refB" | null>(null);
   // Points of the LED strip run being traced, kept here (not in the canvas)
   // so undo and "finish run" can act on it — same split as sketchPoints.
@@ -461,6 +471,24 @@ const SetoutPlan = () => {
   const tileCleanupRef = useRef<(() => void) | null>(null);
   const tileRequestRef = useRef(0);
   useEffect(() => () => tileCleanupRef.current?.(), []);
+
+  // tile is only ever SET inside handleViewSettled — nothing was clearing it
+  // back out when the active canvas changes, so switching to a floor/area
+  // with no plan image (or a different one) kept showing whatever raster
+  // tile the PREVIOUS canvas last zoomed into, underneath the new canvas's
+  // own walls/fittings. Bumping the request token discards any render still
+  // in flight from the canvas just left, so it can't land after this reset.
+  useEffect(() => {
+    tileCleanupRef.current?.();
+    tileCleanupRef.current = null;
+    tileRequestRef.current += 1;
+    setTile(null);
+  }, [activeCanvas?.id]);
+
+  // Never leave a tab switch mid-amend on the floor you just left.
+  useEffect(() => {
+    setAmendingCanvas(false);
+  }, [activeCanvas?.id]);
 
   // Scene units per metre for this plan. One when calibration was skipped, in
   // which case scene units are image pixels and no distance means anything.
@@ -959,8 +987,8 @@ const SetoutPlan = () => {
     });
   };
 
-  const handleStripPointAdd = (point: Point, curveControl?: Point) =>
-    setStripDraft((prev) => [...prev, curveControl ? { ...point, curveControl } : point]);
+  const handleStripPointAdd = (point: Point, curvePoints?: Point[]) =>
+    setStripDraft((prev) => [...prev, curvePoints ? { ...point, curvePoints } : point]);
   const handleStripUndo = () => setStripDraft((prev) => prev.slice(0, -1));
   const handleStripCancel = () => setStripDraft([]);
 
@@ -1000,6 +1028,31 @@ const SetoutPlan = () => {
         },
       }
     );
+  };
+
+  // After a canvas's plan is amended (walls re-traced from scratch against a
+  // new/revised plan document), every wall id on that floor is brand new —
+  // any fitting's measurement_lock still pointing at an old wallId would
+  // otherwise sit there silently showing a stale, now-meaningless distance
+  // (remeasureLock leaves a ref alone when it can't find the wall it
+  // references). Re-derive every affected fitting's lock from scratch
+  // against the new walls, the same way a freshly-placed fitting's lock is
+  // computed — this necessarily drops any manually-picked reference back to
+  // the nearest-wall auto pick, since there's no wall left to preserve a
+  // pick against.
+  const relockCanvasFittings = async (canvasId: string, newWalls: WallSegment[]) => {
+    const affected = fittings.filter((f) => f.canvas_id === canvasId);
+    if (affected.length === 0) return;
+    const updates = affected.map((f) => ({
+      fittingId: f.id,
+      measurement_lock: newWalls.length > 0 ? computeMeasurementLock(f.position, newWalls, f.type) : null,
+    }));
+    try {
+      await bulkRelockFittings.mutateAsync(updates);
+      toast.success(`Walls updated — ${updates.length} measurement${updates.length === 1 ? "" : "s"} recalculated against the new plan.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Walls saved, but couldn't recalculate every measurement — check the measurement list.");
+    }
   };
 
   const handleFittingDrag = (fittingId: string, position: Point) => {
@@ -1324,7 +1377,7 @@ const SetoutPlan = () => {
         <p className="text-sm font-medium">Draw an LED strip</p>
         <p className="mt-1 text-xs text-muted-foreground">
           Tap along the run on the plan — corners and all — then finish it. It snaps to the plan's lines and squares up as you go.
-          {stripCurveMode && " Tap where the strip should bulge to, then the point it ends at."}
+          {stripCurveMode && " Press and drag to draw the curve, then release at the point it ends at."}
         </p>
       </div>
       <div className="rounded-lg bg-muted/50 px-3 py-2">
@@ -1732,6 +1785,24 @@ const SetoutPlan = () => {
                 <Pencil className="h-3.5 w-3.5 mr-1.5" />
                 Rename "{activeCanvas.name}"
               </DropdownMenuItem>
+              {!activeCanvasNeedsSetup && (
+                <DropdownMenuItem
+                  onClick={() => {
+                    const hasContent = activeCanvas.walls.length > 0 || !!activeCanvas.background_image_path;
+                    if (
+                      hasContent &&
+                      !window.confirm(
+                        `Upload a new plan for "${activeCanvas.name}"? Tracing over it replaces the walls/openings on this floor — fittings already placed stay put, but their wall measurements get recalculated once you finish. This can't be undone.`
+                      )
+                    )
+                      return;
+                    setAmendingCanvas(true);
+                  }}
+                >
+                  <Upload className="h-3.5 w-3.5 mr-1.5" />
+                  Upload / replace plan…
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive"
                 disabled={canvases.length <= 1}
@@ -1985,23 +2056,30 @@ const SetoutPlan = () => {
             Export PDF
           </Button>
         </div>
-        {activeCanvasNeedsSetup ? (
-          // This floor/area has nothing drawn on it yet — trace walls or
-          // import a plan for it, the same flow as setting up a brand new
-          // job, just inline here instead of navigating away. Re-mounted
-          // fresh per canvas (key) so switching tabs never carries over an
-          // abandoned sketch from a different floor/area.
+        {activeCanvasNeedsSetup || amendingCanvas ? (
+          // Either this floor/area has nothing drawn on it yet (trace walls
+          // or import a plan for it, the same flow as setting up a brand new
+          // job, just inline here instead of navigating away), or the
+          // tradie chose "Upload / replace plan…" on one that already has
+          // content. Re-mounted fresh per canvas (key) so switching tabs
+          // never carries over an abandoned sketch from a different
+          // floor/area.
           <div className="h-[70vh] md:h-[80vh] rounded-xl border border-border overflow-hidden">
-            {activeCanvas.source_type === "import" ? (
+            {activeCanvasNeedsSetup && activeCanvas.source_type === "draw" ? (
+              <DrawWallsFlow key={activeCanvas.id} canvas={activeCanvas} onBack={() => navigate("/setout")} onComplete={() => {}} />
+            ) : (
               <CalibrationImportFlow
                 key={activeCanvas.id}
                 canvas={activeCanvas}
                 planId={planId!}
-                onBack={() => navigate("/setout")}
-                onComplete={() => {}}
+                onBack={() => (amendingCanvas ? setAmendingCanvas(false) : navigate("/setout"))}
+                onComplete={(savedWalls) => {
+                  if (amendingCanvas) {
+                    setAmendingCanvas(false);
+                    if (savedWalls) void relockCanvasFittings(activeCanvas.id, savedWalls);
+                  }
+                }}
               />
-            ) : (
-              <DrawWallsFlow key={activeCanvas.id} canvas={activeCanvas} onBack={() => navigate("/setout")} onComplete={() => {}} />
             )}
           </div>
         ) : (
@@ -2177,10 +2255,19 @@ const SetoutPlan = () => {
         )}
       </div>
 
-      {/* Mobile drawer sidebar - shown below toolbar when mode selected */}
+      {/* Mobile drawer sidebar - shown below toolbar when mode selected.
+          z-[60] (above BottomNav's z-50) so the drawer's own bottom content
+          — the fitting-type Select is the last thing in it — isn't covered
+          by the nav bar. BottomNav grows taller than this drawer's old z-40
+          could clear once env(safe-area-inset-bottom) is non-zero, which on
+          iOS is only true in the installed PWA (standalone display), not a
+          plain Safari tab — hence this only ever broke there. pb-safe on
+          the inner content repeats that same inset so the drawer's own
+          lowest control still clears the home indicator now that it's
+          rendering above the nav instead of behind it. */}
       {mobileDrawerOpen && (
-        <div className="fixed inset-0 top-auto bottom-0 md:hidden bg-card border-t border-border rounded-t-lg overflow-y-auto z-40 max-h-[75vh]">
-          <div className="p-4 space-y-4">
+        <div className="fixed inset-0 top-auto bottom-0 md:hidden bg-card border-t border-border rounded-t-lg overflow-y-auto z-[60] max-h-[75vh]">
+          <div className="p-4 pb-safe space-y-4">
             {workspaceMode === "place-fittings" ? (
               <FittingPalette
                 twinSpacingDefaultMm={plan?.plan_defaults?.twinDownlightSpacingMm}

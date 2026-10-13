@@ -45,6 +45,8 @@ import {
   projectPointOntoWall,
   offsetSymbolIntoRoom,
   groupPhotosByPosition,
+  hasCurve,
+  freehandTraceToCorners,
 } from "@/lib/setoutGeometry";
 
 interface ViewBox {
@@ -100,9 +102,9 @@ interface SetoutCanvasProps {
   // The LED strip run currently being traced. Held by the parent for the same
   // reason sketchPoints is — undo and the "finish run" button live up there.
   stripDraft?: PathPoint[];
-  // curveControl, when present, is the Bézier control point for the segment
+  // curvePoints, when present, is the freehand-drawn shape of the segment
   // arriving at `point` from the previous one — see curveMode below.
-  onStripPointAdd?: (point: Point, curveControl?: Point) => void;
+  onStripPointAdd?: (point: Point, curvePoints?: Point[]) => void;
   // The ad-hoc tape-measure chain currently being walked — ephemeral, same
   // ownership split as stripDraft (held by the parent for undo/clear), but
   // never becomes a fitting: it's just a ruler for reading a distance off
@@ -125,7 +127,7 @@ interface SetoutCanvasProps {
   fittings?: SetoutFitting[];
   mode: SetoutCanvasMode;
   sketchPoints?: PathPoint[];
-  onSketchPointAdd?: (point: Point, curveControl?: Point) => void;
+  onSketchPointAdd?: (point: Point, curvePoints?: Point[]) => void;
   // Drops the most recently added sketch point. Used to retract the point a
   // double-tap-to-zoom placed on its way in — see handleBackgroundPointerDown.
   onSketchPointUndo?: () => void;
@@ -147,16 +149,30 @@ interface SetoutCanvasProps {
   // point — see onInteriorWallChainEnd.
   interiorWallDraftStart?: Point | null;
   onInteriorWallDraftPointAdd?: (point: Point) => void;
-  onInteriorWallSegmentAdd?: (start: Point, end: Point, curveControl?: Point) => void;
+  onInteriorWallSegmentAdd?: (start: Point, end: Point, curvePoints?: Point[]) => void;
   onInteriorWallChainEnd?: () => void;
-  // One-shot curve mode: while true, the NEXT tap in sketch-walls,
-  // sketch-interior-wall or draw-led-strip is captured as a Bézier control
-  // point (bypassing every snap) instead of adding a corner; the tap after
-  // that is the destination corner, tagged with that control point. Fires
-  // onCurveControlCaptured once the control tap lands so the parent can
-  // flip its own toggle back off — this is deliberately not sticky.
+  // One-shot curve mode: while true, a press-and-drag in sketch-walls,
+  // sketch-interior-wall or draw-led-strip is captured as the freehand shape
+  // of the next segment (bypassing every snap) instead of the usual
+  // pan-the-plan drag; releasing commits that segment, ending at wherever
+  // the drag was released. Fires onCurveControlCaptured once the drag is
+  // released so the parent can flip its own toggle back off — this is
+  // deliberately not sticky. A press-and-release too short to record any
+  // drag just places a plain straight point, same as with curve mode off.
   curveMode?: boolean;
   onCurveControlCaptured?: () => void;
+  // One-shot freehand room sketch: while true, a press-and-drag anywhere on
+  // the canvas in sketch-walls mode is captured as the whole room outline
+  // in one continuous gesture, rather than one tap per corner — unlike
+  // curveMode above, this isn't gated to starting near an existing point,
+  // since there's no previous corner to continue from yet. On release the
+  // raw sampled drag is run through freehandTraceToCorners (simplify, snap
+  // every edge to a right angle, clean up) and handed back via
+  // onFreehandSketchComplete as a ready-made corner list — null if too few
+  // corners survived, so the parent can ask for a retrace instead of
+  // silently saving a degenerate shape.
+  freehandSketchMode?: boolean;
+  onFreehandSketchComplete?: (corners: Point[] | null) => void;
   // Interior walls default to square (horizontal/vertical off the start
   // point) same as the perimeter's snapWalls — a tradie's rough second tap
   // gets straightened automatically. Set false to let a wall land exactly
@@ -277,6 +293,7 @@ interface SetoutCanvasProps {
 // into a polyline, so SVG hit-tests the actual curve geometry natively.
 interface WallStrokeProps {
   seg: { from: Point; to: Point };
+  curvePoints?: Point[];
   curveControl?: Point;
   stroke: string;
   strokeWidth: number;
@@ -286,7 +303,11 @@ interface WallStrokeProps {
   pointerEvents?: React.CSSProperties["pointerEvents"];
 }
 
-function WallStroke({ seg, curveControl, ...strokeProps }: WallStrokeProps) {
+function WallStroke({ seg, curvePoints, curveControl, ...strokeProps }: WallStrokeProps) {
+  if (curvePoints && curvePoints.length > 0) {
+    const d = `M ${seg.from.x} ${seg.from.y} ${curvePoints.map((p) => `L ${p.x} ${p.y}`).join(" ")} L ${seg.to.x} ${seg.to.y}`;
+    return <path d={d} fill="none" {...strokeProps} />;
+  }
   if (curveControl) {
     return <path d={`M ${seg.from.x} ${seg.from.y} Q ${curveControl.x} ${curveControl.y} ${seg.to.x} ${seg.to.y}`} fill="none" {...strokeProps} />;
   }
@@ -337,6 +358,8 @@ export default function SetoutCanvas({
   snapInteriorWalls = true,
   curveMode = false,
   onCurveControlCaptured,
+  freehandSketchMode = false,
+  onFreehandSketchComplete,
   onWallTap,
   selectedEraseWallId = null,
   onOpeningPlace,
@@ -494,6 +517,32 @@ export default function SetoutCanvas({
   const pendingTapRef = useRef<{ clientX: number; clientY: number } | null>(null);
   // How far a pointer may travel and still count as a tap rather than a drag.
   const TAP_SLOP_PX = 8;
+  // A freehand curve being drawn right now (curveMode on, pointer down in an
+  // eligible mode) — the whole gesture is a press-drag-release, so this
+  // takes over instead of the tap/pan machinery above for its duration.
+  // `lastClient` is screen space, used to decide when to record another
+  // sample; `points` (scene space) is what gets saved as curvePoints.
+  const freehandDraftRef = useRef<{ points: Point[]; lastClient: { x: number; y: number } } | null>(null);
+  // A new sample is recorded every time the pointer has moved this many
+  // screen pixels since the last one — screen space rather than scene units
+  // so the drawn line looks equally smooth at any zoom level.
+  const FREEHAND_SAMPLE_PX = 5;
+  // How far (in screen pixels) a press may land from the actual point it
+  // would curve away from and still count as starting that curve, rather
+  // than an ordinary pan that happens to start with curve mode still on.
+  const FREEHAND_START_TOLERANCE_PX = 48;
+  // A whole-room freehand sketch being drawn right now (freehandSketchMode
+  // on, pointer down anywhere in sketch-walls) — same press-drag-release
+  // shape as freehandDraftRef above, but unlike it this isn't gated to
+  // starting near an existing point, since the gesture IS the room outline
+  // from scratch, not one segment continuing a tapped shape.
+  const freehandSketchDraftRef = useRef<{ points: Point[]; lastClient: { x: number; y: number } } | null>(null);
+  // How much a sampled point may deviate from the straight line between its
+  // neighbours and still get simplified away as hand jitter, in screen
+  // pixels (converted to scene units via px2scene() when used) — same
+  // reasoning as every other screen-space tolerance here, so tracing feels
+  // the same at any zoom level.
+  const FREEHAND_SKETCH_SIMPLIFY_PX = 14;
 
   const handleTouchStart = useCallback(
     (e: TouchEvent) => {
@@ -585,12 +634,19 @@ export default function SetoutCanvas({
   // tradie can see what they're about to snap to before committing.
   const [edgeSnapPreview, setEdgeSnapPreview] = useState<Point | null>(null);
 
-  // Captured once a curve-mode control-point tap lands, held until the very
-  // next tap (the destination corner) consumes it. State rather than a ref
-  // so the captured point renders as a marker in the meantime.
-  const [pendingCurveControl, setPendingCurveControl] = useState<Point | null>(null);
+  // Mirrors freehandDraftRef.current.points while a curve is being dragged,
+  // purely so the in-progress shape can be rendered live — the ref above is
+  // the source of truth the pointer handlers actually read/write.
+  const [pendingCurvePoints, setPendingCurvePoints] = useState<Point[] | null>(null);
+  // Mirrors freehandSketchDraftRef.current.points the same way
+  // pendingCurvePoints mirrors freehandDraftRef above — live render only,
+  // the ref is still what the pointer handlers read/write.
+  const [pendingFreehandSketchPoints, setPendingFreehandSketchPoints] = useState<Point[] | null>(null);
   useEffect(() => {
-    setPendingCurveControl(null);
+    freehandDraftRef.current = null;
+    setPendingCurvePoints(null);
+    freehandSketchDraftRef.current = null;
+    setPendingFreehandSketchPoints(null);
   }, [mode]);
 
   // How near the halfway point between two fittings a tap has to be to take
@@ -649,6 +705,46 @@ export default function SetoutCanvas({
   const handleBackgroundPointerDown = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
       if (dragState.current || openingDragState.current) return;
+      // Freehand room sketch takes over the entire gesture, unconditionally —
+      // unlike curve mode below there's no previous point to stay near, the
+      // press can start anywhere, since it's tracing the whole room outline
+      // from scratch in one go.
+      if (freehandSketchMode && !panMode && mode === "sketch-walls") {
+        const scene = sceneFromClient(e.clientX, e.clientY);
+        freehandSketchDraftRef.current = { points: [scene], lastClient: { x: e.clientX, y: e.clientY } };
+        setPendingFreehandSketchPoints([scene]);
+        (e.target as Element).setPointerCapture(e.pointerId);
+        return;
+      }
+      // Curve mode turns the next gesture into a freehand draw instead of a
+      // pan: capture the pointer and start recording, bypassing the
+      // tap/pan logic below entirely for this gesture. Explicit pan mode
+      // still wins if both are somehow on at once.
+      if (
+        curveMode &&
+        !panMode &&
+        (mode === "sketch-walls" || mode === "sketch-interior-wall" || mode === "draw-led-strip")
+      ) {
+        const scene = sceneFromClient(e.clientX, e.clientY);
+        const from =
+          mode === "sketch-walls"
+            ? sketchPoints[sketchPoints.length - 1]
+            : mode === "sketch-interior-wall"
+              ? interiorWallDraftStart
+              : stripDraft[stripDraft.length - 1];
+        // Only treat this as "drawing the curve" if the press actually
+        // starts near the point it would curve away from — otherwise a
+        // tradie panning around the canvas while Curve happens to still be
+        // toggled on gets that whole pan captured as one giant, unintended
+        // curve. Anywhere else on the canvas falls through to the ordinary
+        // pan/tap handling below, same as if curve mode were off.
+        if (from && distance(scene, from) <= FREEHAND_START_TOLERANCE_PX * px2scene()) {
+          freehandDraftRef.current = { points: [scene], lastClient: { x: e.clientX, y: e.clientY } };
+          setPendingCurvePoints([scene]);
+          (e.target as Element).setPointerCapture(e.pointerId);
+          return;
+        }
+      }
       // Allow panning in several cases:
       // 1. Pan mode is explicitly enabled
       // 2. In place-fittings mode with no type selected
@@ -674,29 +770,27 @@ export default function SetoutCanvas({
       pendingTapRef.current = { clientX: e.clientX, clientY: e.clientY };
       (e.target as Element).setPointerCapture(e.pointerId);
     },
-    [panMode, mode, viewBox, px2scene, selectedFittingType]
+    [
+      panMode,
+      mode,
+      viewBox,
+      px2scene,
+      selectedFittingType,
+      curveMode,
+      freehandSketchMode,
+      sceneFromClient,
+      sketchPoints,
+      interiorWallDraftStart,
+      stripDraft,
+    ]
   );
 
   // The actual placement, run on pointer UP rather than DOWN: pressing and
   // dragging has to pan the plan, and that can't be told apart from a tap
   // until the pointer is released.
   const commitBackgroundTap = useCallback(
-    (clientX: number, clientY: number, bypassSnap = false) => {
+    (clientX: number, clientY: number, bypassSnap = false, curvePointsOverride?: Point[]) => {
       const scene = sceneFromClient(clientX, clientY);
-
-      // Curve mode's control-point tap: captured raw, no snapping at all —
-      // the whole point of it is to bulge away from the plan's own line
-      // work, so pulling it back onto that line work would defeat it. Held
-      // until the very next tap (the destination corner) consumes it.
-      if (
-        curveMode &&
-        !pendingCurveControl &&
-        (mode === "sketch-walls" || mode === "sketch-interior-wall" || mode === "draw-led-strip")
-      ) {
-        setPendingCurveControl(scene);
-        onCurveControlCaptured?.();
-        return;
-      }
 
       if (mode === "sketch-walls") {
         // Zooming in is how you read a detailed plan, and double-tap is how
@@ -725,8 +819,7 @@ export default function SetoutCanvas({
         const last = sketchPoints[sketchPoints.length - 1];
         const onEdge = snapToPlanEdge(scene);
         const point = onEdge ?? (snapWalls && last ? snapOrthogonal(last, scene) : scene);
-        onSketchPointAdd?.(point, pendingCurveControl ?? undefined);
-        if (pendingCurveControl) setPendingCurveControl(null);
+        onSketchPointAdd?.(point, curvePointsOverride);
       } else if (mode === "draw-led-strip") {
         // Snap to the plan's line work and square up to the previous point the
         // same way a traced wall does — a strip almost always runs along a
@@ -738,9 +831,8 @@ export default function SetoutCanvas({
         const onEdge = bypassSnap ? null : snapToPlanEdge(scene);
         onStripPointAdd?.(
           onEdge ?? (!bypassSnap && snapWalls && last ? snapOrthogonal(last, scene) : scene),
-          pendingCurveControl ?? undefined
+          curvePointsOverride
         );
-        if (pendingCurveControl) setPendingCurveControl(null);
       } else if (mode === "measure") {
         // Same snap/square-up (and shift bypass) as the LED strip trace above
         // — a hallway or a run between two walls is almost always along the
@@ -766,13 +858,12 @@ export default function SetoutCanvas({
         } else {
           const onEdge = snapToPlanEdge(scene);
           const end = onEdge ?? (snapInteriorWalls ? snapOrthogonal(interiorWallDraftStart, scene) : scene);
-          onInteriorWallSegmentAdd?.(interiorWallDraftStart, end, pendingCurveControl ?? undefined);
-          if (pendingCurveControl) setPendingCurveControl(null);
+          onInteriorWallSegmentAdd?.(interiorWallDraftStart, end, curvePointsOverride);
         }
       } else if (mode === "place-opening") {
         const result = nearestWallAndOffset(scene, walls);
         if (result) {
-          if (result.wall.curveControl) {
+          if (hasCurve(result.wall)) {
             onOpeningPlaceOnCurveBlocked?.();
           } else {
             onOpeningPlace?.(result.wall.id, result.offset);
@@ -902,9 +993,6 @@ export default function SetoutCanvas({
       onInteriorWallSegmentAdd,
       onInteriorWallChainEnd,
       snapInteriorWalls,
-      curveMode,
-      pendingCurveControl,
-      onCurveControlCaptured,
       onOpeningPlace,
       onOpeningPlaceOnCurveBlocked,
       onMeasurementRefPick,
@@ -927,6 +1015,24 @@ export default function SetoutCanvas({
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
+      if (freehandSketchDraftRef.current) {
+        const draft = freehandSketchDraftRef.current;
+        const movedPx = Math.hypot(e.clientX - draft.lastClient.x, e.clientY - draft.lastClient.y);
+        if (movedPx < FREEHAND_SAMPLE_PX) return;
+        draft.lastClient = { x: e.clientX, y: e.clientY };
+        draft.points.push(sceneFromClient(e.clientX, e.clientY));
+        setPendingFreehandSketchPoints([...draft.points]);
+        return;
+      }
+      if (freehandDraftRef.current) {
+        const draft = freehandDraftRef.current;
+        const movedPx = Math.hypot(e.clientX - draft.lastClient.x, e.clientY - draft.lastClient.y);
+        if (movedPx < FREEHAND_SAMPLE_PX) return;
+        draft.lastClient = { x: e.clientX, y: e.clientY };
+        draft.points.push(sceneFromClient(e.clientX, e.clientY));
+        setPendingCurvePoints([...draft.points]);
+        return;
+      }
       if (panState.current) {
         const pending = pendingTapRef.current;
         if (pending) {
@@ -1023,6 +1129,30 @@ export default function SetoutCanvas({
 
   const handlePointerUp = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
+      if (freehandSketchDraftRef.current) {
+        // The whole gesture is the room outline — clean it up into corners
+        // and hand it straight to the parent. onFreehandSketchComplete gets
+        // null (rather than this just silently doing nothing) when too few
+        // corners survive, so the parent can tell the tradie to retrace.
+        const { points } = freehandSketchDraftRef.current;
+        freehandSketchDraftRef.current = null;
+        setPendingFreehandSketchPoints(null);
+        onFreehandSketchComplete?.(freehandTraceToCorners(points, FREEHAND_SKETCH_SIMPLIFY_PX * px2scene()));
+        return;
+      }
+      if (freehandDraftRef.current) {
+        // The drag itself is the drawn curve; wherever it's released becomes
+        // the destination point, same as a plain tap would place one — just
+        // carrying the recorded shape along with it. Fewer than 2 samples
+        // means it never really moved, so it commits as a plain straight
+        // point instead, same as curve mode being off.
+        const { points } = freehandDraftRef.current;
+        freehandDraftRef.current = null;
+        setPendingCurvePoints(null);
+        commitBackgroundTap(e.clientX, e.clientY, e.shiftKey, points.length > 1 ? points : undefined);
+        onCurveControlCaptured?.();
+        return;
+      }
       const pending = pendingTapRef.current;
       pendingTapRef.current = null;
       if (pending) {
@@ -1034,7 +1164,7 @@ export default function SetoutCanvas({
       endPan();
       endDrag();
     },
-    [endPan, endDrag, commitBackgroundTap]
+    [endPan, endDrag, commitBackgroundTap, onCurveControlCaptured, onFreehandSketchComplete, px2scene]
   );
 
   const handleFittingPointerDown = useCallback(
@@ -1252,7 +1382,7 @@ export default function SetoutCanvas({
   const switchLinks = useMemo(() => {
     if (layerVisibility && !layerVisibility.switches) return [];
     const switches = fittings.filter((f) => f.type === "switch");
-    const links: { key: string; switchPos: Point; targetPos: Point; active: boolean; wayCount: number }[] = [];
+    const links: { key: string; switchPos: Point; targetPos: Point; active: boolean; wayCount: number; fromId: string; targetId: string }[] = [];
     for (const sw of switches) {
       const swPos = dragPreview?.id === sw.id ? dragPreview.position : sw.position;
       const gangs = gangsFor(sw);
@@ -1271,6 +1401,8 @@ export default function SetoutCanvas({
             targetPos,
             active: sw.id === linkActiveSwitchId && gangIndex === linkActiveGangIndex,
             wayCount: wayCountForTarget(targetId, switches),
+            fromId,
+            targetId,
           });
           fromPos = targetPos;
           fromId = targetId;
@@ -1331,7 +1463,7 @@ export default function SetoutCanvas({
   }, [mode, linkActiveSwitchId, linkActiveGangIndex, linkActiveCabinetId, selectedFittingId, fittings]);
 
   const measurementLines = useMemo(() => {
-    if (!layerVisibility?.measurements) return [];
+    if (!layerVisibility?.measurements && !selectedFittingId) return [];
     const wallById = new Map(walls.map((w) => [w.id, w]));
     const fittingById = new Map(fittings.map((f) => [f.id, f]));
     const openingById = new Map(openings?.map((o) => [o.id, o]) ?? []);
@@ -1352,6 +1484,11 @@ export default function SetoutCanvas({
     // with nothing visibly attached to it.
     for (const f of visibleFittings) {
       if (!f.measurement_lock) continue;
+      // With the Measurements layer off, a dense job stays decluttered by
+      // default — but selecting one fitting still surfaces its own
+      // distances rather than showing nothing at all. Toggling the layer
+      // back on is still how you see every fitting's measurement at once.
+      if (!layerVisibility?.measurements && f.id !== selectedFittingId) continue;
       const dragging = dragPreview?.id === f.id;
       const pos = dragging ? dragPreview.position : f.position;
       // While dragging, show what the measurement WILL be at the position
@@ -1393,7 +1530,7 @@ export default function SetoutCanvas({
       }
     }
     return lines;
-  }, [visibleFittings, walls, openings, layerVisibility?.measurements, dragPreview, measurementPreviewFor, wallThickness]);
+  }, [visibleFittings, walls, openings, layerVisibility?.measurements, selectedFittingId, dragPreview, measurementPreviewFor, wallThickness]);
 
   /**
    * Where each measurement's label goes, nudged clear of the others.
@@ -1503,6 +1640,19 @@ export default function SetoutCanvas({
   const iconScale = Math.min(ICON_SCREEN_PX * px2scene(), MAX_ICON_SCENE_M) / 24;
   const cursorClass = panMode || mode === "view" ? "cursor-grab active:cursor-grabbing" : "cursor-crosshair";
 
+  // Whichever point the freehand curve preview below should visually
+  // continue from — the last point already committed in whichever mode is
+  // being drawn in, so a live drag reads as extending that shape rather
+  // than floating on its own.
+  const freehandFromPoint: Point | undefined =
+    mode === "sketch-walls"
+      ? sketchPoints[sketchPoints.length - 1]
+      : mode === "sketch-interior-wall"
+        ? (interiorWallDraftStart ?? undefined)
+        : mode === "draw-led-strip"
+          ? stripDraft[stripDraft.length - 1]
+          : undefined;
+
   return (
     <div className={cn("relative h-full w-full overflow-hidden rounded-xl border border-border bg-secondary/40", className)}>
       <svg
@@ -1584,6 +1734,7 @@ export default function SetoutCanvas({
                       // selects the wrong one, easy to correct.
                       <WallStroke
                         seg={seg}
+                        curvePoints={wall.curvePoints}
                         curveControl={wall.curveControl}
                         stroke="transparent"
                         strokeWidth={wallThickness.interior + 90 * px2scene()}
@@ -1599,6 +1750,7 @@ export default function SetoutCanvas({
                       // being swallowed by the solid line drawn on top.
                       <WallStroke
                         seg={seg}
+                        curvePoints={wall.curvePoints}
                         curveControl={wall.curveControl}
                         stroke="currentColor"
                         strokeOpacity={0.35}
@@ -1610,6 +1762,7 @@ export default function SetoutCanvas({
                     )}
                     <WallStroke
                       seg={seg}
+                      curvePoints={wall.curvePoints}
                       curveControl={wall.curveControl}
                       stroke="currentColor"
                       strokeWidth={wall.kind === "interior" ? wallThickness.interior : wallThickness.exterior}
@@ -1749,17 +1902,36 @@ export default function SetoutCanvas({
           </g>
         )}
 
-        {pendingCurveControl && (
-          // Distinct colour from the plain corner dots — this is the
-          // captured curve control point, waiting on the next tap (the
-          // destination corner) to consume it.
-          <circle
-            cx={pendingCurveControl.x}
-            cy={pendingCurveControl.y}
-            r={CORNER_MARKER_PX * px2scene()}
-            className="fill-amber-500"
-            stroke="hsl(var(--background))"
-            strokeWidth={1.5}
+        {pendingCurvePoints && pendingCurvePoints.length > 0 && (
+          // The freehand curve being dragged right now, live — starts from
+          // whichever point this mode was drawing from before the drag
+          // began, so it reads as continuing the shape rather than floating
+          // on its own. Distinct colour from the plan's own line work.
+          <path
+            d={`M ${(freehandFromPoint ?? pendingCurvePoints[0]).x} ${(freehandFromPoint ?? pendingCurvePoints[0]).y} ${pendingCurvePoints
+              .map((p) => `L ${p.x} ${p.y}`)
+              .join(" ")}`}
+            fill="none"
+            className="text-amber-500"
+            stroke="currentColor"
+            strokeWidth={2}
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
+
+        {pendingFreehandSketchPoints && pendingFreehandSketchPoints.length > 0 && (
+          // The room outline being traced right now, live, exactly as drawn
+          // (no simplifying/snapping until release) — the primary brand
+          // colour rather than the curve tool's amber, since this is the
+          // main freehand-sketch gesture, not a one-segment accent.
+          <path
+            d={`M ${pendingFreehandSketchPoints[0].x} ${pendingFreehandSketchPoints[0].y} ${pendingFreehandSketchPoints
+              .map((p) => `L ${p.x} ${p.y}`)
+              .join(" ")}`}
+            fill="none"
+            className="text-primary"
+            stroke="currentColor"
+            strokeWidth={2}
             vectorEffect="non-scaling-stroke"
           />
         )}
@@ -1912,8 +2084,14 @@ export default function SetoutCanvas({
               // highlightSwitchLinks is the "check the wiring" toggle — every
               // run shows in red (the same styling the actively-edited gang
               // already gets), not just the one gang is currently being
-              // worked on.
-              const highlighted = link.active || highlightSwitchLinks;
+              // worked on. selectionGroupIds covers the plain "select a
+              // light or switch" case too — both ends of this link being in
+              // that set means it's part of the run the user just tapped,
+              // so its wire should stand out the same way the fitting icons
+              // already do, not just while the dedicated link-switches flow
+              // is active.
+              const inSelectedRun = selectionGroupIds.has(link.fromId) && selectionGroupIds.has(link.targetId);
+              const highlighted = link.active || highlightSwitchLinks || inSelectedRun;
               return (
                 <g key={link.key}>
                   <path
