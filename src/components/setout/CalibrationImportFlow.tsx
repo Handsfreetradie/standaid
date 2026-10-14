@@ -6,12 +6,24 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import SetoutCanvas, { type BackgroundTile } from "./SetoutCanvas";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useUpdateSetoutCanvasGeometry } from "@/hooks/useSetoutCanvases";
-import { distance, type PathPoint, type Point, type SetoutCanvas as SetoutCanvasRow, type WallOpening, type WallSegment } from "@/lib/setoutTypes";
-import { applyWallLengths, hasCurve, nextOpeningId, nextWallId, polygonToWalls, wallLength } from "@/lib/setoutGeometry";
+import { useCreateSetoutFittingsBulk } from "@/hooks/useSetoutPlans";
+import {
+  distance,
+  isSingleWallFitting,
+  type FittingSpecs,
+  type PathPoint,
+  type Point,
+  type SetoutCanvas as SetoutCanvasRow,
+  type WallOpening,
+  type WallSegment,
+} from "@/lib/setoutTypes";
+import { applyWallLengths, autoRotationForWallMount, computeMeasurementLock, hasCurve, nextOpeningId, nextWallId, polygonToWalls, snapToNearestWall, wallLength } from "@/lib/setoutGeometry";
+import { FITTING_LABELS, type FittingType } from "@/components/setout/symbols";
 import { detectPlanEdges, type PlanEdges } from "@/lib/edgeDetection";
 import { extractPlanLines, PlanVectorIndex, type PdfPageForVector } from "@/lib/planVector";
 import { fromMm, mmValue } from "@/lib/units";
@@ -138,6 +150,122 @@ export default function CalibrationImportFlow({ canvas, planId, onBack, onComple
   const tileRequestRef = useRef(0);
   const fileRef = useRef<HTMLInputElement>(null);
   const saveGeometry = useUpdateSetoutCanvasGeometry(canvas.id, planId);
+  const createFittingsBulk = useCreateSetoutFittingsBulk(planId);
+
+  // "Detect existing symbols" — reads the plan's own legend, lets the
+  // tradie confirm/fix what each entry means, THEN searches the rest of
+  // the sheet for matches (see detect-plan-symbols edge function). Two
+  // AI calls, not one, so a misread legend entry gets caught before it
+  // silently poisons every instance of that symbol found afterward.
+  const [symbolDetectStage, setSymbolDetectStage] = useState<
+    "idle" | "legend-loading" | "legend-review" | "instances-loading" | "instances-review"
+  >("idle");
+  const [detectedLegend, setDetectedLegend] = useState<
+    { legend_label: string; matched_type: FittingType | "unknown"; confidence: string }[]
+  >([]);
+  const [detectedInstances, setDetectedInstances] = useState<
+    { x: number; y: number; legend_label: string; confidence: string }[]
+  >([]);
+
+  const runLegendDetection = async () => {
+    if (!uploadedImagePath) return;
+    setSymbolDetectStage("legend-loading");
+    try {
+      const { data, error } = await supabase.functions.invoke("detect-plan-symbols", {
+        body: { storage_path: uploadedImagePath, content_type: uploadedImageContentType, plan_id: planId, stage: "legend" },
+      });
+      if (error || data?.error) throw new Error(data?.error || error?.message || "Detection failed");
+      const legend = (data.legend ?? []) as { legend_label: string; matched_type: FittingType | "unknown"; confidence: string }[];
+      if (legend.length === 0) {
+        toast.info("Couldn't find a legend on this plan — add fittings manually instead.");
+        setSymbolDetectStage("idle");
+        return;
+      }
+      setDetectedLegend(legend);
+      setSymbolDetectStage("legend-review");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't read that plan's legend.");
+      setSymbolDetectStage("idle");
+    }
+  };
+
+  const runInstanceDetection = async () => {
+    if (!uploadedImagePath) return;
+    const confirmed = detectedLegend.filter((e) => e.matched_type !== "unknown");
+    if (confirmed.length === 0) {
+      toast.error("Nothing confirmed to search for — pick a fitting type for at least one legend entry.");
+      return;
+    }
+    setSymbolDetectStage("instances-loading");
+    try {
+      const { data, error } = await supabase.functions.invoke("detect-plan-symbols", {
+        body: {
+          storage_path: uploadedImagePath,
+          content_type: uploadedImageContentType,
+          plan_id: planId,
+          stage: "instances",
+          confirmed_legend: confirmed.map((e) => ({ legend_label: e.legend_label, matched_type: e.matched_type })),
+        },
+      });
+      if (error || data?.error) throw new Error(data?.error || error?.message || "Detection failed");
+      const instances = (data.instances ?? []) as { x: number; y: number; legend_label: string; confidence: string }[];
+      if (instances.length === 0) {
+        toast.info("No matching symbols found on this plan.");
+        setSymbolDetectStage("idle");
+        return;
+      }
+      setDetectedInstances(instances);
+      setSymbolDetectStage("instances-review");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't search that plan.");
+      setSymbolDetectStage("legend-review");
+    }
+  };
+
+  // Converts every surviving detected instance into a real fitting, through
+  // the exact same positioning pipeline a manual tap already goes through
+  // for that fitting type (snapToNearestWall -> autoRotationForWallMount ->
+  // computeMeasurementLock) — an AI-reported point is never trusted as
+  // already wall-snapped. Walls are re-derived from sketchPoints/
+  // interiorWalls here rather than closed over from the render below, since
+  // this only ever runs with the already-traced perimeter (the button that
+  // triggers detection is gated on perimeterFinalized).
+  const addDetectedFittings = async () => {
+    if (!raster || !pixelsPerMetre) return;
+    const walls = [...(sketchPoints.length >= 3 ? polygonToWalls(sketchPoints) : []), ...interiorWalls];
+    const legendByLabel = new Map(detectedLegend.map((e) => [e.legend_label, e.matched_type]));
+    const planWidth = raster.naturalWidth / pixelsPerMetre;
+    const planHeight = raster.naturalHeight / pixelsPerMetre;
+    const rows = detectedInstances
+      .map((inst) => {
+        const type = legendByLabel.get(inst.legend_label);
+        if (!type || type === "unknown") return null;
+        const rawPoint: Point = { x: inst.x * planWidth, y: inst.y * planHeight };
+        const wallMounted = isSingleWallFitting(type);
+        const position = wallMounted && walls.length > 0 ? snapToNearestWall(rawPoint, walls, wallOpenings) : rawPoint;
+        const specs: FittingSpecs = {};
+        if (wallMounted && walls.length > 0) {
+          const rotation = autoRotationForWallMount(position, walls);
+          if (rotation != null) specs.rotation = rotation;
+        }
+        const measurement_lock = walls.length > 0 ? computeMeasurementLock(position, walls, type) : null;
+        return { canvas_id: canvas.id, type, position, specs, measurement_lock };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null);
+    if (rows.length === 0) {
+      toast.error("Nothing left to add — every detected symbol was discarded or unmatched.");
+      return;
+    }
+    try {
+      await createFittingsBulk.mutateAsync(rows);
+      toast.success(`Added ${rows.length} fitting${rows.length === 1 ? "" : "s"} from the plan.`);
+      setSymbolDetectStage("idle");
+      setDetectedLegend([]);
+      setDetectedInstances([]);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save the detected fittings.");
+    }
+  };
 
   useEffect(() => {
     return () => {
@@ -607,6 +735,16 @@ export default function CalibrationImportFlow({ canvas, planId, onBack, onComple
             <Button size="sm" variant={wallTool === "erase" ? "default" : "outline"} onClick={() => setWallTool("erase")}>
               Delete wall
             </Button>
+            {uploadedImagePath && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={symbolDetectStage !== "idle"}
+                onClick={runLegendDetection}
+              >
+                {symbolDetectStage === "legend-loading" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Detect existing symbols"}
+              </Button>
+            )}
           </div>
         )}
 
@@ -728,6 +866,113 @@ export default function CalibrationImportFlow({ canvas, planId, onBack, onComple
           >
             {selectedEraseWallId ? "Delete selected wall" : "Tap a wall to select it"}
           </Button>
+        )}
+
+        {symbolDetectStage === "legend-review" && (
+          <div className="mb-4 space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Here's what was read off this plan's legend — fix anything wrong before searching the rest of the sheet for it.
+            </p>
+            <div className="space-y-1.5 max-h-56 overflow-y-auto">
+              {detectedLegend.map((entry, i) => (
+                <div key={i} className="flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs">
+                  <span className="font-medium text-foreground flex-1 truncate" title={entry.legend_label}>
+                    {entry.legend_label}
+                  </span>
+                  <Select
+                    value={entry.matched_type}
+                    onValueChange={(value) =>
+                      setDetectedLegend((prev) =>
+                        prev.map((e, idx) => (idx === i ? { ...e, matched_type: value as FittingType | "unknown" } : e))
+                      )
+                    }
+                  >
+                    <SelectTrigger className="h-7 w-44 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unknown">Skip — not a fitting</SelectItem>
+                      {Object.entries(FITTING_LABELS).map(([type, label]) => (
+                        <SelectItem key={type} value={type}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span className="text-muted-foreground w-12 text-right capitalize">{entry.confidence}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => {
+                  setSymbolDetectStage("idle");
+                  setDetectedLegend([]);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button className="flex-1 font-bold" onClick={runInstanceDetection}>
+                Find symbols
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {symbolDetectStage === "instances-loading" && (
+          <div className="mb-4 flex items-center justify-center gap-2 text-xs text-muted-foreground py-6">
+            <Loader2 className="h-4 w-4 animate-spin" /> Searching the plan for those symbols…
+          </div>
+        )}
+
+        {symbolDetectStage === "instances-review" && (
+          <div className="mb-4 space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Found {detectedInstances.length} possible match{detectedInstances.length === 1 ? "" : "es"} — remove anything
+              wrong, then add the rest as real fittings.
+            </p>
+            <div className="space-y-1.5 max-h-56 overflow-y-auto">
+              {detectedInstances.map((inst, i) => {
+                const type = detectedLegend.find((e) => e.legend_label === inst.legend_label)?.matched_type;
+                const label = type && type !== "unknown" ? FITTING_LABELS[type] : inst.legend_label;
+                return (
+                  <div key={i} className="flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs">
+                    <span className="font-medium text-foreground flex-1">{label}</span>
+                    <span className="text-muted-foreground w-12 text-right capitalize">{inst.confidence}</span>
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-destructive"
+                      onClick={() => setDetectedInstances((prev) => prev.filter((_, idx) => idx !== i))}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => {
+                  setSymbolDetectStage("idle");
+                  setDetectedLegend([]);
+                  setDetectedInstances([]);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button className="flex-1 font-bold" disabled={createFittingsBulk.isPending} onClick={addDetectedFittings}>
+                {createFittingsBulk.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  `Add ${detectedInstances.length} fitting${detectedInstances.length === 1 ? "" : "s"}`
+                )}
+              </Button>
+            </div>
+          </div>
         )}
 
         {wallTool === "interior" && interiorWalls.length > 0 && (
