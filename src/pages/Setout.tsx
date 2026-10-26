@@ -9,6 +9,7 @@ import CalibrationImportFlow from "@/components/setout/CalibrationImportFlow";
 import DrawWallsFlow from "@/components/setout/DrawWallsFlow";
 import { useCreateSetoutPlan, useDeleteSetoutPlan, useSetoutPlans } from "@/hooks/useSetoutPlans";
 import { usePrimarySetoutCanvases } from "@/hooks/useSetoutCanvases";
+import { takeTradeflowJobReference } from "@/lib/tradeflowHandoff";
 import type { PlanSourceType, SetoutCanvas as SetoutCanvasRow, SetoutPlan as SetoutPlanRow } from "@/lib/setoutTypes";
 
 type ViewState = { kind: "list" } | { kind: "create" } | { kind: "setup"; plan: SetoutPlanRow; canvas: SetoutCanvasRow };
@@ -30,7 +31,8 @@ const Setout = () => {
   // Deep-linked here from another app (e.g. "Open in StandAId" on a job) with
   // ?jobReference=<value> — prefill and jump straight to the create form.
   useEffect(() => {
-    const ref = searchParams.get("jobReference");
+    // After a sign-in redirect the address loses ?jobReference, so fall back to the one TradeFlow sent.
+    const ref = searchParams.get("jobReference") ?? takeTradeflowJobReference();
     if (ref) {
       setJobReference(ref);
       setView({ kind: "create" });

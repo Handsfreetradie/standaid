@@ -2,10 +2,14 @@ import { createRoot } from "react-dom/client";
 import { registerSW } from "virtual:pwa-register";
 import App from "./App.tsx";
 import { initSentry } from "./lib/sentry.ts";
+import { captureTradeflowHandoff } from "./lib/tradeflowHandoff.ts";
 import "./index.css";
 
 // Initialize error tracking
 initSentry();
+
+// Opened from a job in TradeFlow? Keep its one-off code before any sign-in redirect loses it.
+captureTradeflowHandoff();
 
 // How often to explicitly ask the browser to re-check for a new service
 // worker while the app stays open. registerType "autoUpdate" (vite.config.ts)

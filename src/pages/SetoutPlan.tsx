@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download, Undo2, PencilRuler, Pencil, Ruler, Image as ImageIcon, EyeOff, Camera, Plus, Minus, Trash2, Network, GripHorizontal, ChevronLeft, ChevronRight, Layers, Columns3, Rows3, Gauge, Zap, Sun, Mic, Upload } from "lucide-react";
+import { ArrowLeft, Loader2, MousePointerClick, Cable, CheckSquare, Download, Undo2, PencilRuler, Pencil, Ruler, Image as ImageIcon, EyeOff, Camera, Plus, Minus, Trash2, Network, GripHorizontal, ChevronLeft, ChevronRight, Layers, Columns3, Rows3, Gauge, Zap, Sun, Mic, Upload, Send } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,7 @@ import {
 import { DEFAULT_LAYER_VISIBILITY, DEFAULT_TWIN_SPACING_MM, distance, gangsFor, isSingleWallFitting, type FittingSpecs, type FittingStatus, type LayerVisibility, type MeasurementLock, type MeasurementRef, type PathPoint, type Point, type SetoutFitting, type SetoutCanvas as SetoutCanvasRow, type WallSegment } from "@/lib/setoutTypes";
 import { autoRotationForWallMount, computeMeasurementLock, defaultHeightForType, remeasureLock, DEFAULT_MOUNTING_HEIGHT } from "@/lib/setoutGeometry";
 import { generateSetoutReportPdf, type PlanImage } from "@/lib/setoutReport";
+import { getTradeflowJob, saveReportToTradeflow } from "@/lib/tradeflowHandoff";
 import { urlToBase64 } from "@/lib/auditReport";
 import { BASE_PDF_SCALE, renderPdfTile, type PdfPage } from "@/lib/planRender";
 import { extractPlanLines, measureToFaces, PlanVectorIndex } from "@/lib/planVector";
@@ -195,6 +196,7 @@ const SetoutPlan = () => {
     setCanvasNameDialog(null);
   };
   const [exporting, setExporting] = useState(false);
+  const [savingToTradeflow, setSavingToTradeflow] = useState(false);
   // Maximum demand lives behind a dialog rather than taking up permanent
   // sidebar space — it's a "check once you're done" total, not something
   // edited constantly like circuits, so a glanceable total in the toolbar
@@ -1187,75 +1189,97 @@ const SetoutPlan = () => {
     });
   };
 
+  // Builds the one PDF (marked-up plan, materials, maximum demand, switchboard legend) and also
+  // publishes it to public storage so the legend's own QR code opens the whole thing, circuits
+  // included, not just a bare plan. Shared by "Export PDF" and "Save to TradeFlow job".
+  const buildReport = async () => {
+    if (!plan || !user) throw new Error("Not ready to export yet");
+    // The marked-up pages need the drawing that was marked up on each —
+    // one plan page per floor/area, so every canvas's own background image
+    // (not just whichever tab is currently active) needs fetching. jsPDF
+    // embeds data, not a remote URL, so each signed image is fetched and
+    // inlined — failing that, that canvas's page still renders with just
+    // its walls and fittings.
+    const planImages = new Map<string, PlanImage>();
+    for (const canvas of canvases) {
+      const image = await loadPlanImageForCanvas(canvas);
+      if (image) planImages.set(canvas.id, image);
+    }
+
+    const baseFilename = (plan.name || "setout-plan").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+
+    // The storage path is deterministic (one file per plan, overwritten
+    // every export), so the switchboard legend's QR code can be baked in
+    // pointing at it before the file itself is actually uploaded below.
+    const reportPath = `${user.id}/${plan.id}.pdf`;
+    const reportUrl = supabase.storage.from("setout-plan-exports").getPublicUrl(reportPath).data.publicUrl;
+
+    // Same business-branding source as the Site Audit report — the
+    // switchboard legend gets stuck in the switchboard, so it needs to
+    // identify who wired the job just as much as an audit report does.
+    const p = (profile as any) || {};
+    let logoBase64: string | null = null;
+    if (p.logo_storage_path) {
+      const { data: signed } = await supabase.storage.from("business-logos").createSignedUrl(p.logo_storage_path, 3600);
+      if (signed?.signedUrl) logoBase64 = await urlToBase64(signed.signedUrl);
+    }
+
+    const doc = await generateSetoutReportPdf({
+      plan,
+      canvases,
+      fittings,
+      circuits,
+      loadItems,
+      planImages,
+      reportUrl,
+      business: {
+        name: p.business_name || p.display_name || null,
+        licenceNumber: p.licence_number || null,
+        phone: p.business_phone || null,
+        email: p.business_email || user?.email || null,
+        logoBase64,
+      },
+    });
+
+    try {
+      const reportBlob = doc.output("blob") as Blob;
+      const { error: uploadError } = await supabase.storage
+        .from("setout-plan-exports")
+        .upload(reportPath, reportBlob, { contentType: "application/pdf", upsert: true });
+      if (uploadError) throw uploadError;
+    } catch (err) {
+      console.error("[SetoutPlan] Could not publish the report for the QR code:", err);
+    }
+
+    return { doc, baseFilename };
+  };
+
   const handleExport = async () => {
     if (!plan || exporting || !user || canvases.length === 0) return;
     setExporting(true);
     try {
-      // The marked-up pages need the drawing that was marked up on each —
-      // one plan page per floor/area, so every canvas's own background image
-      // (not just whichever tab is currently active) needs fetching. jsPDF
-      // embeds data, not a remote URL, so each signed image is fetched and
-      // inlined — failing that, that canvas's page still renders with just
-      // its walls and fittings.
-      const planImages = new Map<string, PlanImage>();
-      for (const canvas of canvases) {
-        const image = await loadPlanImageForCanvas(canvas);
-        if (image) planImages.set(canvas.id, image);
-      }
-
-      const baseFilename = (plan.name || "setout-plan").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
-
-      // The storage path is deterministic (one file per plan, overwritten
-      // every export), so the switchboard legend's QR code can be baked in
-      // pointing at it before the file itself is actually uploaded below.
-      const reportPath = `${user.id}/${plan.id}.pdf`;
-      const reportUrl = supabase.storage.from("setout-plan-exports").getPublicUrl(reportPath).data.publicUrl;
-
-      // Same business-branding source as the Site Audit report — the
-      // switchboard legend gets stuck in the switchboard, so it needs to
-      // identify who wired the job just as much as an audit report does.
-      const p = (profile as any) || {};
-      let logoBase64: string | null = null;
-      if (p.logo_storage_path) {
-        const { data: signed } = await supabase.storage.from("business-logos").createSignedUrl(p.logo_storage_path, 3600);
-        if (signed?.signedUrl) logoBase64 = await urlToBase64(signed.signedUrl);
-      }
-
-      // One PDF — marked-up plan, materials, maximum demand, switchboard
-      // legend — downloaded and also published to public storage so the
-      // legend's own QR code opens the whole thing, circuits included, not
-      // just a bare plan.
-      const doc = await generateSetoutReportPdf({
-        plan,
-        canvases,
-        fittings,
-        circuits,
-        loadItems,
-        planImages,
-        reportUrl,
-        business: {
-          name: p.business_name || p.display_name || null,
-          licenceNumber: p.licence_number || null,
-          phone: p.business_phone || null,
-          email: p.business_email || user?.email || null,
-          logoBase64,
-        },
-      });
+      const { doc, baseFilename } = await buildReport();
       doc.save(`${baseFilename}.pdf`);
-
-      try {
-        const reportBlob = doc.output("blob") as Blob;
-        const { error: uploadError } = await supabase.storage
-          .from("setout-plan-exports")
-          .upload(reportPath, reportBlob, { contentType: "application/pdf", upsert: true });
-        if (uploadError) throw uploadError;
-      } catch (err) {
-        console.error("[SetoutPlan] Could not publish the report for the QR code:", err);
-      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not generate the export");
     } finally {
       setExporting(false);
+    }
+  };
+
+  // Only offered when this tab was opened from a job in TradeFlow.
+  const tradeflowJob = getTradeflowJob();
+  const handleSaveToTradeflow = async () => {
+    if (!plan || savingToTradeflow || !user || canvases.length === 0) return;
+    setSavingToTradeflow(true);
+    try {
+      const { doc } = await buildReport();
+      const jobNumber = await saveReportToTradeflow(doc.output("blob") as Blob, plan.name || "Rough-in plan");
+      toast.success(jobNumber ? `Saved to job ${jobNumber} in TradeFlow` : "Saved to the job in TradeFlow");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save to TradeFlow");
+    } finally {
+      setSavingToTradeflow(false);
     }
   };
 
@@ -2055,6 +2079,12 @@ const SetoutPlan = () => {
             {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
             Export PDF
           </Button>
+          {tradeflowJob && (
+            <Button size="sm" className="h-8 gap-1.5" onClick={handleSaveToTradeflow} disabled={savingToTradeflow || exporting}>
+              {savingToTradeflow ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+              Save to TradeFlow job{tradeflowJob.jobReference ? ` ${tradeflowJob.jobReference}` : ""}
+            </Button>
+          )}
         </div>
         {activeCanvasNeedsSetup || amendingCanvas ? (
           // Either this floor/area has nothing drawn on it yet (trace walls
