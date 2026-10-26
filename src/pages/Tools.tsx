@@ -28,9 +28,10 @@ import FaultLoopTool from "@/components/tools/FaultLoopTool";
 import PVStringSizingTool from "@/components/tools/PVStringSizingTool";
 import DCIsolatorTool from "@/components/tools/DCIsolatorTool";
 import BatteryComplianceTool from "@/components/tools/BatteryComplianceTool";
+import CableTrayCutTool from "@/components/tools/CableTrayCutTool";
 import ProjectManager from "@/components/tools/ProjectManager";
 
-type ToolMode = "menu" | "earth-conductor" | "voltage-drop" | "concrete-volume" | "pipe-sizing" | "cable-sizer" | "conduit-fill" | "max-demand" | "brick-calc" | "timber-span" | "roof-pitch" | "heat-load" | "duct-sizing" | "gas-pipe" | "drainage-fall" | "backflow" | "steel-lintel" | "stair-compliance" | "stormwater" | "ventilation" | "fault-loop" | "pv-string" | "dc-isolator" | "battery-check" | "projects";
+type ToolMode = "menu" | "earth-conductor" | "voltage-drop" | "concrete-volume" | "pipe-sizing" | "cable-sizer" | "conduit-fill" | "max-demand" | "brick-calc" | "timber-span" | "roof-pitch" | "heat-load" | "duct-sizing" | "gas-pipe" | "drainage-fall" | "backflow" | "steel-lintel" | "stair-compliance" | "stormwater" | "ventilation" | "fault-loop" | "pv-string" | "dc-isolator" | "battery-check" | "tray-cut" | "projects";
 
 const TOOLS: { id: ToolMode; title: string; desc: string; category: string }[] = [
   // Project Management
@@ -42,6 +43,7 @@ const TOOLS: { id: ToolMode; title: string; desc: string; category: string }[] =
   { id: "conduit-fill", title: "Conduit Fill", desc: "Space-factor multi-cable fill check", category: "Electrical" },
   { id: "earth-conductor", title: "Earth Conductor Size", desc: "AS/NZS 3000 Table 5.1 minimum earth", category: "Electrical" },
   { id: "fault-loop", title: "Fault Loop Impedance", desc: "AS/NZS 3000 App B — max Zs check", category: "Electrical" },
+  { id: "tray-cut", title: "Tray & Top Hat Cuts", desc: "Notch, mitre & fold guide with diagrams", category: "Electrical" },
   // Solar / Battery
   { id: "pv-string", title: "PV String Sizing", desc: "Temp-corrected string voltage vs inverter", category: "Solar / Battery" },
   { id: "dc-isolator", title: "DC Isolator Rating", desc: "Min ratings from array datasheet values", category: "Solar / Battery" },
@@ -91,6 +93,7 @@ const TOOL_COMPONENTS: Record<string, React.FC<{ onBack: () => void }>> = {
   "pv-string": PVStringSizingTool,
   "dc-isolator": DCIsolatorTool,
   "battery-check": BatteryComplianceTool,
+  "tray-cut": CableTrayCutTool,
 };
 
 const Tools = () => {
